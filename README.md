@@ -1,10 +1,11 @@
 # DESKTOP
 
-This is a minimal functional install of Hyprland on Fedora, based on the Omarchy and Omadora implementation and patterns.
+Desktop is a minimal functional install of Hyprland on Fedora, based on the Omadora/Omarchy implementation and patterns.
 
-Desktop purposely does not include all the apps and features included with Omarchy/Omadora.
-It is intended to be a minimal install that matches the base functionality to allow users to build from.
-However, as the implementation closely matches Omarchy/Omadora, adding features from Omarchy/Omadora should be simple.
+Desktop purposely does not include all the apps and features included with Omadora/Omarchy.
+
+As with all this kind of implementations it's about you know how to adjust and know your own preferences.
+
 
 ## Important
 
@@ -34,7 +35,7 @@ From there you should be able to connect to your WiFi network using `iwctl`, and
 > **NOTE:** You may need to manually enable the built-in DHCP client for IWD as per the [Arch Wiki](https://wiki.archlinux.org/title/Iwd).
 
 > **NOTE:** There is also a chance you may be missing the correct WiFi device drivers after the Fedora install, in this case, you can use the bootable media to boot into Recovery Mode and get a shell, then `chroot /mnt/sysimage`, and from there connect and install the Hardware Support package group  `sudo dnf group install -y hardware-support`, or determine and install the specific drivers needed.
-> You may also need to disable the guard checks in the Omadora `install.sh` due to the additional package group being installed.
+> You may also need to disable the guard checks in the Desktop `install.sh` due to the additional package group being installed.
 
 ## Usage
 
