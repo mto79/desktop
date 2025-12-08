@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+desktop-restart-app swayosd-server

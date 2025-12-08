@@ -1,0 +1,13 @@
+# All the default Desktop aliases and functions
+# (don't mess with these directly, just overwrite them here!)
+source ~/.local/share/desktop/default/bash/rc
+
+# Source from .bashrc.d files
+if [ -d ~/.bashrc.d ]; then
+  for rc in ~/.bashrc.d/*; do
+    if [ -f "$rc" ]; then
+      . "$rc"
+    fi
+  done
+fi
+unset rc

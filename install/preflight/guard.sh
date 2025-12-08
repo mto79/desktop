@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+abort() {
+  echo -e "\e[31mInstall requires: $1\e[0m"
+  echo
+
+  read -p "Proceed anyway on your own accord and without assistance? [y/N] " response
+  case "$response" in
+  [yY][eE][sS] | [yY]) ;;
+  *) exit 1 ;;
+  esac
+}
+
+# Must be a Fedora distro
+[[ -f /etc/fedora-release ]] || abort "Fedora"
+
+# Must not be running as root
+if [ "$EUID" -eq 0 ]; then
+  abort "Running as user (not root)"
+fi
+
+# Must be x86_64 or aarch64
+if [ "$(uname -m)" != "x86_64" ] && [ "$(uname -m)" != "aarch64" ]; then
+  abort "x86_64 or aarch64 CPU"
+fi
+
+## MTO: core is not the only one hardware-support and in this case als standard
+# Should be a core only install
+# groups=$(dnf group list --installed --hidden -q | awk 'NR>1 {print $1}')
+# echo $groups
+# [ "$groups" != "core" ] && abort "Core only Fedora install"
+
+# Cleared all guards
+echo "Guards: OK"

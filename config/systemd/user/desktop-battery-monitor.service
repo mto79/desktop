@@ -1,0 +1,8 @@
+[Unit]
+Description=Desktop Battery Monitor Check
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/desktop/bin/desktop-battery-monitor
+Environment=DISPLAY=:0

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+# Lock the screen
+pidof hyprlock || hyprlock &
+
+# Avoid running screensaver when locked
+pkill -f "alacritty --class Screensaver"

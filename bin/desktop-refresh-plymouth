@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+echo "Refreshing default plymouth theme..."
+sudo mkdir -p /usr/share/plymouth/themes/sliced
+sudo cp ~/.local/share/desktop/default/plymouth/* /usr/share/plymouth/themes/sliced/
+sudo plymouth-set-default-theme -R sliced

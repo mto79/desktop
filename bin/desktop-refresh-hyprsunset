@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config hypr/hyprsunset.conf
+desktop-restart-hyprsunset

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+echo -e "\e[32mUpdate Desktop\e[0m"
+
+git -C $DESKTOP_PATH pull --autostash
+git -C $DESKTOP_PATH diff --check || git -C $DESKTOP_PATH reset --merge

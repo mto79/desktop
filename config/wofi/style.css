@@ -1,0 +1,74 @@
+/* Colors are defined by theme file and can be referenced via @base, @text, @selected-text, and @border */
+
+* {
+  font-family: monospace;
+  font-size: 16px;
+}
+
+window {
+  margin: 0;
+  padding: 0;
+  background-color: @base;
+  opacity: 0.95;
+}
+
+#inner-box {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-color: @base;
+}
+
+#outer-box {
+  margin: 0;
+  padding: 10px 20px;
+  border: none;
+  background-color: @base;
+  border: 1px solid @border;
+}
+
+#scroll {
+  margin: 0;
+  padding: 0;
+  border: none;
+  background-color: @base;
+}
+
+#input {
+  margin: 0;
+  padding: 3px;
+  border: none;
+  background-color: @base;
+  color: @text;
+}
+
+#input:focus {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+
+#text {
+  margin: 3px;
+  border: none;
+  color: @text;
+}
+
+#entry {
+  background-color: @base;
+}
+
+#entry:selected {
+  outline: none;
+  border: none;
+}
+
+#entry:selected #text {
+  color: @selected-text;
+}
+
+#entry image {
+  -gtk-icon-transform: scale(0.6);
+}
+
+@import ".config/desktop/current/theme/walker.css";

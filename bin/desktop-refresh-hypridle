@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config hypr/hypridle.conf
+desktop-restart-hypridle

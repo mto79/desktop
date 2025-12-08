@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+
+git -C "$DESKTOP_PATH" describe --tags $(git -C "$DESKTOP_PATH" rev-list --tags --max-count=1)

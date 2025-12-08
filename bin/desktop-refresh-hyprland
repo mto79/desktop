@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config hypr/autostart.conf
+desktop-refresh-config hypr/bindings.conf
+desktop-refresh-config hypr/envs.conf
+desktop-refresh-config hypr/input.conf
+desktop-refresh-config hypr/hyprland.conf

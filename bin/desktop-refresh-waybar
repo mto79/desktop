@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config waybar/config.jsonc
+desktop-refresh-config waybar/style.css
+desktop-restart-waybar

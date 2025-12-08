@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+# Launch Wiremix audio application in a new session with Alacritty terminal
+# Checking for other terminal emulators can be added if needed:wiremix
+
+exec setsid uwsm app -- alacritty --class=Wiremix -e wiremix "$@"

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+# Determine font, keep in mind when not waybar installed this will fail (like alacritty)
+grep -oP 'font-family:\s*["'\'']?\K[^;"'\'']+' ~/.config/waybar/style.css | head -n1

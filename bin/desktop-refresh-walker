@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config walker/config.toml
+desktop-restart-walker

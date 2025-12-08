@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config wofi/config
+desktop-refresh-config wofi/style.css
+desktop-refresh-config wofi/select.css

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config swayosd/config.toml
+desktop-refresh-config swayosd/style.css
+desktop-restart-swayosd
