@@ -2,3 +2,4 @@
 
 source "$DESKTOP_INSTALL/login/systemd.sh"
 source "$DESKTOP_INSTALL/login/plymouth.sh"
+source "$DESKTOP_INSTALL/login/sddm.sh"

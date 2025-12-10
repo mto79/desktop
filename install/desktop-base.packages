@@ -52,12 +52,17 @@ plymouth-plugin-*
 power-profiles-daemon
 ripgrep
 satty
+sddm
 slurp
 starship
 sushi
 swaybg
 tar
 tldr
+qt5-qtgraphicaleffects
+qt6-qtsvg 
+qt6-qtvirtualkeyboard 
+qt6-qtmultimedia
 unzip
 usbutils
 uwsm
