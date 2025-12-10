@@ -17,7 +17,7 @@ for f in ~/.local/share/desktop/themes/*; do ln -nfs "$f" ~/.config/desktop/them
 # Set initial theme
 mkdir -p ~/.config/desktop/current
 ln -snf ~/.config/desktop/themes/tokyo-night ~/.config/desktop/current/theme
-ln -snf ~/.config/desktop/current/theme/backgroundis/1-scenery-pink-lakeside-sunset-lake-landscape-scenic-panorama-7680x3215-144.png ~/.config/desktop/current/background
+ln -snf ~/.config/desktop/current/theme/backgrounds/1-fedora.png ~/.config/desktop/current/background
 
 # Set specific app links for current theme
 ln -snf ~/.config/desktop/current/theme/neovim.lua ~/.config/nvim/lua/plugins/theme.lua
