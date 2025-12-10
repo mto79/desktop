@@ -492,7 +492,7 @@ utc_time_offset = "local"
 time_range = "00:00:00-23:59:59"
 style = "bold bright-green"
 format = "[$time]($style) "
-disabled = false
+disabled = true
 
 [username]
 show_always = true

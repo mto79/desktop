@@ -23,6 +23,8 @@
   ],
   "hyprland/workspaces": {
     "on-click": "activate",
+    "active-only": false,
+    "all-outputs": false,
     "format": "{icon}",
     "format-icons": {
       "default": "",
@@ -89,10 +91,11 @@
     "on-click": "desktop-launch-wifi"
   },
   "battery": {
-    "format": "{capacity}% {icon}",
-    "format-discharging": "{icon}",
-    "format-charging": "{icon}",
-    "format-plugged": "",
+    "format": "{icon} {capacity}% ",
+    "format-discharging": "{icon} {capacity}% ",
+    "format-charging": "{icon} {capacity}%",
+    "format-plugged": " {capacity}% ",
+    "format-full": "󰂅 {capacity}%",
     "format-icons": {
       "charging": [
         "󰢜",
@@ -119,12 +122,12 @@
         "󰁹"
       ]
     },
-    "format-full": "󰂅",
     "tooltip-format-discharging": "{power:>1.0f}W↓ {capacity}%",
     "tooltip-format-charging": "{power:>1.0f}W↑ {capacity}%",
     "interval": 5,
     "on-click": "desktop-menu power",
     "states": {
+      "good": 95,
       "warning": 20,
       "critical": 10
     }
@@ -168,7 +171,7 @@
   },
   "custom/screenrecording-indicator": {
     "on-click": "desktop-cmd-screenrecord",
-    "exec": "/home/misfit/.local/share/desktop/default/waybar/indicators/screen-recording.sh",
+    "exec": "/home/mto/.local/share/desktop/default/waybar/indicators/screen-recording.sh",
     "signal": 8,
     "return-type": "json"
   },

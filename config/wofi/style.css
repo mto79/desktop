@@ -1,7 +1,7 @@
 /* Colors are defined by theme file and can be referenced via @base, @text, @selected-text, and @border */
 
 * {
-  font-family: monospace;
+  font-family: 'JetBrainsMono Nerd Font Mono';
   font-size: 16px;
 }
 
