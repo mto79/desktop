@@ -18,6 +18,9 @@
     "bluetooth",
     "network",
     "pulseaudio",
+    "pulseaudio#microphone",
+    "disk",
+    "memory", 
     "cpu",
     "battery"
   ],
@@ -38,19 +41,20 @@
       "8": "8",
       "9": "9",
       "active": "󱓻"
+     // "active": ""
     },
-    "persistent-workspaces": {
-      "1": [],
-      "2": [],
-      "3": [],
-      "4": [],
-      "5": []
-    }
+    //"persistent-workspaces": {
+    //  "1": [],
+    //  "2": [],
+    //  "3": [],
+    //  "4": [],
+    //  "5": []
+    //}
   },
   "custom/desktop": {
     "format": "",
     "on-click": "desktop-menu",
-    "tooltip-format": "desktop Menu\n\nSuper + Alt + Space"
+    "tooltip-format": "Desktop Menu\n\nSuper + Alt + Space"
   },
   "custom/update": {
     "format": "",
@@ -60,13 +64,23 @@
     "signal": 7,
     "interval": 3600
   },
+  "disk": {
+    "interval": 30,
+    "format": " {free}",
+    "path": "/",
+    "tooltip-format": "{used} used out of {total} on {path} ({percentage_used}%)",
+  },
+  "memory": {
+    "format": " {used:0.1f}GB",
+    "format-alt": " {}%",
+  },
   "cpu": {
     "interval": 5,
-    "format": "󰍛",
+    "format": "󰍛 {}%",
     "on-click": "desktop-launch-system-monitor"
   },
   "clock": {
-    "format": "{:L%A %H:%M}",
+    "format": "{:L%A %H:%M:%S}",
     "format-alt": "{:L%d %B W%V %Y}",
     "tooltip-format": "{:%Z:%Ez}",
     "on-click-right": "desktop-launch-floating-terminal-with-presentation desktop-cmd-tzupdate"
@@ -79,9 +93,9 @@
       "󰤥",
       "󰤨"
     ],
-    "format": "{icon}",
-    "format-wifi": "{icon}",
-    "format-ethernet": "󰀂",
+    "format": "{ifname}",
+    "format-wifi": "{icon} {signalStrength}%",
+    "format-ethernet": "󰲝",
     "format-disconnected": "󰖪",
     "tooltip-format-wifi": "{essid} ({frequency} GHz)\n⇣{bandwidthDownBytes}  ⇡{bandwidthUpBytes}",
     "tooltip-format-ethernet": "⇣{bandwidthDownBytes}  ⇡{bandwidthUpBytes}",
@@ -140,19 +154,30 @@
     "on-click": "desktop-launch-bluetooth"
   },
   "pulseaudio": {
-    "format": "{icon}",
+    "format": "{icon} {volume}%",
     "on-click": "desktop-launch-audio",
     "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
     "tooltip-format": "Playing at {volume}%",
     "scroll-step": 5,
     "format-muted": "󰝟",
     "format-icons": {
-      "default": [
-        "",
-        "",
-        ""
-      ]
+      "phone": [" ", " ", " ", " "],
+      "default": ["", "", "", ""]
     }
+    //"format-icons": {
+    //  "default": [
+    //    "",
+    //    "",
+    //    ""
+    //  ]
+    //}
+  },
+  "pulseaudio#microphone": {
+    "format": "{format_source}",
+    "format-source": " {volume}%",
+    "format-source-muted": " Muted",
+    "on-click": "desktop-launch-audio",
+    "scroll-step": 5
   },
   "group/tray-expander": {
     "orientation": "inherit",

@@ -31,6 +31,8 @@
 }
 
 #tray,
+#disk,
+#memory,
 #cpu,
 #battery,
 #network,
@@ -41,6 +43,56 @@
 #custom-update {
   min-width: 12px;
   margin: 0 7.5px;
+}
+
+#bluetooth {
+  color: #bb9af7
+}
+
+#clock {
+  color: #8a909e;
+}
+
+#cpu {
+  color: #fb958b;
+}
+
+#memory {
+  color: #a1c999;
+}
+
+#disk {
+  color: #e0af68;
+}
+
+#network {
+  color: #8fbcbb;
+}
+
+#pulseaudio {
+  color: #7dcfff;
+}
+
+#pulseaudio.muted {
+  color: #fb958b;
+}
+
+#backlight {
+  color: #bb9af7;
+}
+
+#network.disconnected {
+  color: #fb958b;
+}
+
+#battery {
+  color: #8fbcbb;
+}
+#battery.warning {
+  color: #ecd3a0;
+}
+#battery.critical:not(.charging) {
+  color: #fb958b;
 }
 
 #custom-expand-icon {
