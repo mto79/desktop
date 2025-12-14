@@ -4,7 +4,7 @@ font-family-bold          = "JetBrainsMono Nerd Font Mono"
 font-family-italic        = "JetBrainsMono Nerd Font Mono"
 font-family-bold-italic   = "JetBrainsMono Nerd Font Mono"
 font-feature = -calt, -liga, -dlig
-font-size = 9
+font-size = 12
 
 # Theme
 config-file = ?../desktop/current/theme/ghostty.conf

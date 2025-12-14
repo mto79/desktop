@@ -17,8 +17,10 @@ fcitx5-configtool
 fcitx5-gtk
 fcitx5-qt
 fd-find
+fish
 fontawesome-fonts-all
 fzf
+ghostty
 gnome-calculator
 gnome-themes-extra
 google-noto-fonts-common
@@ -65,8 +67,10 @@ qt6-qtvirtualkeyboard
 qt6-qtmultimedia
 unzip
 usbutils
+util-linux-user
 uwsm
 waybar
+wezterm
 wf-recorder
 wget
 whois
@@ -77,4 +81,5 @@ xdg-desktop-portal-hyprland
 xdg-user-dirs
 xmlstarlet
 yaru-icon-theme
+yazi
 zoxide
