@@ -3,7 +3,7 @@
 
 font-feature = -calt, -liga, -dlig
 font-size = 12
-etbrains omarchy font not working
+
 # Theme
 config-file = ?../desktop/current/theme/ghostty.conf
 background = 000000

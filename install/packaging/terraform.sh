@@ -4,7 +4,8 @@
 # Exit immediately if a command exits with a non-zero status
 
 echo "Adding HashiCorp repository..."
-sudo dnf install -y dnf-plugins-core
+sudo dnf install -y 'dnf-command(config-manager)'
+
 sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/fedora/hashicorp.repo
 
 echo "Installing Terraform..."
