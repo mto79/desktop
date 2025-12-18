@@ -1,12 +1,16 @@
 # Fonts
 # font-family               = "JetBrainsMono Nerd Font Mono"
-
 font-feature = -calt, -liga, -dlig
 font-size = 12
 
 # Theme
 config-file = ?../desktop/current/theme/ghostty.conf
 background = 000000
+
+# Cursor
+cursor-style = block
+cursor-style-blink = true
+
 # Mouse
 mouse-hide-while-typing = true
 
