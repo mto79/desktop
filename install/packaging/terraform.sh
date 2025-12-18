@@ -3,15 +3,27 @@
 # https://developer.hashicorp.com/terraform/tutorials/aws-get-started/install-cli#install-terraform
 # Exit immediately if a command exits with a non-zero status
 
-echo "Adding HashiCorp repository..."
-sudo dnf install -y 'dnf-command(config-manager)'
+echo "==> Detecting Fedora version..."
+FEDORA_VERSION=$(grep -oP '\d+' /etc/fedora-release)
+ARCH=$(uname -m)
 
-sudo dnf config-manager --add-repo https://rpm.releases.hashicorp.com/fedora/hashicorp.repo
+echo "==> Detected Fedora $FEDORA_VERSION on $ARCH architecture"
 
-echo "Installing Terraform..."
-sudo dnf install -y terraform
+# Add HashiCorp repo dynamically
+sudo tee /etc/yum.repos.d/hashicorp.repo >/dev/null <<EOF
+[hashicorp]
+name=HashiCorp Stable - \$basearch
+baseurl=https://rpm.releases.hashicorp.com/fedora/${FEDORA_VERSION}/$ARCH/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://rpm.releases.hashicorp.com/gpg
+EOF
 
-echo "Verifying Terraform installation..."
+echo "==> Installing Terraform..."
+sudo dnf -y install terraform
+
+# Verify installation
+echo "==> Terraform installed:"
 terraform -version
 
 echo "Terraform installation complete!"
