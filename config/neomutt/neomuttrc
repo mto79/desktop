@@ -1,0 +1,69 @@
+# =============================
+# NeoMutt global settings
+# =============================
+set realname = "Your Name"
+set from = "youremail@example.com"
+set use_from = yes
+
+# Caching
+set header_cache = "~/.cache/neomutt/headers"
+set message_cachedir = "~/.cache/neomutt/bodies"
+set postpone = "~/.cache/neomutt/postponed"
+set move = no
+set sort = 'threads'
+
+# SSL / TLS
+set ssl_starttls = yes
+set ssl_force_tls = yes
+
+# Color and UI
+set pager_index_lines = 10
+set status_format = "%f %r %?n?%n messages?%? [ %p%% ]"
+set sidebar_visible = yes
+set sidebar_width = 30
+set sidebar_format = "%n %f"
+
+# Include colors
+color normal white black
+color header brightcyan black
+color indicator brightyellow black
+color status brightmagenta black
+
+# =============================
+# Account 1: Gmail
+# =============================
+account-hook imaps://imap.gmail.com/ "
+    set imap_user = 'youremail@gmail.com'
+    set imap_pass = 'YOUR_APP_PASSWORD'
+    set smtp_url = 'smtps://youremail@gmail.com@smtp.gmail.com:465/'
+    set smtp_pass = 'YOUR_APP_PASSWORD'
+    set folder = 'imaps://imap.gmail.com/'
+    set spoolfile = '+INBOX'
+    mailboxes '+INBOX' '+Sent' '+Trash'
+"
+
+# =============================
+# Account 2: Outlook (example)
+# =============================
+account-hook imaps://outlook.office365.com/ "
+    set imap_user = 'youremail@outlook.com'
+    set imap_pass = 'YOUR_PASSWORD'
+    set smtp_url = 'smtps://youremail@outlook.com@smtp.office365.com:465/'
+    set smtp_pass = 'YOUR_PASSWORD'
+    set folder = 'imaps://outlook.office365.com/'
+    set spoolfile = '+Inbox'
+    mailboxes '+Inbox' '+Sent Items' '+Deleted Items'
+"
+
+# =============================
+# Shortcuts
+# =============================
+macro index <F5> "<sync-mailbox><enter>" "Sync mailbox"
+macro index <F6> "m" "Compose new email"
+
+# =============================
+# GPG / PGP (optional)
+# =============================
+set pgp_autosign = yes
+set pgp_autoencrypt = yes
+
