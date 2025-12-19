@@ -44,7 +44,6 @@ if command_exists kubectl; then
 
   if [[ "$CURRENT_VERSION" == "$KUBECTL_VERSION" ]]; then
     echo "kubectl ${CURRENT_VERSION} is already installed. Nothing to do."
-    exit 0
   fi
 
   echo "kubectl ${CURRENT_VERSION} found, upgrading to ${KUBECTL_VERSION}..."
