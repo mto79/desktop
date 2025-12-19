@@ -63,9 +63,9 @@ install_font() {
 }
 
 show_learn_menu() {
-  case $(menu "Learn" "  Keybindings\n  desktop\n  Hyprland\n  Fedora\n  Neovim") in
+  case $(menu "Learn" "  Keybindings\n  Desktop\n  Hyprland\n  Fedora\n  Neovim") in
   *Keybindings*) desktop-menu-keybindings ;;
-  *desktop*) desktop-launch-webapp "https://github.com/mto79/desktop" ;;
+  *Desktop*) desktop-launch-webapp "https://github.com/mto79/desktop" ;;
   *Hyprland*) desktop-launch-webapp "https://wiki.hypr.land" ;;
   *Fedora*) desktop-launch-webapp "https://docs.fedoraproject.org" ;;
   *Neovim*) desktop-launch-webapp "https://neovim.io/doc/user/quickref.html" ;;
