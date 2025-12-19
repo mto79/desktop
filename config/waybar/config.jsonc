@@ -3,10 +3,11 @@
   "layer": "top",
   "position": "top",
   "spacing": 0,
-  "height": 26,
+  "height": 38,
   "modules-left": [
     "custom/desktop",
-    "hyprland/workspaces"
+    "hyprland/workspaces",
+    "hyprland/window"
   ],
   "modules-center": [
     "clock",
@@ -25,46 +26,24 @@
     "battery"
   ],
   "hyprland/workspaces": {
+    "format": "{id}",
     "on-click": "activate",
     "active-only": false,
     "all-outputs": false,
-    "format": "{}",
     "format-icons": {
-		  "urgent": "",
-			"active": "",
-			"default": ""
+      "urgent": "",
+      "active": "",
+      "default": ""
     },
-		"disable-scroll": false,
-		"on-scroll-up": "hyprctl dispatch workspace e-1",
-		"on-scroll-down": "hyprctl dispatch workspace e+1",
+    "disable-scroll": false,
+    "on-scroll-up": "hyprctl dispatch workspace e-1",
+    "on-scroll-down": "hyprctl dispatch workspace e+1",
   },
-  //"hyprland/workspaces": {
-  //  "on-click": "activate",
-  //  "active-only": false,
-  //  "all-outputs": false,
-  //  "format": "{icon}",
-  //  "format-icons": {
-  //    "default": "",
-  //    "1": "1",
-  //    "2": "2",
-  //    "3": "3",
-  //    "4": "4",
-  //    "5": "5",
-  //    "6": "6",
-  //    "7": "7",
-  //    "8": "8",
-  //    "9": "9",
-  //    "active": "󱓻"
-     // "active": ""
-  //  },
-    //"persistent-workspaces": {
-    //  "1": [],
-    //  "2": [],
-    //  "3": [],
-    //  "4": [],
-    //  "5": []
-    //}
-  //},
+  "hyprland/window": {
+    "format": " {}",
+    "max-length": 250,
+    "separate-outputs": true
+  },
   "custom/desktop": {
     "format": "",
     "on-click": "desktop-menu",
@@ -85,16 +64,20 @@
     "tooltip-format": "{used} used out of {total} on {path} ({percentage_used}%)",
   },
   "memory": {
-    "format": " {used:0.1f}GB",
-    "format-alt": " {}%",
+    "interval": 30,
+    "format": " {used:0.1f}G",
+    "format-alt": " {}%",
+    "tooltip-format": "{used:0.1f}G/{total:0.1f}G"
   },
   "cpu": {
-    "interval": 5,
-    "format": "󰍛 {}%",
+    "interval": 1,
+    "format": "  {icon0}{icon1}{icon2}{icon3} {usage:>2}%",
+    "format-icons": ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
     "on-click": "desktop-launch-system-monitor"
   },
   "clock": {
-    "format": "{:L%A %H:%M}",
+    "interval": 1,
+    "format": "{:L%A %H:%M:%S}",
     "format-alt": "{:L%d %B W%V %Y}",
     "tooltip-format": "{:%Z:%Ez}",
     "on-click-right": "desktop-launch-floating-terminal-with-presentation desktop-cmd-tzupdate"
@@ -150,8 +133,8 @@
         "󰁹"
       ]
     },
-    "tooltip-format-discharging": "{power:>1.0f}W↓ {capacity}%",
-    "tooltip-format-charging": "{power:>1.0f}W↑ {capacity}%",
+    "tooltip-format-discharging": "{power:>1.0f}W↓ {capacity}% {time}",
+    "tooltip-format-charging": "{power:>1.0f}W↑ {capacity}% {time}",
     "interval": 5,
     "on-click": "desktop-menu power",
     "states": {
