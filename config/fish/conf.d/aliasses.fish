@@ -23,10 +23,3 @@ abbr -a vim nvim
 
 ## Lazygit
 abbr -a lg lazygit
-
-### Scripts
-abbr -a scan "/home/mto/Data/MTO/Scripts/scan.sh"
-abbr -a pfx "/home/mto/Data/MTO/Scripts/pfx.sh"
-
-### MTO projects
-abbr -a mto "/home/mto/Data/MTO/Scripts/connect.sh mto"
