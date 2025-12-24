@@ -6,7 +6,7 @@ set -g fish_greeting
 set -gx KITTY_WINDOW_ID 1
 
 ## Tmux
-set -x TMUX_SESSIONIZER_CONFIG_FILE ~/.tmux/configs/tmux-sessionizer
+set -x TMUX_SESSIONIZER_CONFIG_FILE ~/.config/tmux/configs/tmux-sessionizer
 
 # History configuration - match bash HISTSIZE
 set -g fish_history_max_size 32768
