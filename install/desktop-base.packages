@@ -54,6 +54,7 @@ neovim
 net-tools
 nfs-utils
 nmap
+openvpn
 pciutils
 pipewire-devel
 pipx
