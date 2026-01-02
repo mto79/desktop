@@ -75,11 +75,11 @@ ap-southeast-2 = "au"
 us-east-1 = "va"
 
 [battery]
-full_symbol = " "
-charging_symbol = " "
-discharging_symbol = " "
-unknown_symbol = " "
-empty_symbol = " "
+full_symbol = "🔋 "
+charging_symbol = "⚡ "
+discharging_symbol = "🔌 "
+unknown_symbol = "❓ "
+empty_symbol = "🪫 "
 format = "[$symbol$percentage]($style) "
 disabled = false
 [[battery.display]]
