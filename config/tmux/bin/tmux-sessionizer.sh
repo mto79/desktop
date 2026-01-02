@@ -34,8 +34,8 @@ selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-  # Create session with first window named "editor" running nvim +Neotree
-  tmux new-session -s "$selected_name" -n editor -c "$selected" 'nvim +Neotree'
+  # Create session with first window named "editor" running nvim +explorer (snack or neotree)
+  tmux new-session -s "$selected_name" -n editor -c "$selected" "nvim +\"lua require('snacks').explorer()\""
   hydrate $selected_name $selected
   # Add lazygit window
   tmux new-window -t "$selected_name:" -n lazygit -c "$selected" 'lazygit'
@@ -45,8 +45,8 @@ if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
 fi
 
 if ! has_session $selected_name; then
-  # Create session with first window named "editor" running nvim +Neotree
-  tmux new-session -ds "$selected_name" -n editor -c "$selected" 'nvim +Neotree'
+  # Create session with first window named "editor" running nvim +explorer (snack or neo tree)
+  tmux new-session -ds "$selected_name" -n editor -c "$selected" "nvim +\"lua require('snacks').explorer()\""
   hydrate $selected_name $selected
   # Add lazygit window
   tmux new-window -t "$selected_name:" -n lazygit -c "$selected" 'lazygit'
