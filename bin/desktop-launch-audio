@@ -3,4 +3,6 @@
 # Launch Wiremix audio application in a new session with Alacritty terminal
 # Checking for other terminal emulators can be added if needed:wiremix
 
-exec setsid uwsm app -- alacritty --class=Wiremix -e wiremix "$@"
+exec setsid uwsm app -- alacritty --class=Wiremix --title=Wiremix -e bash -c "~/.cargo/bin/wiremix"
+
+# exec setsid uwsm app -- alacritty --class=Wiremix -e wiremix "$@"

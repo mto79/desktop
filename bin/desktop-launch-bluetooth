@@ -1,3 +1,5 @@
 #!/usr/bin/env bash
 
-exec setsid uwsm app -- alacritty --class=Bluetui -e bluetui "$@"
+exec setsid uwsm app -- alacritty --class=Bluetui --title=Bluetui -e bash -c "~/.cargo/bin/bluetui"
+
+#exec setsid uwsm app -- alacritty --class=Bluetui -e bluetui "$@"

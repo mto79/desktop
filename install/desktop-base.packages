@@ -31,12 +31,12 @@ google-noto-fonts-common
 gum
 gvfs-mtp
 gvfs-smb
+hplip
 hypridle
 hyprland
 hyprland-qtutils
 hyprlock
 hyprpicker
-hyprpolkitagent
 hyprshot
 hyprsunset
 imv
@@ -63,7 +63,7 @@ plocate
 plymouth
 plymouth-plugin-*
 power-profiles-daemon
-ruby 
+ruby
 ruby-devel
 ripgrep
 satty
@@ -94,6 +94,7 @@ wofi
 xdg-desktop-portal-gtk
 xdg-desktop-portal-hyprland
 xdg-user-dirs
+xdg-terminal-exec
 xmlstarlet
 yaru-icon-theme
 yazi

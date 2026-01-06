@@ -43,7 +43,6 @@ if command_exists lazygit; then
   CURRENT_VERSION="$(lazygit --version | awk '{print $2}')"
   if [[ "$CURRENT_VERSION" == "${LATEST_VERSION#v}" ]]; then
     echo "LazyGit ${CURRENT_VERSION} is already installed. Nothing to do."
-    exit 0
   fi
   echo "LazyGit ${CURRENT_VERSION} found, upgrading to ${LATEST_VERSION#v}..."
 else
@@ -57,9 +56,16 @@ trap 'rm -rf "$TMPDIR"' EXIT
 cd "$TMPDIR" || err "cd to temp dir failed"
 echo "Using temporary directory: $TMPDIR"
 
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/lazygit_${LATEST_VERSION#v}_Linux_${ARCH}.tar.gz"
 echo "Downloading LazyGit from $DOWNLOAD_URL"
-curl -fsSL -o lazygit.tar.gz "$DOWNLOAD_URL"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/lazygit_${LATEST_VERSION#v}_Linux_${ARCH}.tar.gz"
+
+# Only download if URL is valid
+if curl --head --silent --fail "$DOWNLOAD_URL" >/dev/null; then
+  curl -fsSL -o lazygit.tar.gz "$DOWNLOAD_URL"
+else
+  echo "Download URL not available, skipping LazyGit installation."
+  exit 0
+fi
 
 # -------- extract --------
 tar -xzf lazygit.tar.gz || err "Failed to extract LazyGit"
