@@ -42,6 +42,7 @@ hyprsunset
 imv
 iputils
 iwd
+keepassxc
 keychain
 kvantum-qt5
 make
@@ -52,6 +53,7 @@ nautilus
 neomutt
 neovim
 net-tools
+nextcloud-client
 nfs-utils
 nmap
 openvpn
