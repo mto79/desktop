@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+CONFIG_DIR="/etc/openvpn/client"
+
+# Enable nullglob so the array is empty if no files match
+shopt -s nullglob
+
+# Detect currently running OpenVPN PIDs
+get_vpn_pids() {
+  pgrep -f "openvpn --config"
+}
+
+# Detect currently running VPN configs
+current_vpns() {
+  local pids
+  pids=$(get_vpn_pids)
+  if [[ -n "$pids" ]]; then
+    for pid in $pids; do
+      ps -p "$pid" -o args= | grep -oP "(?<=--config )\S+"
+    done
+  else
+    echo ""
+  fi
+}
+
+# Build the menu safely
+build_menu() {
+  local running
+  running=($(current_vpns))
+  local menu=""
+  local files=("$CONFIG_DIR"/*.ovpn)
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    echo "No .ovpn files found in $CONFIG_DIR"
+    exit 1
+  fi
+
+  for file in "${files[@]}"; do
+    basename=$(basename "$file")
+    if [[ " ${running[@]} " =~ " $file " ]]; then
+      menu+="▶ $basename (running)\n"
+    else
+      menu+="   $basename\n"
+    fi
+  done
+
+  menu+="\nStop VPN\nExit"
+  echo -e "$menu"
+}
+
+# Main loop
+while true; do
+  MENU=$(build_menu | fzf --prompt="OpenVPN Dashboard: " --height 20 --border)
+  [[ -z "$MENU" ]] && continue
+
+  case "$MENU" in
+  Exit)
+    exit 0
+    ;;
+  Stop\ VPN)
+    PIDS=$(get_vpn_pids)
+    if [[ -n "$PIDS" ]]; then
+      echo "Stopping all VPNs..."
+      sudo kill $PIDS
+      sleep 1
+    else
+      echo "No VPN running"
+    fi
+    ;;
+  *)
+    CONFIG_NAME=$(echo "$MENU" | sed 's/^▶ //' | awk '{print $1}')
+    CONFIG_PATH="$CONFIG_DIR/$CONFIG_NAME"
+
+    # Start VPN only if not already running
+    running_configs=($(current_vpns))
+    if [[ " ${running_configs[@]} " =~ " $CONFIG_PATH " ]]; then
+      echo "VPN $CONFIG_NAME is already running"
+    else
+      echo "Starting VPN: $CONFIG_NAME..."
+      sudo openvpn --config "$CONFIG_PATH" &
+      sleep 2
+    fi
+    ;;
+  esac
+
+  # Optional: update Waybar status immediately
+  # ~/.config/waybar/openvpn-status.sh > /dev/null
+done
