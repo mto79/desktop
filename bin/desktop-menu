@@ -275,7 +275,7 @@ show_update_config_menu() {
 show_update_hardware_menu() {
   case $(menu "Restart" "  Audio\n󱚾  Wi-Fi\n󰂯  Bluetooth") in
   *Audio*) present_terminal desktop-restart-pipewire ;;
-  *Wi-Fi*) present_terminal desktop-restart-wifi ;;
+  *WiFi*) present_terminal desktop-restart-wifi ;;
   *Bluetooth*) present_terminal desktop-restart-bluetooth ;;
   *) show_update_menu ;;
   esac
@@ -294,7 +294,7 @@ show_system_menu() {
   *Lock*) desktop-lock-screen ;;
   *Screensaver*) desktop-launch-screensaver force ;;
   *Suspend*) systemctl suspend ;;
-  *Stop*) desktop-state clear relaunch-required && uwsm stop ;;
+  *Exit*) desktop-state clear relaunch-required && uwsm stop ;;
   *Reboot*) desktop-state clear re*-required && systemctl reboot ;;
   *Shutdown*) desktop-state clear re*-required && systemctl poweroff ;;
   *) back_to show_main_menu ;;

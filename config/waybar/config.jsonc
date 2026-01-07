@@ -18,6 +18,7 @@
     "group/tray-expander",
     "bluetooth",
     "network",
+    "custom/openvpn",
     "pulseaudio",
     "pulseaudio#microphone",
     "disk",
@@ -48,6 +49,12 @@
     "format": "",
     "on-click": "desktop-menu",
     "tooltip-format": "Desktop Menu\n\nSuper + Alt + Space"
+  },
+  "custom/openvpn": {
+    "exec": "desktop-status-openvpn",
+    "interval": 3,
+    "return-type": "json",
+    "on-click": "desktop-launch-floating-terminal-with-presentation desktop-launch-openvpn"
   },
   "custom/update": {
     "format": "",

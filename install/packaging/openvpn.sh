@@ -15,6 +15,8 @@ for cmd in git sudo install mktemp; do
   }
 done
 
+sudo mkdir -p $DEST_DIR
+
 # Create temp working directory
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT

@@ -50,7 +50,7 @@ build_menu() {
 
 # Main loop
 while true; do
-  MENU=$(build_menu | fzf --prompt="OpenVPN Dashboard: " --height 20 --border)
+  MENU=$(build_menu | fzf)
   [[ -z "$MENU" ]] && continue
 
   case "$MENU" in
@@ -78,11 +78,11 @@ while true; do
     else
       echo "Starting VPN: $CONFIG_NAME..."
       sudo openvpn --config "$CONFIG_PATH" &
-      sleep 2
+      sleep 8
     fi
     ;;
   esac
 
   # Optional: update Waybar status immediately
-  # ~/.config/waybar/openvpn-status.sh > /dev/null
+  desktop-status-openvpn >/dev/null
 done

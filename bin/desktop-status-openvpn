@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+
+#!/usr/bin/env bash
+
+CONFIGS=()
+
+# Find all openvpn processes
+while read -r pid; do
+  ARGS=$(ps -p "$pid" -o args=)
+
+  CFG=$(echo "$ARGS" | sed -n 's/.*--config \([^ ]*\.ovpn\).*/\1/p')
+
+  if [[ -n "$CFG" ]]; then
+    NAME=$(basename "$CFG" .ovpn)
+    CONFIGS+=("$NAME")
+  fi
+done < <(pgrep -x openvpn)
+
+COUNT=${#CONFIGS[@]}
+
+# No VPN
+if [[ $COUNT -eq 0 ]]; then
+  echo '{"text":"󰦜","tooltip":"VPN: disconnected","class":"vpn-off"}'
+  exit 0
+fi
+
+# Single VPN
+if [[ $COUNT -eq 1 ]]; then
+  echo "{\"text\":\"󰦝\",\"tooltip\":\"VPN: ${CONFIGS[0]}\",\"class\":\"vpn-on\"}"
+  exit 0
+fi
+
+# Multiple VPNs
+LIST=$(printf "%s\n" "${CONFIGS[@]}")
+echo "{\"text\":\"󰦝 $COUNT\",\"tooltip\":\"VPNs active:\n$LIST\",\"class\":\"vpn-multi\"}"
