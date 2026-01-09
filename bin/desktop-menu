@@ -290,7 +290,7 @@ show_update_password_menu() {
 }
 
 show_system_menu() {
-  case $(menu "System" "  Lock\n󱄄  Screensaver\n󰤄  Suspend\n  Stop\n󰜉  Reboot\n󰐥  Shutdown") in
+  case $(menu "System" "  Lock\n󱄄  Screensaver\n󰤄  Suspend\n  Exit\n󰜉  Reboot\n󰐥  Shutdown") in
   *Lock*) desktop-lock-screen ;;
   *Screensaver*) desktop-launch-screensaver force ;;
   *Suspend*) systemctl suspend ;;
