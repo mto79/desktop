@@ -7,8 +7,8 @@ export PATH=$DESKTOP_PATH/bin/:$PATH
 # Set default terminal and editor
 source ~/.config/uwsm/default
 
-# Update user dirs
-desktop-cmd-present xdg-user-dirs-update && xdg-user-dirs-update --quiet
-
 # Activate mise if present on the system
 desktop-cmd-present mise && eval "$(mise activate bash)"
+
+# Update user dirs
+desktop-cmd-present xdg-user-dirs-update && xdg-user-dirs-update --quiet
