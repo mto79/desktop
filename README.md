@@ -2,6 +2,8 @@
 
 Desktop is a minimal functional install of Hyprland on Fedora, based on the Omadora/Omarchy implementation and patterns.
 
+Purpose is to know how the code is build up from the ground.
+
 Desktop purposely does not include all the apps and features included with Omadora/Omarchy.
 
 As with all this kind of implementations it's about you know how to adjust and know your own preferences.
