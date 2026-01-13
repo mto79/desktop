@@ -29,4 +29,4 @@ mkdir -p ~/.config/mako
 ln -snf ~/.config/desktop/current/theme/mako.ini ~/.config/mako/config
 
 # Screensaver
-pipx install terminaltexteffects --force
+pipx install terminaltexteffects==0.14.2 --force
