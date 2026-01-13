@@ -4,4 +4,4 @@
 pidof hyprlock || hyprlock &
 
 # Avoid running screensaver when locked
-pkill -f "alacritty --class Screensaver"
+pkill -f "alacritty --class=org.omadora.screensaver"

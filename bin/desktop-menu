@@ -231,8 +231,8 @@ show_remove_menu() {
 }
 
 show_update_menu() {
-  case $(menu "Update" "  desktop\n  Config\n󰸌  Themes\n  Process\n󰇅  Hardware\n  Password\n  Timezone") in
-  *desktop*) present_terminal desktop-update ;;
+  case $(menu "Update" "  Desktop\n  Config\n󰸌  Themes\n  Process\n󰇅  Hardware\n  Password\n  Timezone") in
+  *Desktop*) present_terminal desktop-update ;;
   *Config*) show_update_config_menu ;;
   *Themes*) present_terminal desktop-theme-update ;;
   *Process*) show_update_process_menu ;;
