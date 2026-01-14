@@ -14,4 +14,4 @@ sudo dnf install gh --repo gh-cli -y
 echo "Verifying glab installation..."
 gh --version
 
-echo "Githhub CLI installation complete!"
+echo "Github CLI installation complete!"
