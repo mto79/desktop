@@ -2,6 +2,7 @@ alacritty
 bat
 bc
 bind-utils
+bolt
 brightnessctl
 btop
 cargo
@@ -87,6 +88,7 @@ unzip
 usbutils
 util-linux-user
 uwsm
+vncviewer
 waybar
 wezterm
 wf-recorder
