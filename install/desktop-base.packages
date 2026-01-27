@@ -41,12 +41,17 @@ hyprlock
 hyprpicker
 hyprshot
 hyprsunset
+ImageMagick
+ImageMagick-libs
 imv
 iputils
 iwd
 keepassxc
 keychain
 kvantum-qt5
+libheif
+libheif-freeworld
+libheif-tools
 make
 mako
 mise
@@ -67,9 +72,11 @@ plocate
 plymouth
 plymouth-plugin-*
 power-profiles-daemon
+remmina
 ruby
 ruby-devel
 ripgrep
+rsync
 satty
 sddm
 setroubleshoot
@@ -103,4 +110,5 @@ xdg-terminal-exec
 xmlstarlet
 yaru-icon-theme
 yazi
+yq
 zoxide

@@ -56,8 +56,8 @@ trap 'rm -rf "$TMPDIR"' EXIT
 cd "$TMPDIR" || err "cd to temp dir failed"
 echo "Using temporary directory: $TMPDIR"
 
-echo "Downloading LazyGit from $DOWNLOAD_URL"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION/lazygit_${LATEST_VERSION#v}_Linux_${ARCH}.tar.gz"
+echo "Downloading LazyGit from $DOWNLOAD_URL"
 
 # Only download if URL is valid
 if curl --head --silent --fail "$DOWNLOAD_URL" >/dev/null; then
