@@ -28,6 +28,7 @@ gcc
 ghostty
 glab
 gnome-calculator
+gnome-keyring
 gnome-themes-extra
 google-noto-fonts-common
 gum
@@ -89,7 +90,7 @@ tldr
 tmux
 qt5-qtgraphicaleffects
 qt6-qtsvg 
-qt6-qtvirtualkeyboard 
+qt6-qtvirtualkeyboard
 qt6-qtmultimedia
 unzip
 usbutils
@@ -102,6 +103,7 @@ wf-recorder
 wget
 whois
 wl-clipboard
+wiremix
 wofi
 xdg-desktop-portal-gtk
 xdg-desktop-portal-hyprland
