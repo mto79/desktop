@@ -1,9 +1,5 @@
 #!/usr/bin/env bash
 
-# Bitwarden CLI Installer for Fedora
-# Author: ChatGPT
-# Date: 2026-01-06
-
 set -euo pipefail
 
 # Functions
@@ -37,6 +33,8 @@ bw_version=$(bw --version)
 info "Bitwarden CLI version: $bw_version"
 
 # 4. Optional: Login prompt
+echo "Set Bitwarden server to https://vault.bitwarden.eu"
+bw config server https://vault.bitwarden.eu
 read -rp "Do you want to log in to Bitwarden now? (y/N): " login_choice
 if [[ "$login_choice" =~ ^[Yy]$ ]]; then
   read -rp "Enter your Bitwarden email: " bw_email
