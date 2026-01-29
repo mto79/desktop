@@ -15,6 +15,4 @@ else
   # Make executable
   sudo chmod +x /usr/local/bin/mc
 
-  # Verify installation
-  mc --help
 fi
