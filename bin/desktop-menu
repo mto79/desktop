@@ -237,7 +237,7 @@ show_update_menu() {
   *Themes*) present_terminal desktop-theme-update ;;
   *Process*) show_update_process_menu ;;
   *Hardware*) show_update_hardware_menu ;;
-  *Timezone*) present_terminal desktop-cmd-tzupdate ;;
+  *Timezone*) present_terminal desktop-tz-select ;;
   *Password*) show_update_password_menu ;;
   *) show_main_menu ;;
   esac

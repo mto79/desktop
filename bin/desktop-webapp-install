@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e
+
 if [ "$#" -lt 3 ]; then
   echo -e "\e[32mLet's create a new web app you can start with the app launcher.\n\e[0m"
   APP_NAME=$(gum input --prompt "Name> " --placeholder "My favorite web app")
@@ -67,5 +69,5 @@ fi
 chmod +x "$DESKTOP_FILE"
 
 if [[ $INTERACTIVE_MODE == true ]]; then
-  echo -e "You can now find $APP_NAME using the app launcher (SUPER + SPACE)\n"
+  echo -e "You can now find $APP_NAME using the app launcher\n"
 fi
