@@ -20,7 +20,7 @@ safe_ln() {
   elif [ -e "$link" ]; then
     echo "File $link exists but is not a symlink, skipping"
   else
-    ln -s "$target" "$link"
+    sudo ln -s "$target" "$link"
     echo "Created symlink $link -> $target"
   fi
 }
