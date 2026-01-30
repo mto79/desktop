@@ -30,22 +30,21 @@ PREFS="$HOME/.config/BraveSoftware/Brave-Browser/Default/Preferences"
 # Check if Preferences exist
 if [[ ! -f "$PREFS" ]]; then
   echo "Brave Preferences file not found at $PREFS"
-  exit 1
+else
+  # Backup Preferences
+  cp "$PREFS" "$PREFS.bak.$(date +%s)"
+  echo "Backup created at $PREFS.bak.<timestamp>"
+
+  # Use jq to detect the path and set allow_sites_to_use_own_fonts = true
+  # This works even if webprefs is missing
+  tmpfile=$(mktemp)
+
+  jq 'if .webkit? and .webkit.webprefs? then
+          .webkit.webprefs.allow_sites_to_use_own_fonts = true
+      else
+          .webkit.webprefs = {allow_sites_to_use_own_fonts: true}
+      end' "$PREFS" >"$tmpfile" && mv "$tmpfile" "$PREFS"
+
+  echo "Brave setting 'Allow sites to use their own fonts' enabled."
+  echo "Restart Brave for changes to take effect."
 fi
-
-# Backup Preferences
-cp "$PREFS" "$PREFS.bak.$(date +%s)"
-echo "Backup created at $PREFS.bak.<timestamp>"
-
-# Use jq to detect the path and set allow_sites_to_use_own_fonts = true
-# This works even if webprefs is missing
-tmpfile=$(mktemp)
-
-jq 'if .webkit? and .webkit.webprefs? then
-        .webkit.webprefs.allow_sites_to_use_own_fonts = true
-    else
-        .webkit.webprefs = {allow_sites_to_use_own_fonts: true}
-    end' "$PREFS" >"$tmpfile" && mv "$tmpfile" "$PREFS"
-
-echo "Brave setting 'Allow sites to use their own fonts' enabled."
-echo "Restart Brave for changes to take effect."
