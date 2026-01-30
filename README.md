@@ -25,6 +25,7 @@ It is recommended to use drive encryption, disable root, and add a privileged us
 Install git (`sudo dnf install -y git`) and clone this repo to the `~/.local/share/desktop` directory.
 
 Run `~/.local/share/desktop/install.sh` to install.
+sudo dnf install -y git && mkdir -p ~/.local/share/desktop && git clone https://github.com/mto79/desktop.git ~/.local/share/desktop
 
 ### WiFi only install help
 
