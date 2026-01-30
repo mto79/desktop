@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 
 cmd="$*"
-exec setsid uwsm app -- alacritty --class=Desktop --title=Desktop -e bash -c "desktop-show-logo; $cmd; desktop-show-done"
+exec setsid uwsm app -- alacritty --class=Desktop --title=Desktop -e bash -c "$cmd; desktop-show-done"
