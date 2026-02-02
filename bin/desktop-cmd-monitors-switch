@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+CONF="$HOME/.config/hypr/monitors.conf"
+MONITORS_JSON="$(hyprctl monitors -j)"
+
+# Helper: get connector name by monitor model
+find_by_model() {
+  local model="$1"
+  echo "$MONITORS_JSON" | jq -r --arg model "$model" \
+    '.[] | select(.model == $model) | .name'
+}
+
+# Internal laptop panel
+LAPTOP="eDP-1"
+
+# External monitors (CHANGE THESE)
+WORK_MONITOR="$(find_by_model "HP P34hc G4")"
+HOME_MONITOR="$(find_by_model "LG UltraFine")"
+
+mkdir -p "$(dirname "$CONF")"
+: >"$CONF" # truncate, no comments
+
+{
+  echo "# AUTO-GENERATED — DO NOT EDIT"
+  echo "# Generated on $(date)"
+  echo
+} >"$CONF"
+
+apply_work() {
+  echo "🧑‍💼 WORK setup detected"
+
+  cat >>"$CONF" <<EOF
+monitor=$LAPTOP, 3840x2400@60, 2160x1440, 2
+monitor=$WORK_MONITOR,3440x1440@60, 2160x0, 1
+EOF
+}
+
+apply_home() {
+  echo "🏠 HOME setup detected"
+
+  cat >>"$CONF" <<EOF
+monitor=$LAPTOP, 3840x2400@60, 2160x1440, 2
+monitor=$HOME_MONITOR,3440x1440@60, 2160x0, 1 
+EOF
+}
+
+apply_laptop_only() {
+  echo "💻 Laptop-only setup"
+
+  cat >>"$CONF" <<EOF
+monitor=$LAPTOP, 3840x2400@60, 2160x1440, 2
+EOF
+
+}
+
+# Decide which layout to apply
+if [[ -n "$WORK_MONITOR" ]]; then
+  apply_work
+elif [[ -n "$HOME_MONITOR" ]]; then
+  apply_home
+else
+  apply_laptop_only
+fi
+
+hyprctl reload
