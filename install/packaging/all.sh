@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# source "$DESKTOP_INSTALL/packaging/ansible.sh"
+source "$DESKTOP_INSTALL/packaging/ansible.sh"
 source "$DESKTOP_INSTALL/packaging/base.sh"
 source "$DESKTOP_INSTALL/packaging/brave-browser.sh"
 source "$DESKTOP_INSTALL/packaging/cargo.sh"

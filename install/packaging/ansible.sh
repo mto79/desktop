@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 echo "Installing Ansible..."
-sudo dnf install -y anisble
+sudo dnf install -y ansible
 
 echo "Verifying Ansible installation..."
 ansible --version
