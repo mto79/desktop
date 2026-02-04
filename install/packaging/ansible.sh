@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 echo "Installing Ansible..."
-sudo dnf install -y ansible
+sudo dnf install -y ansible ansible-lint
 
 echo "Verifying Ansible installation..."
 ansible --version
@@ -9,5 +9,5 @@ ansible --version
 echo "Ansible installation complete!"
 
 echo "Pip helper packages installation for ansible"
-sudo pip install python-gitlab
-sudo pip install requests
+pip install --user python-gitlab
+pip install --user requests
