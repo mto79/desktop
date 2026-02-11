@@ -123,28 +123,6 @@ tooltip {
   padding: 2px;
 }
 
-#custom-openvpn.vpn-off {
-  color: #565f89;
-}
-
-#custom-openvpn.vpn-on {
-  color: #9ece6a;
-}
-
-#custom-openvpn.vpn-multi {
-  color: #e0af68;
-}
-
-@keyframes vpn-pulse {
-  0% { opacity: 0.6; }
-  50% { opacity: 1; }
-  100% { opacity: 0.6; }
-}
-
-#custom-openvpn.vpn-on {
-  animation: vpn-pulse 2s infinite;
-}
-
 #custom-update {
   font-size: 10px;
 }

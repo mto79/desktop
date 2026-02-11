@@ -18,11 +18,10 @@
     "group/tray-expander",
     "bluetooth",
     "network",
-    "custom/openvpn",
     "pulseaudio",
     "pulseaudio#microphone",
     "disk",
-    "memory", 
+    "memory",
     "cpu",
     "battery"
   ],
@@ -50,12 +49,6 @@
     "on-click": "desktop-menu",
     "tooltip-format": "Desktop Menu\n\nSuper + Alt + Space"
   },
-  "custom/openvpn": {
-    "exec": "desktop-status-openvpn",
-    "interval": 3,
-    "return-type": "json",
-    "on-click": "desktop-launch-floating-terminal-with-presentation desktop-launch-openvpn"
-  },
   "custom/update": {
     "format": "",
     "exec": "desktop-update-available",
@@ -79,7 +72,16 @@
   "cpu": {
     "interval": 1,
     "format": "  {icon0}{icon1}{icon2}{icon3} {usage:>2}%",
-    "format-icons": ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"],
+    "format-icons": [
+      "▁",
+      "▂",
+      "▃",
+      "▄",
+      "▅",
+      "▆",
+      "▇",
+      "█"
+    ],
   },
   "clock": {
     "interval": 1,
@@ -104,8 +106,7 @@
     "tooltip-format-ethernet": "⇣{bandwidthDownBytes}  ⇡{bandwidthUpBytes}",
     "tooltip-format-disconnected": "Disconnected",
     "interval": 3,
-    "spacing": 1,
-    "on-click": "desktop-launch-wifi"
+    "spacing": 1
   },
   "battery": {
     "format": "{icon} {capacity}% ",
@@ -165,8 +166,18 @@
     "scroll-step": 5,
     "format-muted": "󰝟",
     "format-icons": {
-      "phone": [" ", " ", " ", " "],
-      "default": ["", "", "", ""]
+      "phone": [
+        " ",
+        " ",
+        " ",
+        " "
+      ],
+      "default": [
+        "",
+        "",
+        "",
+        ""
+      ]
     }
     //"format-icons": {
     //  "default": [
