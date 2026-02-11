@@ -1,8 +1,1 @@
-return {
-	{
-		"LazyVim/LazyVim",
-		opts = {
-			colorscheme = "tokyonight",
-		},
-	},
-}
+/home/mto/.config/desktop/current/theme/neovim.lua

@@ -2,7 +2,6 @@
 
 if command -v mc &>/dev/null; then
   echo "mc is already installed. Current version:"
-  mc --help
 else
   echo "Installing mc (Minio Client)"
 

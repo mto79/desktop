@@ -11,7 +11,7 @@ echo "==> Adding Signal repository (${REPO_NAME})..."
 if sudo dnf repolist | grep -q "${REPO_NAME}"; then
   echo "    Repository already exists, skipping."
 else
-  sudo dnf config-manager addrepo --from-repofile="${REPO_URL}"
+  sudo dnf config-manager addrepo --from-repofile="${REPO_URL}" --overwrite
 fi
 
 echo "==> Refreshing metadata..."

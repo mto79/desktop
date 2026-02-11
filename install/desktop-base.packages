@@ -47,7 +47,6 @@ ImageMagick
 ImageMagick-libs
 imv
 iputils
-iwd
 keepassxc
 keychain
 kvantum-qt5
@@ -61,10 +60,15 @@ mpv
 nautilus
 neomutt
 neovim
+NetworkManager
+NetworkManager-openvpn
+NetworkManager-openvpn-gnome
 net-tools
 nextcloud-client
 nfs-utils
 nmap
+nm-applet
+nm-connection-editor
 openvpn
 pciutils
 pipewire-devel

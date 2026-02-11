@@ -10,5 +10,4 @@ sudo dnf install -y \
 cargo install \
   bluetui \
   cargo-update \
-  eza \
-  impala
+  eza
