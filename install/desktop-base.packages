@@ -32,6 +32,7 @@ gnome-calculator
 gnome-keyring
 gnome-themes-extra
 google-noto-fonts-common
+golang
 gum
 gvfs-mtp
 gvfs-smb
@@ -53,6 +54,7 @@ kvantum-qt5
 libheif
 libheif-freeworld
 libheif-tools
+libreoffice
 make
 mako
 mise
@@ -87,6 +89,7 @@ satty
 sddm
 setroubleshoot
 slurp
+spice-gtk
 starship
 sushi
 swaybg
