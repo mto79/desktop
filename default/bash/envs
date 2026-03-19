@@ -2,4 +2,8 @@
 export EDITOR="nvim"
 export SUDO_EDITOR="$EDITOR"
 export BAT_THEME=ansi
-export KITTY_WINDOW_ID=1
+
+# Duplicated from .config/uwsm/env so SSH works too
+export DESKTOP_PATH=$HOME/.local/share/desktop
+export PATH=$DESKTOP_PATH/bin:$PATH:$HOME/.local/bin
+
