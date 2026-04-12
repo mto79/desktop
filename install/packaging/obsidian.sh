@@ -62,16 +62,70 @@ install_fuse() {
 create_desktop_entry() {
   mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
 
-  info "Downloading Obsidian icon..."
-  curl -fSL -o "${ICON_DIR}/obsidian.png" \
-    "https://raw.githubusercontent.com/obsidianmd/obsidian-releases/master/obsidian.png" 2>/dev/null || true
+  info "Extracting icon from AppImage..."
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  pushd "$tmpdir" &>/dev/null
+
+  # Full extract — heavier but guaranteed to find the icon
+  "${APPIMAGE_PATH}" --appimage-extract &>/dev/null || true
+
+  # Pick the best icon, preferring larger sizes
+  # Electron AppImages typically have icons under usr/share/icons/hicolor/
+  local icon=""
+  local root="$tmpdir/squashfs-root"
+
+  # 1) Try hicolor icons, largest first (512 > 256 > 128 > …)
+  for size in 512x512 256x256 128x128 64x64 48x48 32x32; do
+    icon=$(find "$root" -path "*/hicolor/${size}/apps/*.png" -type f 2>/dev/null | head -1)
+    [[ -n "$icon" ]] && break
+  done
+
+  # 2) Fall back to any .png with "obsidian" in the name
+  if [[ -z "$icon" ]]; then
+    icon=$(find "$root" -iname "*obsidian*.png" -type f 2>/dev/null |
+      head -1)
+  fi
+
+  # 3) Fall back to .DirIcon (standard AppImage icon)
+  if [[ -z "$icon" ]] && [[ -f "$root/.DirIcon" ]]; then
+    icon="$root/.DirIcon"
+  fi
+
+  # 4) Fall back to any svg with "obsidian" in the name
+  if [[ -z "$icon" ]]; then
+    icon=$(find "$root" -iname "*obsidian*.svg" -type f 2>/dev/null |
+      head -1)
+  fi
+
+  # 5) Last resort — largest png by file size
+  if [[ -z "$icon" ]]; then
+    icon=$(find "$root" -name "*.png" -type f -printf '%s %p\n' 2>/dev/null |
+      sort -rn | head -1 | cut -d' ' -f2-)
+  fi
+
+  if [[ -n "$icon" ]]; then
+    local ext="${icon##*.}"
+    cp "$icon" "${ICON_DIR}/obsidian.${ext}"
+    ok "Icon extracted ($(basename "$icon"))."
+  else
+    err "Could not extract icon from AppImage."
+  fi
+
+  popd &>/dev/null
+  rm -rf "$tmpdir"
+
+  # Determine which icon file we ended up with
+  local icon_file
+  icon_file=$(find "${ICON_DIR}" -name "obsidian.*" -type f 2>/dev/null | head -1)
+  icon_file="${icon_file:-${ICON_DIR}/obsidian.png}"
 
   cat >"${DESKTOP_DIR}/obsidian.desktop" <<EOF
 [Desktop Entry]
 Name=Obsidian
 Comment=Knowledge base and note-taking
 Exec=${APPIMAGE_PATH} %u
-Icon=${ICON_DIR}/obsidian.png
+Icon=${icon_file}
 Type=Application
 Categories=Office;TextEditor;
 MimeType=x-scheme-handler/obsidian;
@@ -114,7 +168,7 @@ echo "[obsidian-update] Updated to v${latest}."
 # Desktop notification if possible
 if command -v notify-send &>/dev/null; then
     notify-send "Obsidian Updated" "Obsidian has been updated to v${latest}." \
-        --icon="${HOME}/.local/share/icons/obsidian.png" 2>/dev/null || true
+        --icon="$(find "${HOME}/.local/share/icons" -name 'obsidian.*' -type f 2>/dev/null | head -1)" 2>/dev/null || true
 fi
 SCRIPT
   chmod +x "$script_path"
