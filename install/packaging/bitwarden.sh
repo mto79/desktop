@@ -22,7 +22,7 @@ fi
 # 2. Install Bitwarden CLI globally using npm
 if ! command -v bw >/dev/null 2>&1; then
   info "Installing Bitwarden CLI via npm..."
-  npm install -g @bitwarden/cli
+  sudo npm install -g @bitwarden/cli
 else
   info "Bitwarden CLI already installed."
 fi
