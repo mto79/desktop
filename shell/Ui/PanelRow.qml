@@ -15,6 +15,9 @@ Item {
   // Marks the row as the current one (active sink, connected network). Distinct from
   // hover, and both can be true at once.
   property bool active: false
+  // The keyboard cursor. Both this and `active` can be true at once, so it reads as an
+  // outline rather than another fill.
+  property bool cursor: false
   property bool enabled: true
   property color accentColor: Color.popupAccent
 
@@ -33,6 +36,8 @@ Item {
     anchors.fill: parent
     radius: Style.radius
     color: root.active ? Color.popupSelected : (root.hovered && root.enabled ? Color.popupHover : "transparent")
+    border.width: root.cursor ? 1 : 0
+    border.color: Color.popupAccent
 
     Behavior on color {
       ColorAnimation {

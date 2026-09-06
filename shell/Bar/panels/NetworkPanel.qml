@@ -49,6 +49,113 @@ Popup {
     return null;
   }
 
+  // Keyboard state. The panel holds focus while it is open, so typing filters the list
+  // and the arrows move a cursor through it -- the reason a scan of forty networks is
+  // navigable at all without reaching for the mouse.
+  property string filter: ""
+  property int cursor: -1
+
+  // The network waiting for a passphrase, if any. Non-null swaps the list for a field.
+  property var pskTarget: null
+
+  readonly property var visibleNetworks: {
+    if (filter === "")
+      return networks;
+    var needle = filter.toLowerCase();
+    var out = [];
+    for (var i = 0; i < networks.length; i++)
+      if (networks[i].name.toLowerCase().indexOf(needle) !== -1)
+        out.push(networks[i]);
+    return out;
+  }
+
+  function moveCursor(delta) {
+    var count = visibleNetworks.length;
+    if (count === 0) {
+      cursor = -1;
+      return;
+    }
+    cursor = cursor < 0 ? (delta > 0 ? 0 : count - 1) : (cursor + delta + count) % count;
+    ensureCursorVisible();
+  }
+
+  // Rows differ in height -- a sublabel makes one taller -- so the row itself is asked
+  // where it is rather than multiplying an assumed row height.
+  function ensureCursorVisible() {
+    if (cursor < 0 || cursor >= networkColumn.children.length)
+      return;
+    var row = networkColumn.children[cursor];
+    if (!row)
+      return;
+    if (row.y < networkList.contentY)
+      networkList.contentY = row.y;
+    else if (row.y + row.height > networkList.contentY + networkList.height)
+      networkList.contentY = row.y + row.height - networkList.height;
+  }
+
+  function promptForPsk(network) {
+    pskTarget = network;
+    pskField.text = "";
+    pskError = "";
+    // Focus has to move to the field, or the panel's own key handling would eat the
+    // passphrase as filter text.
+    Qt.callLater(function () {
+      pskField.take();
+    });
+  }
+
+  property string pskError: ""
+
+  function submitPsk() {
+    if (!pskTarget)
+      return;
+    if (pskField.text === "") {
+      pskError = "Passphrase is empty";
+      return;
+    }
+    pskTarget.connectWithPsk(pskField.text);
+    cancelPsk();
+  }
+
+  function cancelPsk() {
+    pskTarget = null;
+    pskError = "";
+    pskField.text = "";
+    pskField.release();
+    root.takeFocus();
+  }
+
+  onKeyPressed: event => {
+    // The field owns the keyboard while it is up.
+    if (pskTarget)
+      return;
+
+    if (event.key === Qt.Key_Down) {
+      root.moveCursor(1);
+      event.accepted = true;
+    } else if (event.key === Qt.Key_Up) {
+      root.moveCursor(-1);
+      event.accepted = true;
+    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      if (root.cursor >= 0 && root.cursor < root.visibleNetworks.length)
+        root.activate(root.visibleNetworks[root.cursor]);
+      event.accepted = true;
+    } else if (event.key === Qt.Key_Backspace) {
+      root.filter = root.filter.slice(0, -1);
+      root.cursor = -1;
+      event.accepted = true;
+    } else if (event.key === Qt.Key_Escape && root.filter !== "") {
+      // Escape clears a filter before it closes the panel, the way a search box does.
+      root.filter = "";
+      root.cursor = -1;
+      event.accepted = true;
+    } else if (event.text !== "" && event.text >= " ") {
+      root.filter += event.text;
+      root.cursor = -1;
+      event.accepted = true;
+    }
+  }
+
   // Debounced snapshot of the scan results, for the same reason AudioPanel keeps one:
   // a Repeater rebuilt from inside the model's own change signal is a crash waiting to
   // happen, and a scan churns the list every few seconds.
@@ -101,6 +208,10 @@ Popup {
       vpnProbe.reload();
     } else {
       root.vpnError = "";
+      root.filter = "";
+      root.cursor = -1;
+      root.pskTarget = null;
+      root.pskError = "";
     }
   }
 
@@ -135,9 +246,9 @@ Popup {
     return network.known ? "saved" : "secured";
   }
 
-  // Known networks and open ones connect straight from here. Anything else needs a
-  // passphrase, and a text field inside a popup that the compositor can dismiss at any
-  // moment is a bad place to type one -- impala already does that job properly.
+  // Known networks and open ones connect straight away; anything else asks for its
+  // passphrase here. That prompt is only possible because the panel is a layer surface
+  // that can hold keyboard focus -- on the old popup it had to hand off to impala.
   function activate(network) {
     if (!network)
       return;
@@ -149,8 +260,7 @@ Popup {
       network.connect();
       return;
     }
-    root.close();
-    Quickshell.execDetached(root.launch(["desktop-launch-wifi"]));
+    root.promptForPsk(network);
   }
 
   // --- VPN ------------------------------------------------------------------------
@@ -263,7 +373,13 @@ Popup {
 
     PanelSection {
       title: "Wi-Fi"
-      value: root.wifiEnabled ? (root.activeNetwork ? root.activeNetwork.name : "not connected") : "off"
+      value: {
+        if (root.filter !== "")
+          return "filter: " + root.filter;
+        if (!root.wifiEnabled)
+          return "off";
+        return root.activeNetwork ? root.activeNetwork.name : "not connected";
+      }
     }
 
     PanelRow {
@@ -283,7 +399,7 @@ Popup {
       width: parent.width
       height: Math.min(contentHeight, Style.rowHeight * 6)
       contentHeight: networkColumn.implicitHeight
-      visible: root.wifiEnabled && root.networks.length > 0
+      visible: root.wifiEnabled && root.visibleNetworks.length > 0 && !root.pskTarget
       clip: true
       boundsBehavior: Flickable.StopAtBounds
 
@@ -293,11 +409,13 @@ Popup {
         width: networkList.width
 
         Repeater {
-          model: root.networks
+          model: root.visibleNetworks
 
           delegate: PanelRow {
             required property var modelData
+            required property int index
 
+            cursor: root.cursor === index
             icon: root.wifiIcon(modelData)
             label: modelData ? modelData.name : ""
             sublabel: {
@@ -323,6 +441,49 @@ Popup {
             }
           }
         }
+      }
+    }
+
+    // Passphrase prompt. Takes the list's place rather than sitting under it, so the
+    // panel does not change height at the moment you are typing into it.
+    Item {
+      width: parent.width
+      height: visible ? 62 : 0
+      visible: root.pskTarget !== null
+
+      Text {
+        id: pskLabel
+
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        height: 20
+        text: {
+          if (root.pskError !== "")
+            return root.pskError;
+          return root.pskTarget ? "Passphrase for " + root.pskTarget.name : "";
+        }
+        color: root.pskError !== "" ? Color.popupUrgent : Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize - 2
+        elide: Text.ElideRight
+      }
+
+      PanelInput {
+        id: pskField
+
+        anchors.top: pskLabel.bottom
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        echoMode: TextInput.Password
+        placeholder: "Enter to connect, Escape to cancel"
+
+        onAccepted: root.submitPsk()
+        onCancelled: root.cancelPsk()
       }
     }
 
