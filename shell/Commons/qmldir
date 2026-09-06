@@ -2,4 +2,5 @@ module qs.Commons
 singleton Bus 1.0 Bus.qml
 singleton Color 1.0 Color.qml
 singleton Dates 1.0 Dates.qml
+singleton Media 1.0 Media.qml
 singleton Style 1.0 Style.qml

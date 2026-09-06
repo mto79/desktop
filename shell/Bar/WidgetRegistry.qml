@@ -18,6 +18,7 @@ QtObject {
       "screenrecording": screenRecording,
       "tray": tray,
       "bluetooth": bluetooth,
+      "media": media,
       "network": network,
       "vpn": vpn,
       "audio": audio,
@@ -78,6 +79,9 @@ QtObject {
   }
   property Component bluetooth: Component {
     Bluetooth {}
+  }
+  property Component media: Component {
+    Media {}
   }
   property Component network: Component {
     Network {}

@@ -12,6 +12,7 @@
         { "id": "window" }
       ],
       "center": [
+        { "id": "media" },
         { "id": "clock", "format": "ddd dd HH:mm:ss", "firstDay": "monday" },
         { "id": "update" },
         { "id": "screenrecording" }
