@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 
 import "Bar"
+import "Notifications"
 import "Osd"
 
 // Entry point for the desktop shell.
@@ -153,10 +154,24 @@ ShellRoot {
       return osdOverlay.show(kind) ? "ok" : "unknown";
     }
 
+    function dismissNotification(): void {
+      notifications.dismissLatest();
+    }
+
+    function clearNotifications(): void {
+      notifications.dismissAll();
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";
     }
+  }
+
+  Notifications {
+    id: notifications
+
+    config: (shell.config && shell.config.notifications) ? shell.config.notifications : ({})
   }
 
   Osd {

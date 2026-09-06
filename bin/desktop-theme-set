@@ -50,7 +50,7 @@ tmux list-sessions &>/dev/null && tmux source-file ~/.config/tmux/tmux.conf
 # shell that is not running, or one too old to answer the call.
 desktop-shell shell reloadTheme >/dev/null 2>&1 || desktop-restart-shell
 #desktop-restart-swayosd
-makoctl reload
+pgrep -x mako >/dev/null && makoctl reload
 hyprctl reload
 
 # Set new background

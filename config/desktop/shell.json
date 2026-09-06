@@ -1,5 +1,11 @@
 {
   "version": 1,
+  "notifications": {
+    "position": "top-right",
+    "margin": 12,
+    "width": 380,
+    "maxVisible": 5
+  },
   "osd": {
     "position": "bottom",
     "margin": 80,

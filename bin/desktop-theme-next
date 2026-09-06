@@ -28,7 +28,7 @@ desktop-restart-waybar
 #desktop-restart-swayosd
 hyprctl reload
 pkill -SIGUSR2 btop
-makoctl reload
+pgrep -x mako >/dev/null && makoctl reload
 
 # Change gnome, terminal, etc. themes
 desktop-theme-set-terminal

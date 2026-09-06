@@ -21,9 +21,14 @@ fi
 
 fall_back_to_waybar() {
   echo "desktop-launch-shell: giving up, falling back to waybar" >&2
+  setsid uwsm app -- waybar >/dev/null 2>&1 &
+  # The shell owns notifications too, so the fallback has to bring mako back with it --
+  # and before the notification below, which is the thing that would otherwise have no
+  # daemon to draw it.
+  pgrep -x mako >/dev/null || setsid uwsm app -- mako >/dev/null 2>&1 &
+  sleep 1
   notify-send -u critical "Desktop shell failed" \
     "$(printf 'Quickshell would not stay running. Falling back to waybar.\nSee: journalctl --user -t desktop-shell')"
-  setsid uwsm app -- waybar >/dev/null 2>&1 &
 }
 
 # Quickshell's own file watcher is off by default: desktop-update-git rewrites
