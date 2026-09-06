@@ -36,6 +36,14 @@ done < <(pgrep -x openvpn 2>/dev/null)
 
 COUNT=${#CONFIGS[@]}
 
+# --names: one active VPN per line, nothing at all when none are up. The bar widget
+# reads this rather than the waybar JSON below, so both renderings keep agreeing about
+# what counts as "connected".
+if [[ "${1:-}" == "--names" ]]; then
+  ((COUNT > 0)) && printf "%s\n" "${CONFIGS[@]}"
+  exit 0
+fi
+
 # No VPN
 if [[ $COUNT -eq 0 ]]; then
   echo '{"text":"󰦜","tooltip":"VPN: disconnected","class":"vpn-off"}'
