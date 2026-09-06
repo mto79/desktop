@@ -9,3 +9,16 @@ DESKTOP_PATH="${DESKTOP_PATH:-$HOME/.local/share/desktop}"
 while timeout 5 quickshell kill -p "$DESKTOP_PATH/shell" >/dev/null 2>&1; do :; done
 
 setsid uwsm app -- desktop-launch-shell >/dev/null 2>&1 &
+
+# A previous failure may have left the waybar/mako fallback running -- it is started on
+# the way down but nothing retired it on the way back up, which is how a session ends up
+# with two bars and mako holding the notification bus. Once the shell answers, it owns
+# both jobs again.
+for _ in $(seq 20); do
+  if timeout 1 quickshell ipc -p "$DESKTOP_PATH/shell" call -- shell ping >/dev/null 2>&1; then
+    pkill -x waybar
+    pkill -x mako
+    break
+  fi
+  sleep 0.25
+done
