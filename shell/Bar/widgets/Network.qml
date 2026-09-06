@@ -87,8 +87,10 @@ BarItem {
 
   // Left click opens the network panel; right click keeps impala one gesture away,
   // since joining a new secured network still needs its passphrase prompt.
+  panelId: "network"
+
   onClicked: if (popups)
-    popups.toggle("network", this)
+    popups.toggle(root.panelId, this)
   rightCommand: ["desktop-launch-wifi"]
 
   IconLabel {

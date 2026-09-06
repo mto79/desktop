@@ -21,8 +21,10 @@ BarItem {
   property date now: new Date()
 
   rightCommand: ["desktop-launch-floating-terminal-with-presentation", "desktop-tz-select"]
+  panelId: "calendar"
+
   onClicked: if (popups)
-    popups.toggle("calendar", this)
+    popups.toggle(root.panelId, this)
 
   Timer {
     interval: 1000

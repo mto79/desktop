@@ -34,8 +34,10 @@ BarItem {
   // Left click opens the panel; right click keeps toggling mute, which is the gesture
   // that existed before panels and is used far more often than the TUI. wiremix moved
   // to a row inside the panel.
+  panelId: "audio"
+
   onClicked: if (popups)
-    popups.toggle("audio", this)
+    popups.toggle(root.panelId, this)
   rightCommand: ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]
 
   function step(delta) {

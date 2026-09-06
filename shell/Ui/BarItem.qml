@@ -32,6 +32,17 @@ BarWidget {
 
   readonly property bool hovered: mouseArea.containsMouse
 
+  // Bar.qml injects `popups` after this component is constructed, so registering in
+  // Component.onCompleted would run against a null host and silently do nothing --
+  // which is exactly what made the first IPC open answer "unknown".
+  function registerAnchor() {
+    if (popups && panelId !== "")
+      popups.registerAnchor(panelId, root);
+  }
+
+  onPopupsChanged: registerAnchor()
+  onPanelIdChanged: registerAnchor()
+
   // Hover in and out is all the host needs; it owns the delay and the single window.
   onHoveredChanged: {
     if (!tooltips)

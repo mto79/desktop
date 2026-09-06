@@ -132,6 +132,18 @@ ShellRoot {
       shell.barTransparent = !shell.barTransparent;
     }
 
+    // Panels are layer surfaces now, so they no longer need a click to map -- a
+    // keybinding or a script can open one:
+    //
+    //   bindd = SUPER, N, Network panel, exec, desktop-shell shell togglePanel network
+    function togglePanel(id: string): string {
+      return bar.popups.toggle(id, null) ? "ok" : "unknown";
+    }
+
+    function closePanels(): void {
+      bar.popups.close();
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";
@@ -139,6 +151,8 @@ ShellRoot {
   }
 
   Bar {
+    id: bar
+
     desktopPath: shell.desktopPath
     widgetRegistry: shell.widgetRegistry
     barConfig: shell.barConfig

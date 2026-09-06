@@ -18,6 +18,9 @@ Item {
   property var widgetConfig: ({})
   // The shared PopupHost, for widgets that open a panel: popups.toggle("audio", this).
   property var popups: null
+  // Set by the widget a panel belongs to -- the speaker for the audio panel, not the
+  // microphone that also opens it. Only used to anchor a panel opened without a click.
+  property string panelId: ""
   // The shared TooltipHost. BarItem drives it from hover; a widget only supplies text.
   property var tooltips: null
   // Shown on hover after a short delay. Empty means no tooltip, which is the default:

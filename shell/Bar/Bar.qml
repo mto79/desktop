@@ -51,6 +51,9 @@ Item {
     onLoadFailed: root.barHidden = false
   }
 
+  // Exposed so shell.qml's IPC handler can open a panel without a click.
+  readonly property alias popups: popupHost
+
   // One instance of every panel, shared across monitors. Deliberately outside Variants
   // -- see PopupHost for why one writer matters.
   PopupHost {
