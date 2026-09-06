@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+
+desktop-refresh-config desktop/shell.json
+desktop-restart-shell

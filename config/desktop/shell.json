@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "bar": {
+    "position": "top",
+    "height": 38,
+    "transparent": false,
+    "centerAnchor": "clock",
+    "layout": {
+      "left": [
+        { "id": "menu" },
+        { "id": "workspaces" },
+        { "id": "window" }
+      ],
+      "center": [
+        { "id": "clock", "format": "ddd dd HH:mm:ss" },
+        { "id": "update" },
+        { "id": "screenrecording" }
+      ],
+      "right": [
+        { "id": "tray" },
+        { "id": "bluetooth" },
+        { "id": "vpn" },
+        { "id": "network" },
+        { "id": "audio" },
+        { "id": "microphone" },
+        { "id": "disk", "path": "/" },
+        { "id": "memory" },
+        { "id": "cpu" },
+        { "id": "battery" }
+      ]
+    }
+  }
+}

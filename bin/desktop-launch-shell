@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+# desktop-launch-shell: Start the Quickshell desktop shell under supervision.
+#
+# Quickshell links against Qt6 *private* API, so the binary is only valid for the exact
+# Qt minor it was built against. On Fedora a Qt point release regularly lands before the
+# COPR rebuilds, and quickshell then refuses to start. Losing the bar entirely for that
+# window is worse than running the old one, so a shell that will not stay up falls back
+# to waybar rather than leaving the session bare.
+
+DESKTOP_PATH="${DESKTOP_PATH:-$HOME/.local/share/desktop}"
+SHELL_PATH="$DESKTOP_PATH/shell"
+
+MAX_RESTARTS=5
+RESTART_WINDOW=60
+
+if [[ ! -d "$SHELL_PATH" ]]; then
+  echo "desktop-launch-shell: no shell at $SHELL_PATH" >&2
+  exit 1
+fi
+
+fall_back_to_waybar() {
+  echo "desktop-launch-shell: giving up, falling back to waybar" >&2
+  notify-send -u critical "Desktop shell failed" \
+    "$(printf 'Quickshell would not stay running. Falling back to waybar.\nSee: journalctl --user -t desktop-shell')"
+  setsid uwsm app -- waybar >/dev/null 2>&1 &
+}
+
+# Quickshell's own file watcher is off by default: desktop-update-git rewrites
+# $DESKTOP_PATH in place, and a live watcher would reload against a half-written tree
+# mid-pull. Set DESKTOP_SHELL_WATCH=1 to get hot reload while working on the QML.
+if [[ -n "${DESKTOP_SHELL_WATCH:-}" ]]; then
+  export QS_DISABLE_FILE_WATCHER=0
+else
+  export QS_DISABLE_FILE_WATCHER=1
+  export QS_NO_RELOAD_POPUP=1
+fi
+
+restarts=0
+window_started=$SECONDS
+
+while true; do
+  # systemd-cat so QML warnings reach the journal. Without it Quickshell logs only to a
+  # tmpfs runtime dir, which makes a failed start look like silence.
+  systemd-cat -t desktop-shell -- quickshell -p "$SHELL_PATH"
+  status=$?
+
+  [[ $status -eq 0 ]] && exit 0
+
+  # A session that is tearing down takes the shell with it. Exiting quietly here keeps
+  # a normal logout from burning the restart budget and firing the waybar fallback.
+  if ! hyprctl -j monitors >/dev/null 2>&1; then
+    exit 0
+  fi
+
+  if (($SECONDS - window_started > RESTART_WINDOW)); then
+    restarts=0
+    window_started=$SECONDS
+  fi
+
+  restarts=$((restarts + 1))
+  if ((restarts >= MAX_RESTARTS)); then
+    fall_back_to_waybar
+    exit 1
+  fi
+
+  echo "desktop-launch-shell: exited $status, restart $restarts/$MAX_RESTARTS" >&2
+  sleep 1
+done

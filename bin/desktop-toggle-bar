@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+# desktop-toggle-bar: Show or hide the desktop shell's bar.
+#
+# The shell watches this state file, so the bar hides without the shell restarting --
+# which matters because the shell will own more than the bar over time.
+
+if [[ -f "$HOME/.local/state/desktop/bar-off" ]]; then
+  desktop-state clear bar-off
+else
+  desktop-state set bar-off
+fi

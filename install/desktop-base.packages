@@ -98,9 +98,13 @@ tar
 tldr
 tmux
 qt5-qtgraphicaleffects
+qt6-qtdeclarative
+qt6-qtimageformats
 qt6-qtsvg 
 qt6-qtvirtualkeyboard
 qt6-qtmultimedia
+qt6-qtwayland
+quickshell
 unzip
 usbutils
 util-linux-user

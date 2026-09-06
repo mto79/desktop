@@ -1,0 +1,13 @@
+{
+  "background": "#1e1e2e",
+  "foreground": "#cdd6f4",
+  "muted": "#7f849c",
+  "accent": "#89b4fa",
+  "urgent": "#f38ba8",
+  "bar": {
+    "background": "#181824",
+    "text": "#cdd6f4",
+    "muted": "#7f849c",
+    "activeWorkspace": "#94e2d5"
+  }
+}

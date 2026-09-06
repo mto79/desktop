@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+# desktop-shell: Call an IPC handler in the running Quickshell shell.
+# Usage: desktop-shell <target> <function> [args...]
+
+DESKTOP_PATH="${DESKTOP_PATH:-$HOME/.local/share/desktop}"
+TIMEOUT="${DESKTOP_SHELL_IPC_TIMEOUT:-2}"
+
+if [[ $# -eq 0 ]]; then
+  echo "Usage: desktop-shell <target> <function> [args...]" >&2
+  exit 1
+fi
+
+timeout "$TIMEOUT" quickshell ipc -p "$DESKTOP_PATH/shell" call -- "$@"

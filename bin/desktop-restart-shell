@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+# desktop-restart-shell: Restart the Quickshell desktop shell.
+
+DESKTOP_PATH="${DESKTOP_PATH:-$HOME/.local/share/desktop}"
+
+# quickshell kill targets one instance at a time; loop until none are left so a stale
+# instance from a previous session cannot survive the restart.
+while timeout 5 quickshell kill -p "$DESKTOP_PATH/shell" >/dev/null 2>&1; do :; done
+
+setsid uwsm app -- desktop-launch-shell >/dev/null 2>&1 &
