@@ -29,6 +29,8 @@ BarItem {
 
   property string load: ""
 
+  readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : "\uf2db"
+
   tooltip: load === "" ? "" : usage + "% now\nload " + load
 
   function sample(text) {
@@ -84,7 +86,7 @@ BarItem {
   }
 
   IconLabel {
-    icon: ""
+    icon: root.icon
     text: root.graph + " " + root.usage + "%"
     color: Color.barText
   }

@@ -9,6 +9,8 @@ BarItem {
 
   readonly property string path: (widgetConfig && widgetConfig.path) ? widgetConfig.path : "/"
 
+  readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : "\uf0a0"
+
   property string free: ""
   property string size: ""
   property string usedPercent: ""
@@ -50,7 +52,7 @@ BarItem {
   }
 
   IconLabel {
-    icon: ""
+    icon: root.icon
     text: root.free
     color: Color.barText
   }

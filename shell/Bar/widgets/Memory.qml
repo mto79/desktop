@@ -12,6 +12,10 @@ BarItem {
   property real usedGb: 0
   property real totalGb: 0
 
+  // nf-md-memory. Override with {"id": "memory", "icon": "..."} -- any glyph the bar
+  // font has, pasted straight into shell.json.
+  readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : "\u{f035b}"
+
   tooltip: totalGb > 0 ? usedGb.toFixed(1) + "G used of " + totalGb.toFixed(1) + "G" : ""
 
   function parse(text) {
@@ -52,7 +56,7 @@ BarItem {
   }
 
   IconLabel {
-    icon: ""
+    icon: root.icon
     text: root.usedGb.toFixed(1) + "G"
     color: Color.barText
   }
