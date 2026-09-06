@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+
+# Open the file manager, optionally at a given path.
+
+exec setsid uwsm app -- nautilus --new-window "${1:-$HOME}"

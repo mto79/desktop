@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+# desktop-gdu: Run the disk usage analyzer with the current theme's colours.
+#
+# gdu takes its palette from a config file and has no include mechanism, so the theme
+# ships one and it is named here. A theme without a gdu.yaml -- anything cloned by
+# desktop-theme-install -- just gets gdu's own colours.
+
+THEME_CONFIG="$HOME/.config/desktop/current/theme/gdu.yaml"
+
+args=()
+[[ -f "$THEME_CONFIG" ]] && args=(--config-file "$THEME_CONFIG")
+
+exec gdu "${args[@]}" "${1:-/}"
