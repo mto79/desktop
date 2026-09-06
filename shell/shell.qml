@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 
 import "Bar"
+import "Osd"
 
 // Entry point for the desktop shell.
 //
@@ -144,10 +145,24 @@ ShellRoot {
       bar.popups.close();
     }
 
+    // Volume and microphone changes are noticed on their own; brightness has to be
+    // told, since sysfs does not deliver a change the way PipeWire does:
+    //
+    //   brightnessctl set +5% && desktop-shell shell osd brightness
+    function osd(kind: string): string {
+      return osdOverlay.show(kind) ? "ok" : "unknown";
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";
     }
+  }
+
+  Osd {
+    id: osdOverlay
+
+    config: (shell.config && shell.config.osd) ? shell.config.osd : ({})
   }
 
   Bar {

@@ -1,5 +1,10 @@
 {
   "version": 1,
+  "osd": {
+    "position": "bottom",
+    "margin": 80,
+    "timeout": 1500
+  },
   "bar": {
     "position": "top",
     "height": 38,
