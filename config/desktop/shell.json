@@ -12,7 +12,7 @@
         { "id": "window" }
       ],
       "center": [
-        { "id": "clock", "format": "ddd dd HH:mm:ss" },
+        { "id": "clock", "format": "ddd dd HH:mm:ss", "firstDay": "monday" },
         { "id": "update" },
         { "id": "screenrecording" }
       ],

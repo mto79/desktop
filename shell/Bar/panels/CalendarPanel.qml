@@ -24,7 +24,33 @@ Popup {
   property int viewMonth: 0
 
   readonly property var locale: Qt.locale()
-  readonly property int firstDayOfWeek: locale.firstDayOfWeek
+
+  // Panels have no config entry of their own, so options come from the widget the
+  // panel hangs under -- {"id": "clock", "firstDay": "monday"}. PopupHost hands us
+  // that widget whether the panel was opened by click or over IPC.
+  readonly property var widgetConfig: (anchorItem && anchorItem.widgetConfig) ? anchorItem.widgetConfig : ({})
+
+  // Locale by default. Worth setting to monday next to ISO week numbers, which always
+  // start there -- a Sunday-first grid puts week 37 beside a day that is still in 36.
+  readonly property var dayNames: ({
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6
+    })
+
+  readonly property int firstDayOfWeek: {
+    var configured = widgetConfig.firstDay;
+    if (configured === undefined || configured === "locale")
+      return locale.firstDayOfWeek;
+    if (typeof configured === "number")
+      return Math.max(0, Math.min(6, configured));
+    var named = dayNames[String(configured).toLowerCase()];
+    return named !== undefined ? named : locale.firstDayOfWeek;
+  }
 
   // Six rows always, so the panel does not change height between a 4-row February and
   // a 6-row month that starts on a Sunday.
