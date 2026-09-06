@@ -1,18 +1,38 @@
 #!/usr/bin/env bash
 
+# desktop-status-openvpn: Report active VPN connections as waybar-style JSON.
+#
+# Two mechanisms have to be checked, and only one of them used to be:
+#
+#   1. NetworkManager profiles (type vpn or wireguard). This is what nm-applet and
+#      `nmcli connection up` create, and it is how the VPNs on this machine are set up.
+#      NM launches openvpn without --config, so the process-scraping below never saw it
+#      and this script reported "disconnected" while a VPN was plainly up.
+#   2. Raw `openvpn --config foo.ovpn` processes, started outside NetworkManager.
+
 CONFIGS=()
 
-# Find all openvpn processes
+# NetworkManager-managed VPNs (openvpn, wireguard, and anything else NM calls a vpn).
+if command -v nmcli >/dev/null 2>&1; then
+  while IFS=: read -r name type state; do
+    [[ "$state" == "activated" ]] || continue
+    case "$type" in
+    vpn | wireguard) CONFIGS+=("$name") ;;
+    esac
+  done < <(nmcli -t -f NAME,TYPE,STATE connection show --active 2>/dev/null)
+fi
+
+# Raw openvpn processes started outside NetworkManager.
 while read -r pid; do
-  ARGS=$(ps -p "$pid" -o args=)
+  [[ -n "$pid" ]] || continue
+  ARGS=$(ps -p "$pid" -o args= 2>/dev/null)
 
   CFG=$(echo "$ARGS" | sed -n 's/.*--config \([^ ]*\.ovpn\).*/\1/p')
 
   if [[ -n "$CFG" ]]; then
-    NAME=$(basename "$CFG" .ovpn)
-    CONFIGS+=("$NAME")
+    CONFIGS+=("$(basename "$CFG" .ovpn)")
   fi
-done < <(pgrep -x openvpn)
+done < <(pgrep -x openvpn 2>/dev/null)
 
 COUNT=${#CONFIGS[@]}
 
@@ -29,5 +49,5 @@ if [[ $COUNT -eq 1 ]]; then
 fi
 
 # Multiple VPNs
-LIST=$(printf "%s\n" "${CONFIGS[@]}")
+LIST=$(printf "%s\\n" "${CONFIGS[@]}")
 echo "{\"text\":\"󰦝 $COUNT\",\"tooltip\":\"VPNs active:\n$LIST\",\"class\":\"vpn-multi\"}"
