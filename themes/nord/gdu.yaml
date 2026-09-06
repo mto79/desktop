@@ -1,0 +1,19 @@
+# gdu colours for the nord theme, applied by bin/desktop-gdu.
+#
+# gdu merges this onto its own defaults, so a style-only file leaves the scanner
+# settings -- ignored directories, storage path -- exactly as they ship.
+style:
+    header:
+        text-color: '#81a1c1'
+        background-color: '#3b4252'
+        hidden: false
+    footer:
+        text-color: '#4c566a'
+        background-color: '#3b4252'
+        number-color: '#81a1c1'
+    selected-row:
+        text-color: '#2e3440'
+        background-color: '#81a1c1'
+    result-row:
+        number-color: '#88c0d0'
+        directory-color: '#81a1c1'

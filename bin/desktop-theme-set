@@ -44,7 +44,11 @@ touch "$HOME/.config/alacritty/alacritty.toml"
 
 # Restart components to apply new theme
 pkill -SIGUSR2 btop
-desktop-restart-waybar
+# Every running server re-reads the config, which re-sources the theme's tmux.conf.
+tmux list-sessions &>/dev/null && tmux source-file ~/.config/tmux/tmux.conf
+# The shell re-reads the theme in place; restarting it is only the fallback for a
+# shell that is not running, or one too old to answer the call.
+desktop-shell shell reloadTheme >/dev/null 2>&1 || desktop-restart-shell
 #desktop-restart-swayosd
 makoctl reload
 hyprctl reload

@@ -1,0 +1,19 @@
+# gdu colours for the tokyo-night theme, applied by bin/desktop-gdu.
+#
+# gdu merges this onto its own defaults, so a style-only file leaves the scanner
+# settings -- ignored directories, storage path -- exactly as they ship.
+style:
+    header:
+        text-color: '#7aa2f7'
+        background-color: '#11111b'
+        hidden: false
+    footer:
+        text-color: '#565f89'
+        background-color: '#11111b'
+        number-color: '#7aa2f7'
+    selected-row:
+        text-color: '#1a1b26'
+        background-color: '#7aa2f7'
+    result-row:
+        number-color: '#7dcfff'
+        directory-color: '#7aa2f7'

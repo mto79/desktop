@@ -1,0 +1,19 @@
+# gdu colours for the catppuccin theme, applied by bin/desktop-gdu.
+#
+# gdu merges this onto its own defaults, so a style-only file leaves the scanner
+# settings -- ignored directories, storage path -- exactly as they ship.
+style:
+    header:
+        text-color: '#89b4fa'
+        background-color: '#181824'
+        hidden: false
+    footer:
+        text-color: '#7f849c'
+        background-color: '#181824'
+        number-color: '#89b4fa'
+    selected-row:
+        text-color: '#1e1e2e'
+        background-color: '#89b4fa'
+    result-row:
+        number-color: '#94e2d5'
+        directory-color: '#89b4fa'
