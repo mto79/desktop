@@ -115,6 +115,12 @@ Item {
     }
   }
 
+  // Do not disturb has no reading of its own; it is on or it is off.
+  function presentDnd(silenced) {
+    ready = true;
+    present(silenced ? "\u{f009a}" : "\u{f009b}", silenced ? 0 : 1, silenced ? "silenced" : "notifications on");
+  }
+
   // Called from shell.qml's IPC handler.
   function show(kind) {
     if (kind === "volume") {
@@ -145,6 +151,7 @@ Item {
         required property var modelData
 
         screen: modelData
+        surfaceNamespace: "desktop-osd"
         visible: root.active
         position: root.position
         margin: root.margin

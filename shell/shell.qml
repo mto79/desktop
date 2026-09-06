@@ -162,6 +162,14 @@ ShellRoot {
       notifications.dismissAll();
     }
 
+    // Answers with the new state, and says so on screen through the OSD -- a toast
+    // confirming that toasts are now silenced would be a poor way to find out.
+    function toggleDoNotDisturb(): string {
+      var silenced = notifications.toggleDnd();
+      osdOverlay.presentDnd(silenced);
+      return silenced ? "on" : "off";
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";

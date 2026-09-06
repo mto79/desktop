@@ -80,12 +80,23 @@ Item {
 
   // Likewise not `visible`.
   readonly property var showing: {
+    if (doNotDisturb)
+      return [];
     var all = server.trackedNotifications ? server.trackedNotifications.values : [];
     // Newest first, and never more than the stack is allowed to show.
     var out = [];
     for (var i = all.length - 1; i >= 0 && out.length < root.maxVisible; i--)
       out.push(all[i]);
     return out;
+  }
+
+  // Silenced notifications are still received and tracked -- nothing is lost, it just
+  // does not interrupt.
+  property bool doNotDisturb: false
+
+  function toggleDnd() {
+    doNotDisturb = !doNotDisturb;
+    return doNotDisturb;
   }
 
   // Reached over IPC, since the toasts are dismissed with the mouse otherwise.
@@ -108,6 +119,7 @@ Item {
         required property var modelData
 
         screen: modelData
+        surfaceNamespace: "desktop-notifications"
         visible: root.showing.length > 0
         position: root.position
         margin: root.margin

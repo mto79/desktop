@@ -21,6 +21,9 @@ PanelWindow {
   property int margin: 80
   // Notifications need clicks; an OSD must not eat them.
   property bool interactive: false
+  // Distinct per consumer, so `hyprctl layers` and any layerrule can tell an OSD from
+  // a notification stack.
+  property string surfaceNamespace: "desktop-surface"
 
   readonly property bool atTop: position.indexOf("top") === 0
   readonly property bool atLeft: position.indexOf("left") !== -1
@@ -28,7 +31,7 @@ PanelWindow {
 
   default property alias content: body.data
 
-  WlrLayershell.namespace: "desktop-osd"
+  WlrLayershell.namespace: root.surfaceNamespace
   WlrLayershell.layer: WlrLayer.Overlay
   WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
 
