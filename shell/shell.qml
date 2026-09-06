@@ -5,6 +5,7 @@ import Quickshell.Io
 import qs.Commons
 
 import "Bar"
+import "Launcher"
 import "Notifications"
 import "Osd"
 
@@ -170,10 +171,21 @@ ShellRoot {
       return silenced ? "on" : "off";
     }
 
+    // Bound to SUPER+SPACE, in place of the wofi menu.
+    function toggleLauncher(): string {
+      return launcher.toggle() ? "open" : "closed";
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";
     }
+  }
+
+  Launcher {
+    id: launcher
+
+    config: (shell.config && shell.config.launcher) ? shell.config.launcher : ({})
   }
 
   Notifications {

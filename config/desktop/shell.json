@@ -1,5 +1,9 @@
 {
   "version": 1,
+  "launcher": {
+    "width": 520,
+    "maxResults": 8
+  },
   "notifications": {
     "position": "top-right",
     "margin": 12,

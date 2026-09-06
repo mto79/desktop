@@ -10,6 +10,9 @@ Item {
   id: root
 
   property string icon: ""
+  // An image path, for rows whose icon is a file rather than a font glyph. Takes the
+  // same slot; whichever one is set wins.
+  property string iconSource: ""
   property string label: ""
   property string sublabel: ""
   // Marks the row as the current one (active sink, connected network). Distinct from
@@ -46,10 +49,28 @@ Item {
     }
   }
 
+  Image {
+    id: picture
+
+    visible: root.iconSource !== ""
+    anchors.left: parent.left
+    anchors.leftMargin: 6
+    anchors.verticalCenter: parent.verticalCenter
+    width: Style.iconSize + 5
+    height: width
+    source: root.iconSource
+    sourceSize.width: width * 2
+    sourceSize.height: width * 2
+    fillMode: Image.PreserveAspectFit
+    smooth: true
+    asynchronous: true
+    opacity: root.enabled ? 1.0 : 0.4
+  }
+
   Text {
     id: glyph
 
-    visible: root.icon !== ""
+    visible: root.icon !== "" && root.iconSource === ""
     anchors.left: parent.left
     anchors.leftMargin: 6
     anchors.verticalCenter: parent.verticalCenter
@@ -63,8 +84,8 @@ Item {
   Column {
     id: column
 
-    anchors.left: glyph.visible ? glyph.right : parent.left
-    anchors.leftMargin: glyph.visible ? 10 : 6
+    anchors.left: picture.visible ? picture.right : (glyph.visible ? glyph.right : parent.left)
+    anchors.leftMargin: (picture.visible || glyph.visible) ? 10 : 6
     anchors.right: trailingSlot.left
     anchors.rightMargin: 8
     anchors.verticalCenter: parent.verticalCenter
