@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+# desktop-status-ai: running agents and token usage, as one bar module.
+#
+#   {"text":"5 · 1.9M","class":"busy","tooltip":"..."}
+#
+# Two widgets sat side by side saying related things about the same subject, and each
+# one paid the bar's full padding for the privilege. Merging them costs a separator and
+# saves a widget's worth of horizontal space.
+#
+# Composed from the two existing scripts rather than reimplementing either: the token
+# accounting in desktop-status-claude is the fiddly part, and there is no reason for two
+# copies of it. `class` follows the agents, since a running agent is the thing worth
+# colouring the bar for; the token figure is context, not an alert.
+
+set -uo pipefail
+
+agents=$(desktop-status-agents 2>/dev/null) || agents=''
+claude=$(desktop-status-claude 2>/dev/null) || claude=''
+
+# A missing or unparseable half degrades to the other rather than blanking the module.
+echo "$agents" | jq -e . >/dev/null 2>&1 || agents='{"text":"","class":"idle","tooltip":""}'
+echo "$claude" | jq -e . >/dev/null 2>&1 || claude='{"text":"","class":"idle","tooltip":""}'
+
+jq -c -n --argjson a "$agents" --argjson c "$claude" '
+  ($a.text // "") as $agentText
+  | ($c.text // "") as $tokenText
+  | {
+      text: (
+        if $agentText != "" and $tokenText != "" then $agentText + " · " + $tokenText
+        elif $agentText != "" then $agentText
+        else $tokenText
+        end
+      ),
+      class: (if $agentText != "" then ($a.class // "busy") else ($c.class // "idle") end),
+      tooltip: (
+        [($a.tooltip // ""), ($c.tooltip // "")]
+        | map(select(. != ""))
+        | join("\n\n")
+      )
+    }'

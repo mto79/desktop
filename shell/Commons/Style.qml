@@ -21,7 +21,7 @@ QtObject {
   // Bar geometry. barSize is overridden from shell.json's bar.height.
   property int barSize: 38
   property int itemSpacing: 2
-  property int itemPaddingH: 10
+  property int itemPaddingH: 6
   property int sectionSpacing: 8
   property int radius: 0
 

@@ -34,6 +34,31 @@ BarWidget {
   //   {"id": "tray", "tint": ["nm-applet", "..."]}  only these, matched on the item id
   readonly property var tintConfig: (widgetConfig && widgetConfig.tint !== undefined) ? widgetConfig.tint : false
 
+  // Replace an item's icon with a glyph from the bar font, keyed on the item id:
+  //
+  //   {"id": "tray", "glyphs": {"keepassxc": "\uf084", "nm-applet": "\uf1eb"}}
+  //
+  // This is the only way a tray icon can genuinely match the rest of the bar. The icons
+  // themselves arrive from the applications as names or pixmaps and cannot be restyled
+  // -- Omarchy does not restyle them either, it hides them behind a hover drawer -- so
+  // looking like the bar means not using them at all. Anything unmapped keeps its own
+  // icon, which is the sane default for a tray whose contents change.
+  //
+  // It also rescues an icon the theme cannot resolve: keepassxc-locked exists nowhere on
+  // this machine, because KeePassXC is an AppImage and only its main icon was copied
+  // out, and it would otherwise be Qt's magenta checkerboard.
+  readonly property var glyphMap: (widgetConfig && widgetConfig.glyphs) ? widgetConfig.glyphs : ({})
+
+  function glyphFor(item) {
+    if (!item)
+      return "";
+    var id = (item.id || "").toLowerCase();
+    for (var key in glyphMap)
+      if (String(key).toLowerCase() === id)
+        return glyphMap[key];
+    return "";
+  }
+
   function shouldTint(item) {
     if (tintConfig === true)
       return true;
@@ -116,6 +141,7 @@ BarWidget {
         required property SystemTrayItem modelData
 
         readonly property bool tinted: root.shouldTint(modelData)
+        readonly property string glyph: root.glyphFor(modelData)
 
         // Half of BarItem's padding either side. The full amount is sized for an icon
         // with a label beside it; a bare icon in it looks marooned.
@@ -148,15 +174,26 @@ BarWidget {
           smooth: true
           // Hidden while tinted: the effect below draws it instead. Still a texture
           // provider, which is all MultiEffect needs from it.
-          visible: !trayItem.tinted
+          visible: !trayItem.tinted && trayItem.glyph === ""
         }
 
         MultiEffect {
           anchors.fill: iconImage
           source: iconImage
-          visible: trayItem.tinted
+          visible: trayItem.tinted && trayItem.glyph === ""
           colorization: 1.0
           colorizationColor: Color.barText
+        }
+
+        // Rendered exactly as every other bar item's icon is: same font, same size, same
+        // colour, so a mapped tray item is indistinguishable from a built-in widget.
+        Text {
+          anchors.centerIn: parent
+          visible: trayItem.glyph !== ""
+          text: trayItem.glyph
+          color: Color.barText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.iconSize
         }
 
         // Every other widget names itself on hover; a tray of four anonymous glyphs was

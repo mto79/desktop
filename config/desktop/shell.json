@@ -50,7 +50,13 @@
       ],
       "right": [
         {
-          "id": "tray"
+          "id": "tray",
+          "glyphs": {
+            "KeePassXC": "",
+            "remmina-icon": "",
+            "Fcitx": "",
+            "nm-applet": ""
+          }
         },
         {
           "id": "bluetooth"
@@ -68,24 +74,14 @@
           "id": "microphone"
         },
         {
-          "id": "claude",
+          "id": "ai",
           "type": "command",
-          "exec": "desktop-status-claude",
-          "interval": 60,
-          "icon": "",
-          "colors": {
-            "active": "muted"
-          },
-          "onClick": "desktop-menu agents"
-        },
-        {
-          "id": "agents",
-          "type": "command",
-          "exec": "desktop-status-agents",
-          "interval": 5,
+          "exec": "desktop-status-ai",
+          "interval": 15,
           "icon": "󰚩",
           "colors": {
-            "busy": "accent"
+            "busy": "accent",
+            "active": "muted"
           },
           "onClick": "desktop-menu agents"
         },
