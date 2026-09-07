@@ -26,7 +26,13 @@
           "id": "menu"
         },
         {
+          "id": "spacer"
+        },
+        {
           "id": "workspaces"
+        },
+        {
+          "id": "spacer"
         },
         {
           "id": "window"
