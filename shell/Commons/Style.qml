@@ -21,7 +21,7 @@ QtObject {
   // Bar geometry. barSize is overridden from shell.json's bar.height.
   property int barSize: 38
   property int itemSpacing: 2
-  property int itemPaddingH: 6
+  property int itemPaddingH: 4
   property int sectionSpacing: 8
   // The gap a bar spacer leaves between groups of widgets. Its own token rather than
   // sectionSpacing, which sizes gaps inside popups: this one only has to beat
