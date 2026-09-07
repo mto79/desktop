@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# desktop-agent-notify: turn a Claude Code notification into a desktop one.
+#
+# Wired to the Notification hook in Claude Code's settings.json, which fires when the
+# agent is waiting on you -- a permission prompt, or a question it cannot get past.
+#
+# This is the other half of desktop-agent: that one says when an agent died, this one
+# says when it stopped and is waiting. Agents run in tmux windows nobody is looking at,
+# so until now a blocked agent and a working one looked exactly the same from outside.
+#
+# Reads the hook payload on stdin, e.g.
+#   {"message":"Claude needs your permission...","cwd":"/home/mto/...","session_id":"..."}
+
+set -uo pipefail
+
+payload=$(cat)
+
+field() {
+  jq -r --arg key "$1" '.[$key] // empty' <<<"$payload" 2>/dev/null
+}
+
+message=$(field message)
+cwd=$(field cwd)
+
+# The project directory is the useful part of the title: with several agents running,
+# "which one" matters more than "an agent". Fall back to the bare name when the payload
+# carries no cwd, rather than showing an empty heading.
+project=${cwd##*/}
+
+notify-send \
+  --app-name="Claude Code" \
+  --urgency=normal \
+  --icon=dialog-information \
+  "${project:-Claude Code}" \
+  "${message:-Waiting for you}"
