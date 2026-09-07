@@ -43,9 +43,15 @@
           "id": "media"
         },
         {
+          "id": "spacer"
+        },
+        {
           "id": "clock",
           "format": "ddd dd HH:mm:ss",
           "firstDay": "monday"
+        },
+        {
+          "id": "spacer"
         },
         {
           "id": "update"
