@@ -13,7 +13,6 @@ COPR_REPOS=(
   "atim/starship"              # COPR for starship
   "lihaohong/yazi"             # COPR for yazi
   "scottames/ghostty"          # COPR for Ghostty
-  "wezfurlong/wezterm-nightly" # COPR for wezterm
   "kylegospo/grub-btrfs"       # COPR for grub-btrfs
   "errornointernet/quickshell" # COPR for Quickshell (not in Fedora repos)
 )
