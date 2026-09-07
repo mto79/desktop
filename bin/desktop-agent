@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+# desktop-agent: run a coding agent and say so when it stops unexpectedly.
+#
+#   desktop-agent claude
+#   desktop-agent opencode --flag
+#
+# Agents run in tmux windows nobody is looking at, so one that dies takes a while to be
+# noticed. A clean exit says nothing; a crash or a non-zero exit sends a notification
+# naming the project it died in.
+
+set -uo pipefail
+
+AGENT="${1:?usage: desktop-agent <claude|opencode> [args...]}"
+shift
+
+"$AGENT" "$@"
+code=$?
+
+if ((code == 0)); then
+  exit 0
+fi
+
+if ((code > 128)); then
+  reason="killed by signal $((code - 128))"
+else
+  reason="exited $code"
+fi
+
+notify-send -u critical "$AGENT stopped" "$reason in ${PWD/#$HOME/\~}"
+exit "$code"

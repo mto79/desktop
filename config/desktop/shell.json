@@ -68,6 +68,17 @@
           "id": "microphone"
         },
         {
+          "id": "claude",
+          "type": "command",
+          "exec": "desktop-status-claude",
+          "interval": 60,
+          "icon": "",
+          "colors": {
+            "active": "muted"
+          },
+          "onClick": "desktop-menu agents"
+        },
+        {
           "id": "agents",
           "type": "command",
           "exec": "desktop-status-agents",

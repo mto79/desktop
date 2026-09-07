@@ -1,20 +1,97 @@
 #!/usr/bin/env bash
 
-# desktop-menu-agents: show the running AI sessions and where they are working.
+# desktop-menu-agents: list the running AI sessions, and jump to the one you pick.
 #
-# A reference list rather than a picker -- what you want from the bar is "which project
-# is that one in", and the answer is the process's working directory.
+# The useful question from the bar is "which project is that one in, and how do I get
+# back to it". Agents run inside tmux, so the answer is a pane: the row carries the
+# session:window it lives in, and choosing it switches a client there and raises the
+# terminal drawing that client.
 
 set -uo pipefail
 
-lines=""
+# Walk up from the agent until a pid matches a tmux pane. The agent is usually the
+# pane's own process, but a wrapper or a shell in between is common enough to climb.
+pane_for_pid() {
+  local pid="$1" panes target
+  panes=$(tmux list-panes -a -F '#{pane_pid} #{session_name}:#{window_index}.#{pane_index}' 2>/dev/null) || return 1
+
+  while [[ -n "$pid" && "$pid" != 1 ]]; do
+    target=$(awk -v p="$pid" '$1 == p { print $2; exit }' <<<"$panes")
+    [[ -n "$target" ]] && {
+      echo "$target"
+      return 0
+    }
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+
+  return 1
+}
+
+# The terminal window that ultimately draws a process, so it can be raised.
+focus_window_for_pid() {
+  local pid="$1" clients address
+  clients=$(hyprctl clients -j)
+
+  while [[ -n "$pid" && "$pid" != 1 ]]; do
+    address=$(jq -r --argjson p "$pid" 'first(.[] | select(.pid == $p) | .address) // empty' <<<"$clients")
+    [[ -n "$address" ]] && {
+      hyprctl dispatch focuswindow "address:$address" >/dev/null
+      return 0
+    }
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+
+  return 1
+}
+
+jump_to() {
+  local target="$1" session="${target%%:*}"
+  local tty client_session client_pid chosen_tty="" chosen_pid=""
+
+  # Prefer a client already attached to that session; any client will do otherwise,
+  # since switch-client can move it.
+  while read -r tty client_session client_pid; do
+    [[ -n "$tty" ]] || continue
+    if [[ "$client_session" == "$session" ]]; then
+      chosen_tty="$tty"
+      chosen_pid="$client_pid"
+      break
+    fi
+    [[ -z "$chosen_tty" ]] && chosen_tty="$tty" && chosen_pid="$client_pid"
+  done < <(tmux list-clients -F '#{client_tty} #{client_session} #{client_pid}' 2>/dev/null)
+
+  if [[ -n "$chosen_tty" ]]; then
+    tmux switch-client -c "$chosen_tty" -t "$target" 2>/dev/null ||
+      tmux select-window -t "${target%.*}" 2>/dev/null
+    [[ -n "$chosen_pid" ]] && focus_window_for_pid "$chosen_pid"
+  else
+    # Nothing attached: the session is running headless, so bring it up in a terminal.
+    setsid uwsm app -- alacritty -e tmux attach -t "$session" >/dev/null 2>&1 &
+  fi
+}
+
+rows=""
+declare -A TARGETS=()
 
 for pid in $(pgrep -x claude 2>/dev/null) $(pgrep -x opencode 2>/dev/null); do
-  cwd=$(readlink /proc/"$pid"/cwd 2>/dev/null) || continue
+  cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
   tool=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
-  lines+="$(printf '%-9s %s' "$tool" "${cwd/#$HOME/~}")"$'\n'
+  target=$(pane_for_pid "$pid" || true)
+
+  label=$(printf '%-9s %s' "$tool" "${cwd/#$HOME/\~}")
+  [[ -n "$target" ]] && label="$label  [$target]"
+
+  rows+="$label"$'\n'
+  [[ -n "$target" ]] && TARGETS["$label"]="$target"
 done
 
-[[ -n "$lines" ]] || lines="No agent sessions running"$'\n'
+if [[ -z "$rows" ]]; then
+  printf 'No agent sessions running\n' |
+    desktop-menu-select --prompt "Agents" --width 700 --rows 12 >/dev/null
+  exit 0
+fi
 
-printf '%s' "$lines" | desktop-menu-select --prompt "Agents" --width 700 --rows 12 >/dev/null
+choice=$(printf '%s' "$rows" | desktop-menu-select --prompt "Agents" --width 760 --rows 12) || exit 0
+
+target="${TARGETS[$choice]:-}"
+[[ -n "$target" ]] && jump_to "$target"
