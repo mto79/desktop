@@ -1,0 +1,36 @@
+# Atuin: shell history in SQLite. Copied to ~/.config/atuin/ by install/config/config.sh.
+#
+# The ctrl-r binding is set up in config/fish/config.fish, which deliberately leaves
+# up-arrow to fish. This file is only about what gets recorded and how it is searched.
+
+# Where ctrl-r starts. Press ctrl-r again inside the search to cycle
+# global -> host -> session -> directory.
+filter_mode = "global"
+
+# Match anywhere in the command rather than only at the start.
+search_mode = "fuzzy"
+
+# Atuin's own detector for things shaped like credentials -- AWS keys, GitHub tokens
+# and similar. On by default; set here so the intent is visible rather than inherited.
+secrets_filter = true
+
+# Commands never written to the database at all.
+#
+# This matters more here than it would with a flat history file: atuin's history is a
+# durable, indexed, full-text-searchable store, so a secret that lands in it is far
+# easier to recover later than one buried in fish_history. secrets_filter above only
+# knows well-known token shapes -- it cannot know about our own tooling, which is what
+# these are for.
+#
+# Regexes are unanchored: without ^ or $ they match anywhere in the command line.
+history_filter = [
+  "^bw ",              # Bitwarden CLI -- see config/fish/functions/bw-unlock.fish
+  "--password[ =]",
+  "--token[ =]",
+  "--secret[ =]",
+  "^atuin (login|register|key)",
+]
+
+# Directories whose commands are never recorded. Nothing here yet; the shape is
+#   cwd_filter = ["^/some/path"]
+# cwd_filter = []

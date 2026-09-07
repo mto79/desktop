@@ -1,0 +1,6 @@
+# Unpacked by install/packaging/openshiftlocal.sh, which extracts into the working
+# directory rather than a temp one. 100MB+ of binary, not source.
+install/packaging/crc-linux-*/
+
+# Ansible's local cache, created when a playbook is run from this directory.
+.ansible/

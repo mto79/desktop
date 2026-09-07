@@ -50,6 +50,7 @@ ImageMagick
 ImageMagick-libs
 imv
 iputils
+jq
 keychain
 kvantum-qt5
 libheif
