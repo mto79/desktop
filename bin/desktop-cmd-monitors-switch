@@ -98,6 +98,11 @@ apply_layout() {
   } >"$CONF"
 
   hyprctl reload >/dev/null
+
+  # The widest screen is a different one at every desk, so workspace 3 has to be
+  # re-pinned against the monitors the reload just brought up -- not the old ones.
+  desktop-workspace-pin
+
   notify-send "Monitors" "Applied the $name layout"
 }
 
