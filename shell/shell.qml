@@ -199,6 +199,13 @@ ShellRoot {
       return launcher.selectFrom(itemsFile, resultFile, prompt, preselect, width, rows) ? "ok" : "unknown";
     }
 
+    // Input mode: the same surface with no list, for a script that needs a line of
+    // text rather than a choice. bin/desktop-menu-input waits on the same handshake.
+    function input(resultFile: string, prompt: string, initial: string): string {
+      launcher.showInput(resultFile, prompt, initial);
+      return "ok";
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";

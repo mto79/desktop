@@ -37,6 +37,9 @@ Item {
   property int selectRows: 0
 
   readonly property bool selecting: resultFile !== ""
+  // Input mode is select mode with no list: the answer is what was typed rather than
+  // which row was under the cursor.
+  property bool inputMode: false
 
   readonly property var entries: DesktopEntries.applications ? DesktopEntries.applications.values : []
 
@@ -152,6 +155,23 @@ Item {
       answer("", false);
   }
 
+  function showInput(resultPath, promptText, initial) {
+    items = [];
+    inputMode = true;
+    resultFile = resultPath;
+    prompt = promptText;
+    query = "";
+    cursor = 0;
+    open = true;
+
+    Qt.callLater(function () {
+      if (!root.field)
+        return;
+      root.field.text = initial;
+      root.field.take();
+    });
+  }
+
   function showSelect(itemsText, resultPath, promptText, preselect) {
     var lines = itemsText.split("\n");
     var kept = [];
@@ -242,6 +262,7 @@ Item {
       return;
     writeResult(resultFile, chosen ? "1\n" + value : "0\n");
     resultFile = "";
+    inputMode = false;
     items = [];
     prompt = "";
     selectWidth = 0;
@@ -377,7 +398,15 @@ Item {
             root.query = text;
             root.cursor = 0;
           }
-          onAccepted: root.activate(root.results[root.cursor])
+          onAccepted: {
+            if (root.inputMode) {
+              // An empty prompt is a cancellation: there is nothing to ask.
+              root.open = false;
+              root.answer(input.text, input.text !== "");
+            } else {
+              root.activate(root.results[root.cursor]);
+            }
+          }
           onCancelled: root.hide()
 
           // Arrows have to be caught here: the field owns the keyboard while it has
@@ -415,7 +444,7 @@ Item {
 
         Text {
           width: parent.width
-          visible: root.results.length === 0
+          visible: root.results.length === 0 && !root.inputMode
           text: "No match"
           color: Color.popupMuted
           font.family: Style.fontFamily

@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+
+# desktop-menu-input: ask for a line of text in the shell and print it.
+#
+# The other half of desktop-menu-select: same tempfile handshake, no list. Nothing
+# typed means exit 1, so a caller can tell "cancelled" from "asked for an empty
+# string". Falls back to wofi's dmenu when the shell is not running.
+
+set -uo pipefail
+
+PROMPT="Enter text"
+INITIAL=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+  --prompt)
+    PROMPT="$2"
+    shift 2
+    ;;
+  --initial)
+    INITIAL="$2"
+    shift 2
+    ;;
+  *)
+    echo "desktop-menu-input: unknown option $1" >&2
+    exit 2
+    ;;
+  esac
+done
+
+fall_back_to_wofi() {
+  # wofi's dmenu returns what was typed when nothing matches, which is the closest it
+  # gets to a text field.
+  printf '' | wofi --dmenu -p "$PROMPT…"
+}
+
+command -v quickshell >/dev/null 2>&1 || { fall_back_to_wofi; exit $?; }
+
+WORK=$(mktemp -d) || exit 1
+trap 'rm -rf "$WORK"' EXIT
+
+if ! desktop-shell shell input "$WORK/result" "$PROMPT" "$INITIAL" >/dev/null 2>&1; then
+  fall_back_to_wofi
+  exit $?
+fi
+
+for _ in $(seq 6000); do
+  [[ -f "$WORK/result" ]] && break
+  sleep 0.05
+done
+
+[[ -f "$WORK/result" ]] || exit 1
+
+STATUS=$(head -n 1 "$WORK/result")
+[[ "$STATUS" == "1" ]] || exit 1
+
+printf '%s\n' "$(tail -n +2 "$WORK/result")"

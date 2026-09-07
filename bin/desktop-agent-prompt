@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# desktop-agent-prompt: ask a coding agent something, from anywhere.
+#
+#   desktop-agent-prompt              # ask for the prompt, then run it
+#   desktop-agent-prompt "review this"
+#
+# The agent runs in a floating terminal in the directory of the focused window, so
+# "explain this file" lands in the project you were looking at rather than in $HOME.
+
+set -uo pipefail
+
+AGENT="${DESKTOP_AGENT:-claude}"
+
+PROMPT="${*:-}"
+if [[ -z "$PROMPT" ]]; then
+  PROMPT=$(desktop-menu-input --prompt "Ask $AGENT") || exit 0
+fi
+
+[[ -n "$PROMPT" ]] || exit 0
+
+# The focused window's working directory, when it has one worth using. A terminal's own
+# shell is the common case; anything else falls back to $HOME.
+cwd="$HOME"
+pid=$(hyprctl activewindow -j | jq -r '.pid // empty')
+if [[ -n "$pid" ]]; then
+  # The deepest child holding a cwd is the shell inside the terminal, not the terminal.
+  for child in $(pgrep -P "$pid" 2>/dev/null) "$pid"; do
+    candidate=$(readlink "/proc/$child/cwd" 2>/dev/null) || continue
+    [[ -d "$candidate" ]] && cwd="$candidate" && break
+  done
+fi
+
+exec setsid uwsm app -- alacritty --class=Agent --title="$AGENT" \
+  --working-directory "$cwd" \
+  -e "$AGENT" "$PROMPT"
