@@ -1,24 +1,101 @@
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Services.SystemTray
+import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
 
 // StatusNotifier tray icons.
 //
-// Left click activates, right click opens the item's own menu. waybar hid these behind
-// an expander drawer; they are shown directly here, since the count is normally small.
+// Left click raises the application's window, right click opens the item's own menu.
 //
-// Each icon is its own hover target rather than the tray being one block, so a tray
-// item behaves like every other thing in the bar: it lights up under the pointer, it
-// says what it is, and its highlight is the width of the thing you are about to click.
-// The icons themselves cannot be restyled -- they arrive from the applications as icon
-// names or pixmaps, and are whatever those applications ship.
+// Raising is done here rather than left to the item's Activate call, because on Wayland
+// an application cannot raise itself -- KeePassXC's attempts show up in the journal as
+// "Wayland does not support QWindow::requestActivate()", and clicking its tray icon did
+// nothing at all. Only the compositor may move focus, so the window is found through the
+// foreign-toplevel protocol and activated from here. Activate is still called for items
+// with no window of their own, which is the case that call is actually good for.
+//
+// Each icon is its own hover target, so a tray item behaves like every other thing in
+// the bar: it lights up under the pointer, it says what it is, and its highlight is the
+// width of the thing you are about to click.
 BarWidget {
   id: root
 
   readonly property int iconSize: (widgetConfig && widgetConfig.iconSize) ? widgetConfig.iconSize : Style.trayIconSize
+
+  // Recolour icons to the bar's foreground. Off by default and deliberately not
+  // automatic: it makes a monochrome icon match the bar and flattens a deliberately
+  // coloured one into a silhouette, and only you can say which is which.
+  //
+  //   {"id": "tray", "tint": true}                  every icon
+  //   {"id": "tray", "tint": ["nm-applet", "..."]}  only these, matched on the item id
+  readonly property var tintConfig: (widgetConfig && widgetConfig.tint !== undefined) ? widgetConfig.tint : false
+
+  function shouldTint(item) {
+    if (tintConfig === true)
+      return true;
+    if (!Array.isArray(tintConfig) || !item)
+      return false;
+    var id = (item.id || "").toLowerCase();
+    for (var i = 0; i < tintConfig.length; i++)
+      if (String(tintConfig[i]).toLowerCase() === id)
+        return true;
+    return false;
+  }
+
+  // Words too generic to identify anything: every second tray item calls itself an
+  // applet or an indicator, and matching on those would focus the wrong window.
+  readonly property var noiseWords: ["icon", "applet", "tray", "status", "indicator", "panel", "systray"]
+
+  // Lowercase alphanumeric words of three characters or more. "remmina-icon" gives
+  // ["remmina"], which is enough to find "org.remmina.Remmina"; "nm-applet" gives
+  // nothing, and correctly falls through to Activate.
+  function tokensOf(text) {
+    if (!text)
+      return [];
+    var parts = String(text).toLowerCase().split(/[^a-z0-9]+/);
+    var out = [];
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].length < 3)
+        continue;
+      if (noiseWords.indexOf(parts[i]) !== -1)
+        continue;
+      out.push(parts[i]);
+    }
+    return out;
+  }
+
+  function flatten(text) {
+    return text ? String(text).toLowerCase().replace(/[^a-z0-9]+/g, "") : "";
+  }
+
+  // Returns true when a window was found and raised.
+  function raiseApplication(item) {
+    if (!item)
+      return false;
+
+    var tokens = tokensOf(item.id).concat(tokensOf(item.title));
+    if (tokens.length === 0)
+      return false;
+
+    // Matched against the app id only, never the window title. "nm-applet" reduces to
+    // the token "network", and a browser tab called "Network settings" would otherwise
+    // be a perfectly good match for it.
+    var tops = ToplevelManager.toplevels ? ToplevelManager.toplevels.values : [];
+    for (var i = 0; i < tops.length; i++) {
+      var haystack = flatten(tops[i].appId);
+      for (var t = 0; t < tokens.length; t++) {
+        if (haystack.indexOf(tokens[t]) !== -1) {
+          tops[i].activate();
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   implicitWidth: layout.implicitWidth
 
@@ -38,13 +115,14 @@ BarWidget {
 
         required property SystemTrayItem modelData
 
+        readonly property bool tinted: root.shouldTint(modelData)
+
         // Half of BarItem's padding either side. The full amount is sized for an icon
         // with a label beside it; a bare icon in it looks marooned.
         implicitWidth: root.iconSize + Style.itemPaddingH
         implicitHeight: root.height
 
-        // The same highlight, radius and fade BarItem uses, so a tray icon does not
-        // acknowledge the pointer differently from its neighbours.
+        // The same highlight, radius and fade BarItem uses.
         Rectangle {
           anchors.fill: parent
           color: mouseArea.containsMouse ? Color.barHover : "transparent"
@@ -58,6 +136,8 @@ BarWidget {
         }
 
         Image {
+          id: iconImage
+
           anchors.centerIn: parent
           width: root.iconSize
           height: root.iconSize
@@ -66,6 +146,17 @@ BarWidget {
           sourceSize.height: root.iconSize
           fillMode: Image.PreserveAspectFit
           smooth: true
+          // Hidden while tinted: the effect below draws it instead. Still a texture
+          // provider, which is all MultiEffect needs from it.
+          visible: !trayItem.tinted
+        }
+
+        MultiEffect {
+          anchors.fill: iconImage
+          source: iconImage
+          visible: trayItem.tinted
+          colorization: 1.0
+          colorizationColor: Color.barText
         }
 
         // Every other widget names itself on hover; a tray of four anonymous glyphs was
@@ -99,14 +190,16 @@ BarWidget {
             root.tooltips.release(trayItem)
 
           onClicked: mouse => {
-            // Releasing on click matches BarItem: the menu is about to cover the spot
-            // the tooltip would sit in.
             if (root.tooltips)
               root.tooltips.release(trayItem);
 
-            if (mouse.button === Qt.RightButton || trayItem.modelData.onlyMenu)
+            if (mouse.button === Qt.RightButton || trayItem.modelData.onlyMenu) {
               menuAnchor.open();
-            else
+              return;
+            }
+
+            // The window first; Activate only for an item that has none.
+            if (!root.raiseApplication(trayItem.modelData))
               trayItem.modelData.activate();
           }
         }

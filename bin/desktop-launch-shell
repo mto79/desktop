@@ -41,6 +41,18 @@ else
   export QS_NO_RELOAD_POPUP=1
 fi
 
+# Without a platform theme Qt looks up icons in hicolor and nowhere else, so any tray
+# icon that lives only in the session's actual theme renders as Qt's magenta and black
+# checkerboard -- fcitx5's input-keyboard-symbolic is in Adwaita and Yaru, not hicolor,
+# and looked like a broken bar. gtk3 makes Qt read the icon theme GTK is configured with
+# (Yaru-magenta, which inherits Yaru).
+#
+# Exported here rather than in the session environment on purpose: it would otherwise
+# apply to every Qt application, and this session sets QT_STYLE_OVERRIDE=kvantum, whose
+# styling the gtk3 platform theme would start arguing with. The shell is the only thing
+# that needs it.
+export QT_QPA_PLATFORMTHEME=gtk3
+
 restarts=0
 window_started=$SECONDS
 
