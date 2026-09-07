@@ -59,6 +59,31 @@ BarWidget {
     return "";
   }
 
+  // A command to run when an item is clicked and has no window to raise, keyed on id:
+  //
+  //   {"id": "tray", "commands": {"remmina-icon": "remmina"}}
+  //
+  // Some tray applications simply cannot be reached through the protocol. Remmina runs
+  // as `remmina -i` with no window, implements no Activate method, and its menu is an
+  // Ayatana one where left-click-opens-the-menu is the intended behaviour -- so the
+  // only way to its main window is to run `remmina` again, which the already-running
+  // instance answers by showing itself. Explicit configuration rather than guessing at
+  // a menu entry called something like "Open Main Window".
+  readonly property var commandMap: (widgetConfig && widgetConfig.commands) ? widgetConfig.commands : ({})
+
+  function commandFor(item) {
+    if (!item)
+      return null;
+    var id = (item.id || "").toLowerCase();
+    for (var key in commandMap) {
+      if (String(key).toLowerCase() !== id)
+        continue;
+      var value = commandMap[key];
+      return Array.isArray(value) ? value : String(value).split(" ");
+    }
+    return null;
+  }
+
   function shouldTint(item) {
     if (tintConfig === true)
       return true;
@@ -245,6 +270,13 @@ BarWidget {
             // attached and have no window of their own to raise.
             if (root.raiseApplication(trayItem.modelData))
               return;
+            // Below raising, above the menu: once the command has produced a window,
+            // later clicks take the cheaper path and simply raise it.
+            var command = root.commandFor(trayItem.modelData);
+            if (command) {
+              Quickshell.execDetached(root.launch(command));
+              return;
+            }
             if (trayItem.modelData.hasMenu) {
               menuAnchor.open();
               return;

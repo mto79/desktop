@@ -68,6 +68,9 @@
             "remmina-icon": "",
             "Fcitx": "",
             "nm-applet": ""
+          },
+          "commands": {
+            "remmina-icon": "remmina"
           }
         },
         {
