@@ -161,13 +161,29 @@ show_setup_menu() {
     desktop-launch-bluetooth
     ;;
   *Power*) show_setup_power_menu ;;
-  *Monitors*) open_in_editor ~/.config/hypr/monitors.conf ;;
+  *Monitors*) show_monitors_menu ;;
   *Keybindings*) open_in_editor ~/.config/hypr/bindings.conf ;;
   *Input*) open_in_editor ~/.config/hypr/input.conf ;;
   *Defaults*) open_in_editor ~/.config/uwsm/default ;;
   *DNS*) present_terminal desktop-setup-dns ;;
   *Config*) show_setup_config_menu ;;
   *) show_main_menu ;;
+  esac
+}
+
+show_monitors_menu() {
+  local choice current options
+  current=$(desktop-cmd-monitors-switch --current)
+  # Only layouts whose screens are actually plugged in are offered.
+  options="$(desktop-cmd-monitors-switch --list)\nAuto\nEdit generated config"
+
+  choice=$(menu "Monitors" "$options" "" "$current")
+
+  case "$choice" in
+  "") back_to show_setup_menu ;;
+  Auto) desktop-cmd-monitors-switch ;;
+  Edit*) open_in_editor ~/.config/hypr/monitors.conf ;;
+  *) desktop-cmd-monitors-switch "$choice" ;;
   esac
 }
 
@@ -314,6 +330,7 @@ go_to_menu() {
   *screenrecord*) show_screenrecord_menu ;;
   *setup*) show_setup_menu ;;
   *power*) show_setup_power_menu ;;
+  *monitor*) show_monitors_menu ;;
   *install*) show_install_menu ;;
   *remove*) show_remove_menu ;;
   *update*) show_update_menu ;;
