@@ -14,6 +14,8 @@ set -uo pipefail
 
 PROMPT="Select"
 PRESELECT=""
+WIDTH=0
+ROWS=0
 WOFI_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -24,6 +26,14 @@ while [[ $# -gt 0 ]]; do
     ;;
   --select)
     PRESELECT="$2"
+    shift 2
+    ;;
+  --width)
+    WIDTH="$2"
+    shift 2
+    ;;
+  --rows)
+    ROWS="$2"
     shift 2
     ;;
   --wofi-args)
@@ -56,7 +66,7 @@ trap 'rm -rf "$WORK"' EXIT
 
 printf '%s\n' "$OPTIONS" >"$WORK/options"
 
-if ! desktop-shell shell select "$WORK/options" "$WORK/result" "$PROMPT" "$PRESELECT" >/dev/null 2>&1; then
+if ! desktop-shell shell select "$WORK/options" "$WORK/result" "$PROMPT" "$PRESELECT" "$WIDTH" "$ROWS" >/dev/null 2>&1; then
   fall_back_to_wofi
   exit $?
 fi

@@ -31,6 +31,10 @@ Item {
   property string resultFile: ""
   property string prompt: ""
   property var items: []
+  // A caller may need a wider surface or more rows than the app list wants -- the
+  // keybindings reference is two columns of text, not a list of names.
+  property int selectWidth: 0
+  property int selectRows: 0
 
   readonly property bool selecting: resultFile !== ""
 
@@ -88,8 +92,9 @@ Item {
 
   readonly property var itemResults: {
     var needle = query.trim().toLowerCase();
+    var limit = selectRows > 0 ? selectRows : maxResults;
     var out = [];
-    for (var i = 0; i < items.length; i++) {
+    for (var i = 0; i < items.length && out.length < limit; i++) {
       var parsed = parseItem(items[i]);
       if (needle === "" || parsed.label.toLowerCase().indexOf(needle) !== -1 || parsed.sub.toLowerCase().indexOf(needle) !== -1)
         out.push(parsed);
@@ -187,7 +192,7 @@ Item {
 
   // Reading the options from a file rather than an IPC argument: a menu can be long,
   // and quoting a whole list through an argv round trip is a bug waiting to happen.
-  function selectFrom(itemsFile, resultPath, promptText, preselect) {
+  function selectFrom(itemsFile, resultPath, promptText, preselect, width, rows) {
     if (itemsFile === "" || resultPath === "")
       return false;
 
@@ -204,6 +209,8 @@ Item {
     pendingResult = resultPath;
     pendingPrompt = promptText;
     pendingPreselect = preselect;
+    selectWidth = parseInt(width, 10) || 0;
+    selectRows = parseInt(rows, 10) || 0;
     source.path = "";
     source.path = itemsFile;
     return true;
@@ -237,6 +244,8 @@ Item {
     resultFile = "";
     items = [];
     prompt = "";
+    selectWidth = 0;
+    selectRows = 0;
   }
 
   // Not FileView: assigning its path starts a read, and for a file that does not exist
@@ -342,7 +351,7 @@ Item {
     surfaceNamespace: "desktop-launcher"
 
     Rectangle {
-      width: root.surfaceWidth
+      width: (root.selecting && root.selectWidth > 0) ? root.selectWidth : root.surfaceWidth
       height: layout.implicitHeight + Style.popupPadding * 2
       radius: Style.radius
       color: Color.popupBackground

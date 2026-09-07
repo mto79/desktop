@@ -322,9 +322,38 @@ go_to_menu() {
   esac
 }
 
+# Pressing the menu key again closes an open menu, which is what `pkill wofi` used to
+# do. The shell is asked to drop the list it is showing, and the bash tree waiting on
+# that list is stopped with it -- on its own, a cancelled selection means "go back",
+# and the menu would reopen instead of closing.
+close_open_menu() {
+  local closed=1
+
+  [[ "$(desktop-shell shell closeSelect 2>/dev/null)" == "closed" ]] && closed=0
+
+  # Excluding this script's own children as well as itself: the pipeline below runs in
+  # a command-substitution subshell, which ps reports with this same command line -- so
+  # without the ppid test the guard finds itself and decides a menu was open.
+  local pids
+  pids=$(ps -eo pid,ppid,args --no-headers |
+    awk -v self="$$" '$1 != self && $2 != self && $3 == "bash" && $4 ~ /bin\/desktop-menu$/ { print $1 }')
+  if [[ -n "$pids" ]]; then
+    kill $pids 2>/dev/null
+    closed=0
+  fi
+
+  pkill -x wofi && closed=0
+
+  return $closed
+}
+
+if close_open_menu; then
+  exit 0
+fi
+
 if [[ -n "$1" ]]; then
   BACK_TO_EXIT=true
-  pkill wofi || go_to_menu "$1"
+  go_to_menu "$1"
 else
-  pkill wofi || show_main_menu
+  show_main_menu
 fi

@@ -182,11 +182,21 @@ ShellRoot {
       launcher.show();
     }
 
+    // Answers "closed" when a select was showing and has been cancelled, "none" when
+    // there was nothing to close. That distinction is what lets pressing the menu key
+    // twice close the menu, the way `pkill wofi` used to.
+    function closeSelect(): string {
+      if (!launcher.selecting)
+        return "none";
+      launcher.hide();
+      return "closed";
+    }
+
     // Select mode, the shell's dmenu. bin/desktop-menu-select writes the options to a
     // file, calls this, and blocks until the result file appears -- so a bash menu can
     // present a list without owning any UI. An empty result means cancelled.
-    function select(itemsFile: string, resultFile: string, prompt: string, preselect: string): string {
-      return launcher.selectFrom(itemsFile, resultFile, prompt, preselect) ? "ok" : "unknown";
+    function select(itemsFile: string, resultFile: string, prompt: string, preselect: string, width: string, rows: string): string {
+      return launcher.selectFrom(itemsFile, resultFile, prompt, preselect, width, rows) ? "ok" : "unknown";
     }
 
     // Health check, so a script can tell "shell is not running" from "call failed".

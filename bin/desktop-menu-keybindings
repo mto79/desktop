@@ -86,8 +86,17 @@ parse_bindings() {
 monitor_height=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true) | .height')
 menu_height=$((monitor_height * 40 / 100))
 
-pkill wofi || dynamic_bindings |
+# Same toggle as the desktop menu: a second press closes the list rather than opening
+# another one.
+if [[ "$(desktop-shell shell closeSelect 2>/dev/null)" == "closed" ]]; then
+  exit 0
+fi
+pkill -x wofi && exit 0
+
+# The list is for reading, not for picking, so the selection is discarded. The wofi
+# geometry travels along for the fallback path, where it still applies.
+dynamic_bindings |
   sort -u |
   parse_bindings |
-  #walker --dmenu --theme keybindings -p 'Keybindings'
-  wofi --dmenu -p 'Keybindings' -W 800 -H "$menu_height"
+  desktop-menu-select --prompt 'Keybindings' --width 900 --rows 16 \
+    --wofi-args "-W 800 -H $menu_height" >/dev/null
