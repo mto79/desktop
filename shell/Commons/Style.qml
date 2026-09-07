@@ -13,6 +13,10 @@ QtObject {
   property string fontFamily: "monospace"
   property int fontSize: 13
   property int iconSize: 15
+  // Tray icons are raster images from the applications, not glyphs from the bar font,
+  // and read a little smaller at the same nominal size. Its own token so the two can be
+  // balanced by eye; overridable per layout with {"id": "tray", "iconSize": 18}.
+  property int trayIconSize: 16
 
   // Bar geometry. barSize is overridden from shell.json's bar.height.
   property int barSize: 38
