@@ -5,7 +5,12 @@ set -e
 echo -e "\e[32m\nUpdate Cargo bins\e[0m"
 
 if desktop-cmd-present cargo && cargo install-update --version >/dev/null 2>&1; then
-  cargo install-update --all
+  # --locked builds each crate against the Cargo.lock its author published and tested.
+  # Without it cargo re-resolves every dependency to the newest semver-compatible
+  # version, which is how eza 0.23.5 came to compile palette 0.7.5's library against
+  # palette_derive 0.7.7's macro -- the macro emits paths into modules that version of
+  # the library does not have, and the build dies with 34 unresolved-name errors.
+  cargo install-update --all --locked
 else
   echo "cargo install-update not found, skipping"
 fi
