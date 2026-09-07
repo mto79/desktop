@@ -88,6 +88,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  CpuPanel {
+    id: cpuPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   MediaPanel {
     id: mediaPanel
 

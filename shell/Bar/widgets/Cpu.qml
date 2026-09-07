@@ -33,6 +33,13 @@ BarItem {
 
   tooltip: load === "" ? "" : usage + "% now\nload " + load
 
+  // The braille history says how busy; the panel says which threads, how hot and what
+  // is doing it.
+  panelId: "cpu"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
+
   function sample(text) {
     var line = text.split("\n")[0];
     var parts = line.trim().split(/\s+/);

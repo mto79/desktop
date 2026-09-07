@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+
+# desktop-status-cpu: package temperature and average clock, as JSON.
+#
+#   {"tempC":51.0,"freqMhz":1128}
+#
+# Read by the shell's CPU panel. It lives here rather than as a shell command embedded
+# in QML because the quoting needed to nest awk inside a QML string inside a shell
+# argument is unreadable and was, in fact, wrong the first time.
+#
+# Neither number has a fixed path. Thermal zone numbering changes between machines and
+# across boots, so the package sensor is found by its type; frequency is averaged over
+# every thread because on a hybrid part the P-cores and E-cores sit at different clocks
+# and any single core's figure is close to meaningless.
+#
+# Missing values are omitted rather than reported as zero -- a desktop with no
+# x86_pkg_temp zone should show no temperature row, not 0 degrees.
+
+set -uo pipefail
+
+temp=""
+for zone in /sys/class/thermal/thermal_zone*; do
+  [[ -r "$zone/type" ]] || continue
+  if [[ "$(<"$zone/type")" == "x86_pkg_temp" ]]; then
+    temp=$(<"$zone/temp")
+    break
+  fi
+done
+
+# k10temp on AMD, and some Intel laptops expose the package only through coretemp.
+if [[ -z "$temp" ]]; then
+  for hwmon in /sys/class/hwmon/hwmon*; do
+    [[ -r "$hwmon/name" ]] || continue
+    case "$(<"$hwmon/name")" in
+    coretemp | k10temp)
+      [[ -r "$hwmon/temp1_input" ]] && temp=$(<"$hwmon/temp1_input")
+      break
+      ;;
+    esac
+  done
+fi
+
+freq=$(awk '{ sum += $1; n++ } END { if (n) printf "%d", sum / n }' \
+  /sys/devices/system/cpu/cpu*/cpufreq/scaling_cur_freq 2>/dev/null)
+
+out="{"
+[[ -n "$temp" ]] && out+="\"tempC\":$((temp / 1000)),"
+[[ -n "$freq" ]] && out+="\"freqMhz\":$((freq / 1000)),"
+echo "${out%,}}"
