@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
+# Matched on the title, not the class: ghostty cannot set a Wayland app id, so every
+# window it opens is com.mitchellh.ghostty and a class check here is false the instant
+# the screensaver starts -- which exits it again before you ever see it.
 screensaver_in_focus() {
-  hyprctl activewindow -j | jq -e '.class == "org.desktop.screensaver"' >/dev/null 2>&1
+  hyprctl activewindow -j | jq -e '.title == "org.desktop.screensaver"' >/dev/null 2>&1
 }
 
 exit_screensaver() {
