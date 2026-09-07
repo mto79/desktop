@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# Alacritty
-touch ~/.config/alacritty/alacritty.toml
-
 # Ghostty
 if command -v ghostty >/dev/null; then
   v=$(ghostty --version | awk '/^Ghostty/{print $2}' | cut -d- -f1)

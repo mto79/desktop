@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 
-# FIXME: Find a way to make this generic where we it can work for kitty + ghostty
-
 # Exit early if we don't have the tte show
 if ! command -v tte &>/dev/null; then
   exit 1
 fi
 
-# Exit early if screensave is already running
+# Exit early if screensaver is already running. The title is on ghostty's command
+# line, so pgrep still finds it the way it found the class before.
 pgrep -f org.desktop.screensaver && exit 0
 
 # Allow screensaver to be turned off but also force started
@@ -21,8 +20,9 @@ for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
   hyprctl dispatch focusmonitor $m
 
   hyprctl dispatch exec -- \
-    alacritty --class=org.desktop.screensaver \
-    --config-file ~/.local/share/desktop/default/alacritty/screensaver.toml \
+    ghostty --title=org.desktop.screensaver \
+    --background=000000 --cursor-color=000000 \
+    --font-size=18 --background-opacity=1 \
     -e desktop-cmd-screensaver
 done
 

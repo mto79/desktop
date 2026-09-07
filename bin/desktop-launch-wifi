@@ -2,6 +2,6 @@
 
 rfkill unblock wifi
 # desktop-launch-or-focus-tui impala
-exec setsid uwsm app -- alacritty --class=Impala --title=Impala -e bash -c "~/.cargo/bin/impala"
+exec setsid uwsm app -- ghostty --title=Impala -e bash -c "~/.cargo/bin/impala"
 
-#exec setsid uwsm app -- alacritty --class=Impala -e bash -c "impala '$@'"
+#exec setsid uwsm app -- ghostty --title=Impala -e bash -c "impala '$@'"

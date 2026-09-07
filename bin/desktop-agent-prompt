@@ -34,6 +34,6 @@ fi
 # Through desktop-agent so a crash is announced, and with desktop-show-done after it so
 # the window survives the agent: an agent that exits immediately -- unauthenticated, a
 # bad flag, anything -- used to take its own error message off the screen with it.
-exec setsid uwsm app -- alacritty --class=Agent --title="$AGENT" \
-  --working-directory "$cwd" \
+exec setsid uwsm app -- ghostty --title="Agent $AGENT" \
+  --working-directory="$cwd" \
   -e bash -c 'desktop-agent "$1" "$2"; desktop-show-done' _ "$AGENT" "$PROMPT"

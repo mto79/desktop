@@ -2,4 +2,4 @@
 
 # Open the disk usage analyzer, optionally on a given filesystem.
 
-exec setsid uwsm app -- alacritty --class=Gdu --title="Disk Usage" -e desktop-gdu "${1:-/}"
+exec setsid uwsm app -- ghostty --title=Gdu -e desktop-gdu "${1:-/}"

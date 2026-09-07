@@ -311,7 +311,7 @@ Item {
     // uwsm scopes the app to its own systemd unit, the way every other launcher in
     // this checkout does it. runInTerminal entries get the terminal wrapped around
     // them, since nothing else will.
-    var command = entry.runInTerminal ? ["uwsm", "app", "--", "alacritty", "-e"].concat(entry.command) : ["uwsm", "app", "--"].concat(entry.command);
+    var command = entry.runInTerminal ? ["uwsm", "app", "--", "ghostty", "-e"].concat(entry.command) : ["uwsm", "app", "--"].concat(entry.command);
 
     Quickshell.execDetached({
       command: command,

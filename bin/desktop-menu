@@ -33,7 +33,7 @@ menu() {
 }
 
 terminal() {
-  alacritty --class=desktop -e "$@"
+  ghostty --title=Desktop -e "$@"
 }
 
 present_terminal() {
