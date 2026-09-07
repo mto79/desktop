@@ -182,9 +182,11 @@ rules = [
 	{ mime = "application/rtf",        fg = "#9ece6a" },
 	{ mime = "application/vnd.*",      fg = "#9ece6a" },
 
-	# Fallback
-	{ name = "*", fg = "#c6d0f5" },
-	{ name = "*/", fg = "#7aa2f7" }
+	# Fallback. `url` rather than `name`: yazi renamed the key, and the old spelling is
+	# not merely ignored -- it fails the whole file to parse, so the flavour was being
+	# dropped for preset settings on every launch.
+	{ url = "*", fg = "#c6d0f5" },
+	{ url = "*/", fg = "#7aa2f7" }
 ]
 
 # : }}}
