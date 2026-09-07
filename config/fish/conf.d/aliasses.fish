@@ -20,8 +20,10 @@ abbr -a vi nvim
 abbr -a vim nvim
 
 ## AI
-abbr -a c opencode
-abbr -a cx 'printf "\033[2J\033[3J\033[H" && claude --allow-dangerously-skip-permissions'
+# Through desktop-agent, which notifies when an agent stops with a non-zero status --
+# these run in tmux windows nobody is watching, so a crash otherwise goes unnoticed.
+abbr -a c 'desktop-agent opencode'
+abbr -a cx 'printf "\033[2J\033[3J\033[H" && desktop-agent claude --allow-dangerously-skip-permissions'
 
 ## Container
 abbr -a d docker
