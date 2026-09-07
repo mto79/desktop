@@ -1,76 +1,57 @@
 import QtQuick
-import Quickshell.Io
+import Quickshell.Bluetooth
 import qs.Commons
 import qs.Ui
 
-// Bluetooth power state and connected device count, polled from bluetoothctl.
+// Bluetooth power state and connected devices.
 //
-// Quickshell has no Bluez service, so this parses `bluetoothctl show` and
-// `bluetoothctl devices Connected` rather than talking to DBus directly.
+// Reads Quickshell's Bluez binding rather than polling bluetoothctl every ten seconds,
+// so the icon changes the moment a headset connects instead of up to ten seconds later
+// -- and the widget and its panel cannot disagree about what is connected. The service
+// only starts once something binds to it, which every property below does.
 BarItem {
   id: root
 
-  property bool powered: false
-  property var deviceNames: []
+  readonly property var adapter: Bluetooth.defaultAdapter
+  readonly property bool powered: adapter ? adapter.enabled : false
 
-  readonly property int connected: deviceNames.length
+  readonly property var connectedDevices: {
+    var list = Bluetooth.devices ? Bluetooth.devices.values : [];
+    var out = [];
+    for (var i = 0; i < list.length; i++)
+      if (list[i] && list[i].connected)
+        out.push(list[i]);
+    return out;
+  }
+
+  readonly property int connected: connectedDevices.length
 
   tooltip: {
+    if (!adapter)
+      return "No Bluetooth adapter";
     if (!powered)
       return "Bluetooth off";
-    return connected === 0 ? "Bluetooth on\nNothing connected" : "Bluetooth\n" + deviceNames.join("\n");
+    if (connected === 0)
+      return "Bluetooth on\nNothing connected";
+    var names = [];
+    for (var i = 0; i < connectedDevices.length; i++) {
+      var d = connectedDevices[i];
+      names.push(d.name || d.deviceName || d.address);
+    }
+    return "Bluetooth\n" + names.join("\n");
   }
 
-  command: ["desktop-launch-bluetooth"]
+  // Left click opens the panel; right click keeps bluetui one gesture away, since
+  // pairing a device that wants a passkey confirmation still needs its agent.
+  panelId: "bluetooth"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
+  rightCommand: ["desktop-launch-bluetooth"]
 
   IconLabel {
-    icon: root.powered ? "" : "󰂲"
+    icon: root.powered ? "\u{f294}" : "\u{f00b2}"
     text: root.connected > 0 ? String(root.connected) : ""
     color: root.powered ? Color.barText : Color.barMuted
-  }
-
-  Process {
-    id: showProbe
-
-    command: ["bluetoothctl", "show"]
-
-    stdout: StdioCollector {
-      onStreamFinished: root.powered = /Powered:\s*yes/.test(text)
-    }
-  }
-
-  Process {
-    id: devicesProbe
-
-    command: ["bluetoothctl", "devices", "Connected"]
-
-    stdout: StdioCollector {
-      onStreamFinished: {
-        // `Device AA:BB:CC:DD:EE:FF Some Speaker` -- everything past the address is
-        // the alias, which can itself contain spaces.
-        var names = [];
-        var lines = text.split("\n");
-        for (var i = 0; i < lines.length; i++) {
-          if (lines[i].indexOf("Device ") !== 0)
-            continue;
-          var parts = lines[i].split(" ");
-          names.push(parts.slice(2).join(" ") || parts[1]);
-        }
-        root.deviceNames = names;
-      }
-    }
-  }
-
-  Timer {
-    interval: 10000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: {
-      if (!showProbe.running)
-        showProbe.running = true;
-      if (!devicesProbe.running)
-        devicesProbe.running = true;
-    }
   }
 }
