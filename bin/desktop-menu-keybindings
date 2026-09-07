@@ -12,7 +12,17 @@
 # - Output comma-separated values that the parser can understand
 dynamic_bindings() {
   hyprctl -j binds |
-    jq -r '.[] | {modmask, key, keycode, description, dispatcher, arg} | "\(.modmask),\(.key)@\(.keycode),\(.description),\(.dispatcher),\(.arg)"' |
+    jq -r '
+      .[]
+      # Every key in a submap carries a second bind that only leaves the submap, plus a
+      # catchall doing the same. They are plumbing, not bindings anyone presses.
+      | select(.dispatcher != "submap" or .arg != "reset")
+      # A submap binding is a bare letter, which in this list would read as a global key
+      # that does not exist. Show it under the leader that reaches it instead.
+      # Keep in step with the `bindd = SUPER, D, Panels, submap, panels` in
+      # default/hypr/bindings/utilities.conf.
+      | (if .submap == "" then (.modmask | tostring) else "SUPER D then" end) as $mods
+      | "\($mods),\(.key)@\(.keycode),\(.description),\(.dispatcher),\(.arg)"' |
     sed -r \
       -e 's/null//' \
       -e 's,~/.local/share/desktop/bin/,,' \
