@@ -59,6 +59,9 @@
           }
         },
         {
+          "id": "spacer"
+        },
+        {
           "id": "bluetooth"
         },
         {
@@ -68,10 +71,16 @@
           "id": "network"
         },
         {
+          "id": "spacer"
+        },
+        {
           "id": "audio"
         },
         {
           "id": "microphone"
+        },
+        {
+          "id": "spacer"
         },
         {
           "id": "ai",
@@ -107,6 +116,9 @@
             "transcribing": "accent"
           },
           "onClick": "voxtype record toggle"
+        },
+        {
+          "id": "spacer"
         },
         {
           "id": "disk",

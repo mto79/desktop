@@ -23,6 +23,10 @@ QtObject {
   property int itemSpacing: 2
   property int itemPaddingH: 6
   property int sectionSpacing: 8
+  // The gap a bar spacer leaves between groups of widgets. Its own token rather than
+  // sectionSpacing, which sizes gaps inside popups: this one only has to beat
+  // itemPaddingH by enough that the eye reads a break, and 8 did not.
+  property int barGroupSpacing: 14
   property int radius: 0
 
   // Popup / panel geometry.

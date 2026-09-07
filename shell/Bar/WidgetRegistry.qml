@@ -16,6 +16,7 @@ QtObject {
       "clock": clock,
       "update": systemUpdate,
       "screenrecording": screenRecording,
+      "spacer": spacer,
       "tray": tray,
       "bluetooth": bluetooth,
       "media": media,
@@ -54,6 +55,10 @@ QtObject {
   }
   property Component qmlModule: Component {
     QmlModule {}
+  }
+
+  property Component spacer: Component {
+    Spacer {}
   }
 
   property Component menu: Component {
