@@ -6,6 +6,7 @@ BarWidget 1.0 BarWidget.qml
 BarItem 1.0 BarItem.qml
 IconLabel 1.0 IconLabel.qml
 PanelInput 1.0 PanelInput.qml
+PanelMeter 1.0 PanelMeter.qml
 PanelRow 1.0 PanelRow.qml
 PanelSection 1.0 PanelSection.qml
 PanelSlider 1.0 PanelSlider.qml

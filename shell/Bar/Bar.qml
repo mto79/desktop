@@ -95,6 +95,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  MemoryPanel {
+    id: memoryPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   NetworkPanel {
     id: networkPanel
 

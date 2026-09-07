@@ -18,6 +18,13 @@ BarItem {
 
   tooltip: totalGb > 0 ? usedGb.toFixed(1) + "G used of " + totalGb.toFixed(1) + "G" : ""
 
+  // The headline number is the alarming one -- it counts cache as used. The panel is
+  // where that gets broken down into what is actually spoken for.
+  panelId: "memory"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
+
   function parse(text) {
     var total = 0;
     var available = 0;
