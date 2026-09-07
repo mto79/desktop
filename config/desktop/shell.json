@@ -39,6 +39,15 @@
         { "id": "network" },
         { "id": "audio" },
         { "id": "microphone" },
+        {
+          "id": "voxtype",
+          "type": "command",
+          "exec": "desktop-status-voxtype",
+          "follow": true,
+          "icon": "\uf130",
+          "colors": { "recording": "urgent", "transcribing": "accent" },
+          "onClick": "voxtype record toggle"
+        },
         { "id": "disk", "path": "/" },
         { "id": "memory" },
         { "id": "cpu" },

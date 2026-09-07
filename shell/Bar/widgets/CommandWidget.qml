@@ -20,6 +20,10 @@ BarItem {
   // command whose arguments should not go anywhere near word splitting.
   readonly property var exec: (widgetConfig && widgetConfig.exec) ? widgetConfig.exec : ""
   readonly property int interval: (widgetConfig && widgetConfig.interval) ? widgetConfig.interval * 1000 : 5000
+  // "follow": true for a script that streams a line per change rather than printing
+  // once and exiting -- `voxtype status --follow`, `journalctl -f`, anything with a
+  // --follow of its own. Polling such a script would never see it finish.
+  readonly property bool follow: !!(widgetConfig && widgetConfig.follow)
   readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : ""
   // Class -> colour role, for a script that reports state the way waybar's CSS classes
   // did: { "colors": { "vpn-off": "muted", "critical": "urgent" } }.
@@ -44,7 +48,9 @@ BarItem {
   scrollUpCommand: shell(widgetConfig ? widgetConfig.onScrollUp : null)
   scrollDownCommand: shell(widgetConfig ? widgetConfig.onScrollDown : null)
 
-  visible: !hideWhenEmpty || label !== "" || icon !== ""
+  // The icon is decoration for the label, so it does not on its own keep an otherwise
+  // empty module on the bar.
+  visible: !hideWhenEmpty || label !== ""
   implicitWidth: visible ? content.implicitWidth + Style.itemPaddingH * 2 : 0
 
   readonly property color textColor: {
@@ -85,6 +91,7 @@ BarItem {
     state = "";
   }
 
+  // Polled: run, read everything, exit, repeat on the timer.
   Process {
     id: probe
 
@@ -97,11 +104,36 @@ BarItem {
 
   Timer {
     interval: root.interval
-    running: root.exec !== ""
+    running: root.exec !== "" && !root.follow
     repeat: true
     triggeredOnStart: true
     onTriggered: if (!probe.running)
       probe.running = true
+  }
+
+  // Followed: stay running and read a line at a time.
+  Process {
+    id: follower
+
+    command: root.shell(root.exec) || []
+    running: root.follow && root.exec !== ""
+
+    stdout: SplitParser {
+      onRead: line => root.apply(line)
+    }
+
+    // A follower that dies -- the tool it watches restarting, say -- is started again
+    // rather than leaving the module frozen on its last reading.
+    onExited: if (root.follow)
+      restart.start()
+  }
+
+  Timer {
+    id: restart
+
+    interval: 2000
+    onTriggered: if (root.follow && !follower.running)
+      follower.running = true
   }
 
   IconLabel {

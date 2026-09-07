@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# desktop-status-voxtype: Stream voxtype's state as bar-friendly JSON.
+#
+# voxtype already speaks waybar's format and can follow its own status, so this only
+# reshapes it: idle prints an empty text, which is how the bar widget knows to take no
+# space at all. A push-to-talk indicator that is visible while nothing is happening is
+# just clutter.
+#
+# setpriv's pdeathsig keeps the follower tied to this script, which is the bar's direct
+# child -- without it a crashed shell leaves `voxtype status --follow` running under the
+# user's systemd instance with nothing to report to.
+
+if ! command -v voxtype >/dev/null 2>&1; then
+  echo '{"text":"","class":"missing","tooltip":"voxtype is not installed"}'
+  exit 0
+fi
+
+setpriv --pdeathsig TERM voxtype status --follow --format json |
+  jq --unbuffered -c '{
+    text: (if (.class // "idle") == "idle" then "" else ((.alt // .class) | tostring) end),
+    class: (.class // "idle"),
+    tooltip: (.tooltip // "")
+  }'
