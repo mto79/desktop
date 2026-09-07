@@ -235,9 +235,21 @@ BarWidget {
               return;
             }
 
-            // The window first; Activate only for an item that has none.
-            if (!root.raiseApplication(trayItem.modelData))
-              trayItem.modelData.activate();
+            // Window first, then menu, then Activate.
+            //
+            // Activate is last because plenty of items do not implement it: remmina
+            // runs as `remmina -i` with no window at all and answers the call with "No
+            // such method", so a click on it did nothing whatsoever. Its menu is where
+            // "Open Main Window" lives, which is the thing you actually wanted. The
+            // same holds for nm-applet and fcitx, which are menus with an icon
+            // attached and have no window of their own to raise.
+            if (root.raiseApplication(trayItem.modelData))
+              return;
+            if (trayItem.modelData.hasMenu) {
+              menuAnchor.open();
+              return;
+            }
+            trayItem.modelData.activate();
           }
         }
 
