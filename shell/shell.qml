@@ -176,6 +176,13 @@ ShellRoot {
       return launcher.toggle() ? "open" : "closed";
     }
 
+    // Select mode, the shell's dmenu. bin/desktop-menu-select writes the options to a
+    // file, calls this, and blocks until the result file appears -- so a bash menu can
+    // present a list without owning any UI. An empty result means cancelled.
+    function select(itemsFile: string, resultFile: string, prompt: string, preselect: string): string {
+      return launcher.selectFrom(itemsFile, resultFile, prompt, preselect) ? "ok" : "unknown";
+    }
+
     // Health check, so a script can tell "shell is not running" from "call failed".
     function ping(): string {
       return "ok";

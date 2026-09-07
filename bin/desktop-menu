@@ -23,18 +23,13 @@ menu() {
   local extra="$3"
   local preselect="$4"
 
-  read -r -a args <<<"$extra"
-
-  if [[ -n "$preselect" ]]; then
-    local index
-    index=$(echo -e "$options" | grep -nxF "$preselect" | cut -d: -f1)
-    if [[ -n "$index" ]]; then
-      args+=("-a" "$index")
-    fi
-  fi
-
-  # echo -e "$options" | walker --dmenu --theme dmenu_250 -p "$prompt…" "${args[@]}"
-  echo -e "$options" | wofi --dmenu -p "$prompt…" "${args[@]}"
+  # The desktop shell draws the list. desktop-menu-select falls back to wofi by itself
+  # when the shell is not running, and takes the wofi-only flags along for that case --
+  # which is why they are still passed rather than dropped.
+  echo -e "$options" | desktop-menu-select \
+    --prompt "$prompt" \
+    ${preselect:+--select "$preselect"} \
+    ${extra:+--wofi-args "$extra"}
 }
 
 terminal() {
@@ -114,7 +109,7 @@ show_toggle_menu() {
   *Screensaver*) desktop-toggle-screensaver ;;
   *Nightlight*) desktop-toggle-nightlight ;;
   *Idle*) desktop-toggle-idle ;;
-  *Bar*) desktop-toggle-waybar ;;
+  *Bar*) desktop-toggle-bar ;;
   *) show_trigger_menu ;;
   esac
 }
@@ -188,7 +183,7 @@ show_setup_power_menu() {
 
 show_setup_config_menu() {
   # case $(menu "Setup" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n  Swayosd\n󰌧  Walker\n󰍜  Waybar\n󰞅  XCompose") in
-  case $(menu "Setup" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n󰌧  Wofi\n󰍜  Waybar\n󰞅  XCompose") in
+  case $(menu "Setup" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n󰌧  Wofi\n󰍜  Shell\n󰍜  Waybar\n󰞅  XCompose") in
   *Hyprland*) open_in_editor ~/.config/hypr/hyprland.conf ;;
   *Hypridle*) open_in_editor ~/.config/hypr/hypridle.conf && desktop-restart-hypridle ;;
   *Hyprlock*) open_in_editor ~/.config/hypr/hyprlock.conf ;;
@@ -196,6 +191,7 @@ show_setup_config_menu() {
   # *Swayosd*) open_in_editor ~/.config/swayosd/config.toml && desktop-restart-swayosd ;;
   # *Walker*) open_in_editor ~/.config/walker/config.toml && desktop-restart-walker ;;
   *Wofi*) open_in_editor ~/.config/wofi/config && desktop-restart-wofi ;;
+  *Shell*) open_in_editor ~/.config/desktop/shell.json && desktop-restart-shell ;;
   *Waybar*) open_in_editor ~/.config/waybar/config.jsonc && desktop-restart-waybar ;;
   *XCompose*) open_in_editor ~/.XCompose && desktop-restart-xcompose ;;
   *) show_main_menu ;;
@@ -245,12 +241,13 @@ show_update_menu() {
 
 show_update_process_menu() {
   # case $(menu "Restart" "  Hypridle\n  Hyprsunset\n  Swayosd\n󰌧  Walker\n󰍜  Waybar") in
-  case $(menu "Restart" "  Hypridle\n  Hyprsunset\n󰌧  Wofi\n󰍜  Waybar") in
+  case $(menu "Restart" "  Hypridle\n  Hyprsunset\n󰌧  Wofi\n󰍜  Shell\n󰍜  Waybar") in
   *Hypridle*) desktop-restart-hypridle ;;
   *Hyprsunset*) desktop-restart-hyprsunset ;;
   # *Swayosd*) desktop-restart-swayosd ;;
   # *Walker*) desktop-restart-walker ;;
   *Wofi*) desktop-restart-wofi ;;
+  *Shell*) desktop-restart-shell ;;
   *Waybar*) desktop-restart-waybar ;;
   *) show_update_menu ;;
   esac
@@ -258,7 +255,7 @@ show_update_process_menu() {
 
 show_update_config_menu() {
   # case $(menu "Use default config" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n󱣴  Plymouth\n  Swayosd\n󰌧  Walker\n󰍜  Waybar") in
-  case $(menu "Use default config" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n󱣴  Plymouth\n󰌧  Wofi\n󰍜  Waybar") in
+  case $(menu "Use default config" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n󱣴  Plymouth\n󰌧  Wofi\n󰍜  Shell\n󰍜  Waybar") in
   *Hyprland*) present_terminal desktop-refresh-hyprland ;;
   *Hypridle*) present_terminal desktop-refresh-hypridle ;;
   *Hyprlock*) present_terminal desktop-refresh-hyprlock ;;
@@ -267,6 +264,7 @@ show_update_config_menu() {
   # *Swayosd*) present_terminal desktop-refresh-swayosd ;;
   # *Walker*) present_terminal desktop-refresh-walker ;;
   *Wofi*) present_terminal desktop-refresh-wofi ;;
+  *Shell*) present_terminal desktop-refresh-shell ;;
   *Waybar*) present_terminal desktop-refresh-waybar ;;
   *) show_update_menu ;;
   esac
