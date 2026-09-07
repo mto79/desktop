@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# desktop-restart-wofi: Drop any running wofi so the next launch picks up new config.
+#
+# Unlike the other desktop-restart-* scripts this does not relaunch: wofi is not a
+# daemon, it is spawned per invocation and exits on selection. Relaunching it here
+# would pop a launcher in the user's face after a font or config change.
+
+pkill -x wofi 2>/dev/null || true

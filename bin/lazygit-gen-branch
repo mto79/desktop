@@ -1,0 +1,39 @@
+#!/bin/bash
+DESC="$1"
+TICKET="$2"
+
+if [ -z "$DESC" ]; then
+  echo "No description provided." >&2
+  exit 1
+fi
+
+if [ -n "$TICKET" ]; then
+  PROMPT="Generate a git branch name for the following work: $DESC
+Jira ticket: $TICKET
+
+Rules:
+- Format: type/ticket-short-description (e.g. feat/teaminfra-123-add-user-auth)
+- The Jira ticket must appear after the slash and before the description
+- Ticket format: teaminfra-<number> (lowercase)
+- Types: feat, fix, chore, refactor, ci, hotfix
+- Description: lowercase, hyphens only, concise (3-5 words max)
+- Output only the branch name, nothing else"
+else
+  PROMPT="Generate a git branch name for the following work: $DESC
+
+Rules:
+- Format: type/short-description (e.g. feat/add-user-auth, fix/login-timeout, chore/update-deps)
+- Types: feat, fix, chore, refactor, ci, hotfix
+- Description: lowercase, hyphens only, concise (3-5 words max)
+- Output only the branch name, nothing else"
+fi
+
+BRANCH=$(claude -p "$PROMPT")
+
+if [ -z "$BRANCH" ]; then
+  echo "No branch name generated." >&2
+  exit 1
+fi
+
+echo "Creating branch: $BRANCH"
+git checkout -b "$BRANCH"

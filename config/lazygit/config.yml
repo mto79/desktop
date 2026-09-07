@@ -1,2 +1,26 @@
 gui:
   nerdFontsVersion: "3"
+
+customCommands:
+  - key: 'C'
+    context: 'files'
+    description: 'AI commit message (Claude)'
+    command: 'lazygit-gen-commit'
+    output: terminal
+  - key: 'N'
+    context: 'localBranches'
+    description: 'AI branch name (Claude)'
+    command: 'lazygit-gen-branch "{{.Form.Desc}}" "{{.Form.Ticket}}"'
+    output: terminal
+    prompts:
+      - type: input
+        title: 'What is this branch for?'
+        key: 'Desc'
+      - type: input
+        title: 'Jira ticket (e.g. teaminfra-123, leave empty to skip)'
+        key: 'Ticket'
+  - key: 'H'
+    context: 'localBranches'
+    description: 'Housekeeping — delete merged branches'
+    command: 'lazygit-housekeeping'
+    output: terminal

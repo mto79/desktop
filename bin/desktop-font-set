@@ -20,6 +20,9 @@ if [[ -n "$font_name" && "$font_name" != "CNCLD" ]]; then
       -v "$font_name" \
       ~/.config/fontconfig/fonts.conf
 
+    # The shell renders through the fontconfig "monospace" alias edited above, but Qt
+    # resolves it once at startup, so it needs a restart to pick the new font up.
+    desktop-restart-shell
     desktop-restart-waybar
     # desktop-restart-swayosd
     # desktop-restart-walker

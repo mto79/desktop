@@ -15,6 +15,7 @@ COPR_REPOS=(
   "scottames/ghostty"          # COPR for Ghostty
   "wezfurlong/wezterm-nightly" # COPR for wezterm
   "kylegospo/grub-btrfs"       # COPR for grub-btrfs
+  "errornointernet/quickshell" # COPR for Quickshell (not in Fedora repos)
 )
 
 # Loop through array and enable each repo

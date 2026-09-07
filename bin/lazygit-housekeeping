@@ -1,0 +1,30 @@
+#!/bin/bash
+echo "Fetching and pruning remote refs..."
+git fetch --prune
+
+GONE=$(git branch -vv | grep ': gone]' | awk '{print $1}')
+
+if [ -z "$GONE" ]; then
+  echo ""
+  echo "Nothing to clean up — no branches with a deleted remote."
+  read -rp "Press Enter to return..."
+  exit 0
+fi
+
+echo ""
+echo "Branches to delete (remote is gone):"
+echo "$GONE" | sed 's/^/  /'
+echo ""
+read -rp "Delete these branches, switch to main and pull? [y/N] " CONFIRM
+
+if [[ "$CONFIRM" =~ ^[Yy]$ ]]; then
+  echo "$GONE" | xargs git branch -D
+  git checkout main
+  git pull
+  echo ""
+  echo "Done."
+else
+  echo "Aborted."
+fi
+
+read -rp "Press Enter to return to lazygit..."

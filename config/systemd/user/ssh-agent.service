@@ -1,0 +1,30 @@
+# A single ssh-agent for the whole user session.
+#
+# Started before the graphical session, so Hyprland and everything it launches
+# -- KeePassXC's SSH agent integration in particular -- inherit SSH_AUTH_SOCK
+# from the systemd user manager. A fish-only `set -Ux` never reached them.
+#
+# The socket lives in $XDG_RUNTIME_DIR (tmpfs, wiped at logout), so a dead
+# agent can never leave a stale socket file behind for the next login.
+
+[Unit]
+Description=SSH key agent
+Documentation=man:ssh-agent(1)
+
+# KeePassXC decides whether an agent exists by stat-ing the socket file, so if
+# it autostarts before this unit has created the socket it reports "No agent
+# running, cannot list identities." and does not retry. The Hyprland session is
+# ordered After=graphical-session-pre.target, so getting in before that target
+# guarantees the socket is there when the desktop starts.
+Before=graphical-session-pre.target
+
+[Service]
+Type=simple
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+ExecStart=/usr/bin/ssh-agent -D -a $SSH_AUTH_SOCK
+Restart=on-failure
+
+[Install]
+# default.target covers non-graphical logins; graphical-session-pre.target is
+# what the Before= above needs in order to apply.
+WantedBy=default.target graphical-session-pre.target

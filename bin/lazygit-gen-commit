@@ -1,0 +1,8 @@
+#!/bin/bash
+MSG=$(claude -p "$(cat ~/.claude/commands/gen-commit-msg.md)")
+if [ -z "$MSG" ]; then
+  echo "No commit message generated." >&2
+  exit 1
+fi
+echo "Generated: $MSG"
+git commit -m "$MSG"
