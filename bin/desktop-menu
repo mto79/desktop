@@ -305,8 +305,7 @@ show_main_menu() {
 
 go_to_menu() {
   case "${1,,}" in
-  #*apps*) walker -p "Launch…" ;;
-  *apps*) wofi --show drun -p "Launch…" ;;
+  *apps*) desktop-shell shell openLauncher >/dev/null 2>&1 || wofi --show drun -p "Launch…" ;;
   *learn*) show_learn_menu ;;
   *trigger*) show_trigger_menu ;;
   *style*) show_style_menu ;;

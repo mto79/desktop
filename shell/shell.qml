@@ -176,6 +176,12 @@ ShellRoot {
       return launcher.toggle() ? "open" : "closed";
     }
 
+    // Always opens. The desktop menu's Apps row means "show me the launcher", where a
+    // toggle would close one that is already up.
+    function openLauncher(): void {
+      launcher.show();
+    }
+
     // Select mode, the shell's dmenu. bin/desktop-menu-select writes the options to a
     // file, calls this, and blocks until the result file appears -- so a bash menu can
     // present a list without owning any UI. An empty result means cancelled.
