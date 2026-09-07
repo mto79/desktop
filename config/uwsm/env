@@ -2,7 +2,12 @@
 
 # Ensure Desktop bins are in the path
 export DESKTOP_PATH=$HOME/.local/share/desktop
-export PATH=$DESKTOP_PATH/bin/:$PATH
+# ~/.local/bin and ~/.cargo/bin are where user-installed tools land. The interactive
+# shell adds them itself, so anything typed in a terminal works -- and anything the
+# desktop starts did not: claude lives in ~/.local/bin and impala in ~/.cargo/bin,
+# which is why scripts here had to hard-code those paths and why SUPER+A reported
+# "claude: command not found".
+export PATH=$DESKTOP_PATH/bin/:$HOME/.local/bin:$HOME/.cargo/bin:$PATH
 
 # Set default terminal and editor
 source ~/.config/uwsm/default

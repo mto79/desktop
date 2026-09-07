@@ -11,8 +11,27 @@
 
 set -uo pipefail
 
+# Hyprland's environment is fixed when the session starts, so a keybinding launched
+# today still has the PATH the session was born with -- no ~/.local/bin, where claude
+# lives, and no ~/.cargo/bin. config/uwsm/env fixes that for the next login; this makes
+# the wrapper work now, and keeps it working when it is called from somewhere odd.
+case ":$PATH:" in
+*":$HOME/.local/bin:"*) ;;
+*) PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH" ;;
+esac
+
 AGENT="${1:?usage: desktop-agent <claude|opencode> [args...]}"
 shift
+
+# A wrapper that is started by the desktop rather than by a shell cannot assume the
+# shell's PATH. Saying which agent is missing beats bash's "command not found" arriving
+# in a window that is about to close.
+if ! command -v "$AGENT" >/dev/null 2>&1; then
+  message="$AGENT is not on PATH ($PATH)"
+  echo "desktop-agent: $message" >&2
+  notify-send -u critical "Cannot start $AGENT" "$message"
+  exit 127
+fi
 
 "$AGENT" "$@"
 code=$?
