@@ -1,17 +1,45 @@
 #!/usr/bin/env bash
 
+# desktop-cmd-screenshot: capture and hand the result to satty for annotation.
+#
+#   desktop-cmd-screenshot          # region
+#   desktop-cmd-screenshot window
+#   desktop-cmd-screenshot output
+#
+# Pressing the key again while the picker is up cancels it, which is what you want when
+# you change your mind mid-selection.
+
+set -uo pipefail
+
 [[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
 OUTPUT_DIR="${DESKTOP_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}}"
 
-if [[ ! -d "$OUTPUT_DIR" ]]; then
-  notify-send "Screenshot directory does not exist: $OUTPUT_DIR" -u critical -t 3000
+# Created rather than refused: a missing Pictures directory is not a reason to lose the
+# screenshot someone is in the middle of taking.
+if [[ ! -d "$OUTPUT_DIR" ]] && ! mkdir -p "$OUTPUT_DIR"; then
+  notify-send -u critical "Screenshot" "Cannot create $OUTPUT_DIR"
   exit 1
 fi
 
-pkill slurp || hyprshot -m ${1:-region} --raw |
+# A picker is already up, so this press is the cancel.
+pkill -x slurp && exit 0
+
+FILE="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
+
+# --freeze holds the screen still while you select, so the capture is what you pointed
+# at rather than whatever moved while you were pointing. --silent because the
+# notification belongs at the end of this script, once satty has actually written
+# something.
+hyprshot -m "${1:-region}" --freeze --silent --raw |
   satty --filename - \
-    --output-filename "$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png" \
+    --output-filename "$FILE" \
     --early-exit \
     --actions-on-enter save-to-clipboard \
     --save-after-copy \
     --copy-command 'wl-copy'
+
+# satty exits without writing when the shot is discarded, so the file is the only
+# honest signal that there is a screenshot to talk about.
+if [[ -f "$FILE" ]]; then
+  notify-send "Screenshot saved" "$(basename "$FILE") - copied to clipboard" -t 3000
+fi
