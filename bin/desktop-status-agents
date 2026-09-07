@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+# desktop-status-agents: report running AI coding sessions as bar-friendly JSON.
+#
+# Claude Code and OpenCode only, which is what this desktop actually runs. The count is
+# of processes, so two sessions in two tmux windows read as two -- which is the number
+# worth knowing when you are wondering what is still working in the background.
+
+set -uo pipefail
+
+names=""
+total=0
+
+for tool in claude opencode; do
+  count=$(pgrep -x -c "$tool" 2>/dev/null || true)
+  count=${count:-0}
+  ((count > 0)) || continue
+  total=$((total + count))
+  names+="$count $tool"$'\n'
+done
+
+if ((total == 0)); then
+  echo '{"text":"","class":"idle","tooltip":"No agents running"}'
+  exit 0
+fi
+
+summary=$(printf '%s' "$names" | paste -sd', ' -)
+printf '{"text":"%s","class":"busy","tooltip":"%s"}\n' "$total" "$summary"

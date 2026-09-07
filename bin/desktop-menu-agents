@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# desktop-menu-agents: show the running AI sessions and where they are working.
+#
+# A reference list rather than a picker -- what you want from the bar is "which project
+# is that one in", and the answer is the process's working directory.
+
+set -uo pipefail
+
+lines=""
+
+for pid in $(pgrep -x claude 2>/dev/null) $(pgrep -x opencode 2>/dev/null); do
+  cwd=$(readlink /proc/"$pid"/cwd 2>/dev/null) || continue
+  tool=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+  lines+="$(printf '%-9s %s' "$tool" "${cwd/#$HOME/~}")"$'\n'
+done
+
+[[ -n "$lines" ]] || lines="No agent sessions running"$'\n'
+
+printf '%s' "$lines" | desktop-menu-select --prompt "Agents" --width 700 --rows 12 >/dev/null

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+# desktop-cmd-camera: see and control what can reach the camera.
+#
+#   desktop-cmd-camera status   # who is using it, or nothing
+#   desktop-cmd-camera block    # unload the USB webcam driver
+#   desktop-cmd-camera allow    # load it again
+#
+# Blocking unloads uvcvideo, which is the USB webcam only -- the built-in MIPI camera
+# is driven by the intel_ipu6 stack and is not affected. Both need root, so they are
+# meant to be run from a terminal where the sudo prompt is visible.
+
+set -uo pipefail
+
+case "${1:-status}" in
+status)
+  users=$(fuser -v /dev/video* 2>&1 | tail -n +2)
+  if [[ -z "$users" ]]; then
+    echo "Nothing is using the camera."
+  else
+    echo "$users"
+  fi
+  ;;
+block)
+  echo "Unloading uvcvideo (USB webcam)..."
+  sudo modprobe -r uvcvideo && notify-send "Camera" "USB webcam blocked"
+  ;;
+allow)
+  echo "Loading uvcvideo (USB webcam)..."
+  sudo modprobe uvcvideo && notify-send "Camera" "USB webcam available again"
+  ;;
+*)
+  echo "usage: desktop-cmd-camera [status|block|allow]" >&2
+  exit 2
+  ;;
+esac

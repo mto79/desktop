@@ -22,36 +22,98 @@
     "centerAnchor": "clock",
     "layout": {
       "left": [
-        { "id": "menu" },
-        { "id": "workspaces" },
-        { "id": "window" }
+        {
+          "id": "menu"
+        },
+        {
+          "id": "workspaces"
+        },
+        {
+          "id": "window"
+        }
       ],
       "center": [
-        { "id": "media" },
-        { "id": "clock", "format": "ddd dd HH:mm:ss", "firstDay": "monday" },
-        { "id": "update" },
-        { "id": "screenrecording" }
+        {
+          "id": "media"
+        },
+        {
+          "id": "clock",
+          "format": "ddd dd HH:mm:ss",
+          "firstDay": "monday"
+        },
+        {
+          "id": "update"
+        },
+        {
+          "id": "screenrecording"
+        }
       ],
       "right": [
-        { "id": "tray" },
-        { "id": "bluetooth" },
-        { "id": "vpn" },
-        { "id": "network" },
-        { "id": "audio" },
-        { "id": "microphone" },
+        {
+          "id": "tray"
+        },
+        {
+          "id": "bluetooth"
+        },
+        {
+          "id": "vpn"
+        },
+        {
+          "id": "network"
+        },
+        {
+          "id": "audio"
+        },
+        {
+          "id": "microphone"
+        },
+        {
+          "id": "agents",
+          "type": "command",
+          "exec": "desktop-status-agents",
+          "interval": 5,
+          "icon": "󰚩",
+          "colors": {
+            "busy": "accent"
+          },
+          "onClick": "desktop-menu agents"
+        },
+        {
+          "id": "camera",
+          "type": "command",
+          "exec": "desktop-status-camera",
+          "interval": 3,
+          "icon": "",
+          "colors": {
+            "on": "urgent"
+          },
+          "onClick": "desktop-menu camera"
+        },
         {
           "id": "voxtype",
           "type": "command",
           "exec": "desktop-status-voxtype",
           "follow": true,
-          "icon": "\uf130",
-          "colors": { "recording": "urgent", "transcribing": "accent" },
+          "icon": "",
+          "colors": {
+            "recording": "urgent",
+            "transcribing": "accent"
+          },
           "onClick": "voxtype record toggle"
         },
-        { "id": "disk", "path": "/" },
-        { "id": "memory" },
-        { "id": "cpu" },
-        { "id": "battery" }
+        {
+          "id": "disk",
+          "path": "/"
+        },
+        {
+          "id": "memory"
+        },
+        {
+          "id": "cpu"
+        },
+        {
+          "id": "battery"
+        }
       ]
     }
   }

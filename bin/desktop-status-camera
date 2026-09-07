@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+
+# desktop-status-camera: report camera use as bar-friendly JSON.
+#
+# "In use" means a process other than the audio/video daemons holds a /dev/video*
+# device open. wireplumber keeps one open permanently so PipeWire can offer the camera
+# to applications -- counting that would light the indicator forever.
+#
+# The caveat that comes with it: an application that reaches the camera *through*
+# PipeWire rather than opening the device itself is not visible here.
+
+holders=""
+
+for pid in $(fuser /dev/video* 2>/dev/null); do
+  comm=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
+  case "$comm" in
+  wireplumber | pipewire* | "") continue ;;
+  esac
+  holders+="$comm"$'\n'
+done
+
+names=$(printf '%s' "$holders" | sort -u | paste -sd', ' -)
+
+if [[ -z "$names" ]]; then
+  echo '{"text":"","class":"off","tooltip":"Camera idle"}'
+else
+  printf '{"text":"cam","class":"on","tooltip":"Camera in use by %s"}\n' "$names"
+fi
