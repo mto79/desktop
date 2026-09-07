@@ -34,4 +34,17 @@ if status is-interactive
         case '*'
             echo "⚠️  SSH agent unreachable at $SSH_AUTH_SOCK"
     end
+
+    # Shell history in SQLite instead of a flat file: full-text search over every
+    # command, with the directory, exit code and duration it ran with. Ctrl+R opens it.
+    #
+    # Up-arrow is deliberately left alone. Atuin binds it by default to the same search
+    # scoped to this session, but fish's own prefix search is muscle memory worth more
+    # than the consistency -- drop --disable-up-arrow to hand it over.
+    #
+    # Local-only: nothing is uploaded and no account exists unless `atuin register` is
+    # run deliberately. The database lives in ~/.local/share/atuin.
+    if type -q atuin
+        atuin init fish --disable-up-arrow | source
+    end
 end
