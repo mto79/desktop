@@ -65,4 +65,21 @@ else:
 sys.exit(1 if fails else 0)
 PY
 [[ $? -eq 0 ]] || fail "shell wiring"
+
+# The shell draws notifications, so it has to own the bus name. mako takes it by D-Bus
+# activation if any notification arrives before the shell registers, and then keeps it
+# for the session: the shell looks fine and silently shows nothing. Checked live because
+# nothing static can see it -- the squatter is a running process, not a line in a file.
+if pgrep -x quickshell >/dev/null && have busctl; then
+  owner=$(busctl --user status org.freedesktop.Notifications 2>/dev/null |
+    sed -n 's/^Comm=//p')
+  case $owner in
+    quickshell) pass "the shell owns the notification bus" ;;
+    "") fail "the shell owns the notification bus" "nobody owns org.freedesktop.Notifications" ;;
+    *) fail "the shell owns the notification bus" \
+      "$owner holds it — run desktop-restart-shell" ;;
+  esac
+else
+  pass "skipped, no running shell to check the notification bus against"
+fi
 finish

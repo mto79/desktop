@@ -53,6 +53,35 @@ fi
 # that needs it.
 export QT_QPA_PLATFORMTHEME=gtk3
 
+# mako claims org.freedesktop.Notifications through D-Bus activation, not through a
+# unit anyone enabled: its service file names the bus directly, so the first
+# notification that arrives before the shell has registered starts it, and it then holds
+# the bus for the rest of the session. The shell comes up otherwise healthy, logs one
+# line about the name already being taken, and quietly draws none of the notifications.
+#
+# desktop-restart-shell already retires the fallback once the shell answers IPC. The
+# login path needs the same and did not have it, which is the difference between a
+# restarted session and a fresh one. Quickshell re-registers by itself the moment the
+# name is released, so killing the squatter is the whole fix.
+#
+# Masking mako.service would look like the tidier answer and is not: uwsm app -- mako
+# cannot start a masked unit, so it would disarm the fallback below at the same time.
+#
+# Bounded, and started once rather than per restart: the fallback deliberately runs mako
+# when the shell will not stay up, and a waiter still polling then would kill the very
+# thing that was just started to cover for it.
+retire_fallback() {
+  for _ in $(seq 40); do
+    if timeout 1 quickshell ipc -p "$SHELL_PATH" call -- shell ping >/dev/null 2>&1; then
+      pkill -x waybar
+      pkill -x mako
+      return
+    fi
+    sleep 0.25
+  done
+}
+retire_fallback &
+
 restarts=0
 window_started=$SECONDS
 
