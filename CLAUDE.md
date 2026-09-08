@@ -46,7 +46,11 @@ Commit messages follow Conventional Commits and explain **why**, not what — th
 already says what. Look at recent history for the register; it is closer to prose than
 to changelog lines.
 
-Verify changes in the running system, not by reasoning about them. The shell, the window
+Run `./test/all` before finishing. It is plain bash, needs no compositor, and takes a
+second; every check in it exists because something once broke. Add a case when you fix a
+bug — that is what stops it coming back.
+
+Verify changes in the running system too, not by reasoning about them. The shell, the window
 rules and the launchers all have ways to be checked cheaply — see the `shell-dev`,
 `visual-verification` and `install-scripts` skills.
 

@@ -65,6 +65,13 @@ still launch through alacritty, which would break the moment it is uninstalled.
 Make them idempotent and safe to re-run: they are marked done on success, but a skipped
 or failed one can be retried.
 
+## Tests
+
+`./test/all` covers this area: `install-test.sh` checks that every command `bin/` calls
+is in the package list, that no packaging script is left unsourced, and that `all.sh`
+names only files that exist. Adding a dependency without adding it to the package list
+fails the suite.
+
 ## Testing install changes without installing
 
 Most of these scripts want sudo and change the system. Verify the parts you can:

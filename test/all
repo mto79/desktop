@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Run every test. Each file runs even when an earlier one fails, so one broken thing
+# cannot hide the rest.
+
+set -uo pipefail
+
+ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+
+failed=()
+for test in "$ROOT"/test/*-test.sh; do
+  name=$(basename "$test")
+  printf '\n==> %s\n' "$name"
+  bash "$test" || failed+=("$name")
+done
+
+printf '\n'
+if ((${#failed[@]} > 0)); then
+  printf '%d suite(s) failed:\n' "${#failed[@]}" >&2
+  printf '  %s\n' "${failed[@]}" >&2
+  exit 1
+fi
+printf 'all suites passed\n'
