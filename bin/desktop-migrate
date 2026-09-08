@@ -7,6 +7,12 @@ mkdir -p "$STATE_DIR"
 # Skipped migrations are tracked separately
 mkdir -p "$STATE_DIR/skipped"
 
+# An unmatched glob otherwise expands to itself, so an empty migrations directory hands
+# the loop the literal string "*.sh" -- which bash then tries to run, fails, and offers
+# to mark as skipped. Machines built before the first migration existed still carry the
+# empty "*.sh" marker that left behind.
+shopt -s nullglob
+
 # Run any pending migrations
 for file in ~/.local/share/desktop/migrations/*.sh; do
   filename=$(basename "$file")
