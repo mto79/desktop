@@ -4,11 +4,6 @@ echo "Enabling COPR Repos"
 
 # Array of COPR repos to enable
 COPR_REPOS=(
-  # NOTE: solopasha builds for rawhide only since Nov 2025 -- the fedora-43 chroot is
-  # gone from the backend, so this repo resolves to nothing here and every hypr* package
-  # already installed from it is frozen. Left enabled because skip_if_unavailable makes
-  # it harmless, but the Hyprland stack needs a new source before the next Fedora bump.
-  "solopasha/hyprland"         # COPR for USWM and Hyprland packages
   "jdxcode/mise"               # COPR for mise
   "atim/starship"              # COPR for starship
   "lihaohong/yazi"             # COPR for yazi
@@ -23,15 +18,30 @@ for repo in "${COPR_REPOS[@]}"; do
   sudo dnf copr enable -y "$repo"
 done
 
-# hyprpolkitagent is not packaged in Fedora and solopasha no longer builds it here, but
-# it is what default/hypr/autostart.conf enables -- without it nothing draws a polkit
-# prompt and KeePassXC's fingerprint unlock is asked of an agent that is not there.
+# The Hyprland stack lives here now. solopasha, which built it until Nov 2025, has no
+# chroot for any released Fedora any more -- so this is not a preference, it is the only
+# maintained source. It carries Hyprland itself, which is the point: the compositor was
+# frozen at 0.51.1 with no security or bug fixes.
 #
-# This project also ships Hyprland itself, several releases ahead of what is installed,
-# and an hyprland-guiutils that links against libhyprutils.so.13 while the running
-# compositor needs .so.9; letting either in would leave a session that will not start.
-# includepkgs is what holds the repo to the two packages we actually came for.
-echo "Enabling COPR repo: hermitfeather/hyprland-dev (hyprpolkitagent only)"
+# Still pinned with includepkgs rather than left open. The repo also ships packages that
+# would shadow Fedora's own (hyprlang, hyprutils and friends exist in both), and an
+# unpinned dev repo deciding to replace something unrelated is exactly the failure this
+# desktop cannot absorb. Add a name here deliberately when it is needed.
+HYPR_PACKAGES=(
+  aquamarine hypridle hyprcursor hyprgraphics hyprland hyprland-guiutils
+  hyprland-qt-support hyprland-uwsm hyprlang hyprlock hyprpicker hyprpolkitagent
+  hyprshot hyprsunset hyprtoolkit hyprutils uwsm xdg-desktop-portal-hyprland
+)
+
+echo "Enabling COPR repo: hermitfeather/hyprland-dev (the Hyprland stack)"
 sudo dnf copr enable -y hermitfeather/hyprland-dev
 sudo dnf config-manager setopt \
-  "copr:copr.fedorainfracloud.org:hermitfeather:hyprland-dev.includepkgs=hyprpolkitagent,hyprland-qt-support"
+  "copr:copr.fedorainfracloud.org:hermitfeather:hyprland-dev.includepkgs=$(
+    IFS=,; echo "${HYPR_PACKAGES[*]}")"
+
+# satty is the one thing hermitfeather does not build. It is the screenshot annotator
+# desktop-cmd-screenshot pipes into, so without it every screenshot fails silently.
+echo "Enabling COPR repo: mineiro/satty"
+sudo dnf copr enable -y mineiro/satty
+sudo dnf config-manager setopt \
+  "copr:copr.fedorainfracloud.org:mineiro:satty.includepkgs=satty"
