@@ -150,6 +150,41 @@ Item {
     readonly property color accentColor: root.accent(notification.urgency)
     readonly property int timeout: root.timeoutFor(notification)
 
+    // Chromium names itself, not the site. A Mattermost message arrives as
+    //
+    //   app_name "Brave"  summary "Direct Message"
+    //   body     "chat.nationaalarchief.nl\n\n@ivo: ..."
+    //
+    // so the header read "Brave" for every tab that has ever asked for permission, and
+    // the one thing identifying the sender was buried in the first line of the body.
+    // Lift it out: the origin becomes the sender, and the body keeps only the message.
+    readonly property bool fromBrowser: {
+      var entry = String(notification.desktopEntry || "").toLowerCase();
+      return entry.indexOf("brave") !== -1 || entry.indexOf("chrom") !== -1 || entry.indexOf("firefox") !== -1;
+    }
+
+    // Split only on something that looks like a host: one line, no spaces, at least one
+    // dot, followed by a blank line. A body that merely opens with a short sentence is
+    // left alone.
+    readonly property var originSplit: {
+      if (!fromBrowser)
+        return null;
+      var body = String(notification.body || "");
+      var brk = body.indexOf("\n\n");
+      if (brk <= 0)
+        return null;
+      var head = body.slice(0, brk).trim();
+      if (head === "" || head.indexOf(" ") !== -1 || head.indexOf(".") === -1)
+        return null;
+      return {
+        origin: head,
+        rest: body.slice(brk + 2).trim()
+      };
+    }
+
+    readonly property string senderLabel: originSplit ? originSplit.origin : (notification.appName || "Notification")
+    readonly property string bodyText: originSplit ? originSplit.rest : notification.body
+
     width: root.toastWidth
     height: layout.implicitHeight + 20
     radius: Style.radius
@@ -214,7 +249,7 @@ Item {
 
       Text {
         width: parent.width
-        text: toast.notification.appName || "Notification"
+        text: toast.senderLabel
         color: toast.accentColor
         font.family: Style.fontFamily
         font.pixelSize: Style.fontSize - 3
@@ -238,8 +273,8 @@ Item {
 
       Text {
         width: parent.width
-        visible: toast.notification.body !== ""
-        text: toast.notification.body
+        visible: toast.bodyText !== ""
+        text: toast.bodyText
         // Senders may send Pango markup; StyledText renders the subset Qt knows and
         // ignores the rest, which beats printing tags at the reader.
         textFormat: Text.StyledText
