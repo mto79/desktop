@@ -18,30 +18,37 @@ for repo in "${COPR_REPOS[@]}"; do
   sudo dnf copr enable -y "$repo"
 done
 
-# The Hyprland stack lives here now. solopasha, which built it until Nov 2025, has no
-# chroot for any released Fedora any more -- so this is not a preference, it is the only
-# maintained source. It carries Hyprland itself, which is the point: the compositor was
-# frozen at 0.51.1 with no security or bug fixes.
+# The Hyprland stack. solopasha stopped building for released Fedora in Nov 2025, which
+# left the compositor frozen at 0.51.1 with nothing to upgrade to.
 #
-# Still pinned with includepkgs rather than left open. The repo also ships packages that
-# would shadow Fedora's own (hyprlang, hyprutils and friends exist in both), and an
-# unpinned dev repo deciding to replace something unrelated is exactly the failure this
-# desktop cannot absorb. Add a name here deliberately when it is needed.
+# mineiro rather than the more obvious hermitfeather, for a reason worth recording:
+# hermitfeather ships only the newest build of each library, so its own hyprland cannot
+# be installed -- 0.55.2 wants libaquamarine.so.10 and libhyprutils.so.12 while the repo
+# carries only aquamarine 0.14.0 and hyprutils 0.14.1. Its f44 branch is fine; its f43
+# branch is not. mineiro keeps every library version alongside every compositor version,
+# so each hyprland finds the sonames it was built against. It also builds satty, which
+# hermitfeather does not.
+#
+# Pinned with includepkgs. The repo carries far more than this desktop wants, and a dev
+# repo quietly replacing something unrelated is exactly the failure this cannot absorb.
+#
+# The list is a dependency closure, not a wishlist: a package missing from it is
+# "filtered out by exclude filtering" and dnf reports only that it cannot install the
+# compositor, without naming the pin as the cause. hyprwire was the one that bit --
+# Hyprland grew a dependency on it at 0.53. Derive the list with repoquery --requires
+# rather than guessing when the stack moves again.
 HYPR_PACKAGES=(
   aquamarine hypridle hyprcursor hyprgraphics hyprland hyprland-guiutils
   hyprland-qt-support hyprland-uwsm hyprlang hyprlock hyprpicker hyprpolkitagent
-  hyprshot hyprsunset hyprtoolkit hyprutils uwsm xdg-desktop-portal-hyprland
+  hyprshot hyprsunset hyprtoolkit hyprutils hyprwire satty uwsm
+  xdg-desktop-portal-hyprland
 )
 
-echo "Enabling COPR repo: hermitfeather/hyprland-dev (the Hyprland stack)"
-sudo dnf copr enable -y hermitfeather/hyprland-dev
+echo "Enabling COPR repo: mineiro/hyprland (the Hyprland stack)"
+sudo dnf copr enable -y mineiro/hyprland
+# setopt writes to /etc/dnf/repos.override.d/99-config_manager.repo, not to the .repo
+# file copr enable manages, so the two do not fight and the pin survives a re-enable.
+# It still has to come second: the repo must exist before it can be configured.
 sudo dnf config-manager setopt \
-  "copr:copr.fedorainfracloud.org:hermitfeather:hyprland-dev.includepkgs=$(
+  "copr:copr.fedorainfracloud.org:mineiro:hyprland.includepkgs=$(
     IFS=,; echo "${HYPR_PACKAGES[*]}")"
-
-# satty is the one thing hermitfeather does not build. It is the screenshot annotator
-# desktop-cmd-screenshot pipes into, so without it every screenshot fails silently.
-echo "Enabling COPR repo: mineiro/satty"
-sudo dnf copr enable -y mineiro/satty
-sudo dnf config-manager setopt \
-  "copr:copr.fedorainfracloud.org:mineiro:satty.includepkgs=satty"

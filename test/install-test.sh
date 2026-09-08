@@ -63,4 +63,63 @@ while read -r b; do
   [[ -f "$ROOT/install/packaging/$b" ]] || gone+=("$b")
 done < <(grep -oP '^\s*source "\$DESKTOP_INSTALL/packaging/\K[^"]+' "$all")
 if ((${#gone[@]} == 0)); then pass "all.sh sources only files that exist"; else fail "all.sh sources only files that exist" "${gone[*]}"; fi
+
+# The Hyprland copr is pinned with includepkgs, so a package the install list wants but
+# the pin omits is "filtered out by exclude filtering" -- dnf then refuses the whole
+# transaction without ever naming the pin as the cause. hyprwire cost an evening this
+# way. Every hypr* package we ask for, plus satty, has to be in the pin.
+copr="$ROOT/install/preflight/copr.sh"
+pinned=$(sed -n '/^HYPR_PACKAGES=(/,/^)/p' "$copr" | sed '1d;$d' | tr ' \n' '\n\n')
+unpinned=()
+while read -r pkg; do
+  printf '%s\n' "$pinned" | grep -qxF "$pkg" || unpinned+=("$pkg")
+done < <(grep -hE '^(hypr|satty$)' "$ROOT"/install/*.packages | sort -u)
+if ((${#unpinned[@]} == 0)); then
+  pass "every Hyprland package we install is allowed by the copr pin"
+else
+  fail "every Hyprland package we install is allowed by the copr pin" \
+    "${unpinned[*]} — add to HYPR_PACKAGES in install/preflight/copr.sh"
+fi
+
+# The list above only covers what we ask for by name; the pin also has to cover what
+# those packages drag in, and that is where hyprwire hid. dnf knows which repo each
+# installed package came from, so on a machine that already runs this stack the real
+# closure can be read back and checked. Offline, and skipped elsewhere.
+if have dnf; then
+  missing=()
+  while read -r pkg; do
+    [[ -n $pkg ]] || continue
+    printf '%s\n' "$pinned" | grep -qxF "$pkg" || missing+=("$pkg")
+  done < <(dnf repoquery -q --installed --qf '%{name} %{from_repo}\n' 2>/dev/null \
+    | awk '$2 ~ /mineiro:hyprland/ {print $1}')
+  if ((${#missing[@]} == 0)); then
+    pass "the copr pin covers everything actually installed from it"
+  else
+    fail "the copr pin covers everything actually installed from it" \
+      "${missing[*]} — a reinstall would fail with 'filtered out by exclude filtering'"
+  fi
+else
+  pass "skipped, dnf not present"
+fi
+
+# And the pin copr.sh intends has to be the pin the machine actually has. It was not:
+# the repo got enabled by hand during the 0.56 upgrade and went unpinned for a day.
+# Note the location -- dnf5 setopt writes to repos.override.d, never to the .repo file,
+# so grepping /etc/yum.repos.d for includepkgs reports "unset" even when it is set.
+override=/etc/dnf/repos.override.d/99-config_manager.repo
+repoid=$(grep -oP '\bcopr:[A-Za-z0-9_.:@-]+(?=\.includepkgs)' "$copr" | head -1)
+if [[ -f $override && -n $repoid ]]; then
+  live=$(sed -n "\|^\[$repoid\]|,/^\[/p" "$override" | grep -m1 '^includepkgs=' | cut -d= -f2-)
+  want=$(printf '%s\n' "$pinned" | grep -v '^$' | sort | paste -sd,)
+  got=$(printf '%s\n' "${live//,/$'\n'}" | grep -v '^$' | sort | paste -sd,)
+  if [[ -z $live ]]; then
+    fail "the live copr pin matches copr.sh" "$repoid has no includepkgs — re-run install/preflight/copr.sh"
+  elif [[ $want == "$got" ]]; then
+    pass "the live copr pin matches copr.sh"
+  else
+    fail "the live copr pin matches copr.sh" "drifted — re-run install/preflight/copr.sh"
+  fi
+else
+  pass "skipped, no dnf repo overrides on this machine"
+fi
 finish
