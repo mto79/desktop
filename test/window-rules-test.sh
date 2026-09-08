@@ -45,4 +45,39 @@ else:
 sys.exit(1 if fails else 0)
 PY
 [[ $? -eq 0 ]] || fail "launcher titles are covered by window rules"
+
+# Hyprland 0.53 rewrote the rule syntax: matchers became `match:prop value` and every
+# effect needs an explicit value, so a bare `float` or a `class:foo` is now a parse
+# error rather than a deprecation warning.
+stale=$(grep -rhn "^\s*\(windowrule\|layerrule\)" "$ROOT/default/hypr" "$ROOT/config/hypr" 2>/dev/null \
+  | grep -vP 'match:' || true)
+if [[ -z $stale ]]; then
+  pass "no rule uses the pre-0.53 syntax"
+else
+  fail "no rule uses the pre-0.53 syntax" "$(echo "$stale" | head -3 | tr '\n' ' ')"
+fi
+
+# Hyprland's own parser splits rule fields on commas without regard for brackets, so a
+# regex containing {0,1} is torn in half and reported as an invalid field. Use ? or a
+# bounded form without a comma.
+commas=$(grep -rhn "^\s*\(windowrule\|layerrule\)" "$ROOT/default/hypr" "$ROOT/config/hypr" 2>/dev/null \
+  | grep -P '\{\d*,\d*\}' || true)
+if [[ -z $commas ]]; then
+  pass "no rule regex contains a comma the parser would split on"
+else
+  fail "no rule regex contains a comma the parser would split on" "$commas"
+fi
+
+# The authority on all of this is Hyprland itself, which can check a config without
+# running. Only meaningful once the config has been deployed to ~/.config.
+if have Hyprland && [[ -f $HOME/.config/hypr/hyprland.conf ]]; then
+  if Hyprland --verify-config --config "$HOME/.config/hypr/hyprland.conf" 2>&1 | grep -q "^config ok"; then
+    pass "Hyprland accepts the deployed config"
+  else
+    fail "Hyprland accepts the deployed config" \
+      "$(Hyprland --verify-config --config "$HOME/.config/hypr/hyprland.conf" 2>&1 | grep -m3 '^Config error' | tr '\n' ' ')"
+  fi
+else
+  pass "skipped, Hyprland or deployed config not present"
+fi
 finish
