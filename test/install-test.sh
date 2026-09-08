@@ -122,4 +122,40 @@ if [[ -f $override && -n $repoid ]]; then
 else
   pass "skipped, no dnf repo overrides on this machine"
 fi
+
+# NVIDIA rotates the CUDA repository signing key between Fedora releases -- fedora43
+# publishes only 1940C73E.pub, fedora44 only 73CD9B30.pub. A key name written into a
+# $releasever URL therefore 404s on the release after the one it was written for, and
+# the failure surfaces as an unimportable key mid-upgrade rather than as a bad URL.
+# The name has to be resolved from the repository, never hardcoded.
+#
+# Commented lines are skipped deliberately: nvidia.sh and the migration both name the
+# two keys in prose, to explain why neither may be written into a URL. Without that the
+# check flags its own documentation.
+hardcoded=$(grep -rnE '[0-9A-F]{8}\.pub' "$ROOT/install" "$ROOT/migrations" 2>/dev/null |
+  awk -F: '$3 !~ /^[[:space:]]*#/ {print $1}' | sort -u)
+if [[ -z $hardcoded ]]; then
+  pass "no install script hardcodes an NVIDIA signing key name"
+else
+  fail "no install script hardcodes an NVIDIA signing key name" \
+    "${hardcoded//$ROOT\//} — resolve it from the repo listing instead"
+fi
+
+# nvidia.sh writes cuda-fedora-nvidia.repo, whose baseurl follows $releasever. A
+# release-numbered file added by hand sits beside it under a different name, pinned to
+# the release it was created on, and serves that release's packages into the next
+# release's transaction. migrations/1788901901.sh replaces one with the other.
+if [[ -d /etc/yum.repos.d ]]; then
+  shopt -s nullglob
+  numbered=(/etc/yum.repos.d/cuda-fedora[0-9]*.repo)
+  shopt -u nullglob
+  if ((${#numbered[@]} == 0)); then
+    pass "no release-numbered CUDA repository shadows the release-following one"
+  else
+    fail "no release-numbered CUDA repository shadows the release-following one" \
+      "${numbered[*]} — run migrations/1788901901.sh"
+  fi
+else
+  pass "skipped, no /etc/yum.repos.d on this machine"
+fi
 finish

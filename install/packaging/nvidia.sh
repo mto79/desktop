@@ -37,17 +37,46 @@ if ! curl -fsSL -o /dev/null "${REPO_BASE}/repodata/repomd.xml"; then
   exit 1
 fi
 
+# NVIDIA rotates the repository signing key between Fedora releases -- fedora43 carries
+# only 1940C73E.pub and fedora44 only 73CD9B30.pub -- so the key name cannot be written
+# into a $releasever URL the way the baseurl can. Hardcoding one is how this breaks on
+# the next upgrade: the gpgkey 404s, dnf cannot import it, and the install fails on a
+# machine whose repository is otherwise perfectly fine. Read the name out of the
+# repository instead.
+echo "Resolving NVIDIA's signing key for Fedora ${RELEASE}..."
+REPO_KEY=$(curl -fsSL "${REPO_BASE}/" | grep -oE '[A-Za-z0-9._-]+\.pub' | sort -u | head -1)
+if [[ -z "$REPO_KEY" ]]; then
+  echo "No signing key found in ${REPO_BASE}/." >&2
+  echo "Nothing was changed. Check the directory listing and re-run." >&2
+  exit 1
+fi
+echo "  found ${REPO_KEY}"
+
+# A repository added by hand before this script existed sits in a differently named file
+# with the release number baked into its baseurl. Left in place it survives a Fedora
+# upgrade still pointing at the old release, quietly shadowing the one written below --
+# two repositories for one thing, one of them permanently stale. The glob cannot match
+# this script's own file, which carries no digits.
+for stale in /etc/yum.repos.d/cuda-fedora[0-9]*.repo; do
+  [[ -e "$stale" ]] || continue
+  echo "  removing stale hand-added repository $(basename "$stale")"
+  sudo rm -f "$stale"
+done
+
 # $releasever rather than the number resolved above, so the repository follows the next
 # Fedora upgrade instead of pinning this machine to the release it was installed on.
 # The check above is what keeps that from silently breaking: dnf is deliberately left
 # to fail loudly on a missing repo, since a driver quietly not updating is worse.
+#
+# The key is the one exception, pinned to the release it was resolved from for the
+# reason above. Re-run this script after a Fedora upgrade to refresh it.
 sudo tee "$REPO_FILE" >/dev/null <<EOF
 [cuda-fedora-nvidia]
 name=NVIDIA CUDA for Fedora \$releasever
 baseurl=https://developer.download.nvidia.com/compute/cuda/repos/fedora\$releasever/x86_64
 enabled=1
 gpgcheck=1
-gpgkey=https://developer.download.nvidia.com/compute/cuda/repos/fedora\$releasever/x86_64/1940C73E.pub
+gpgkey=${REPO_BASE}/${REPO_KEY}
 EOF
 
 # The module is built by DKMS against the running kernel, so its headers have to be
