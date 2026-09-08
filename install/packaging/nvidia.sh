@@ -38,19 +38,40 @@ if ! curl -fsSL -o /dev/null "${REPO_BASE}/repodata/repomd.xml"; then
 fi
 
 # NVIDIA rotates the repository signing key between Fedora releases -- fedora43 carries
-# only 1940C73E.pub and fedora44 only 73CD9B30.pub -- so the key name cannot be written
-# into a $releasever URL the way the baseurl can. Hardcoding one is how this breaks on
-# the next upgrade: the gpgkey 404s, dnf cannot import it, and the install fails on a
-# machine whose repository is otherwise perfectly fine. Read the name out of the
-# repository instead.
-echo "Resolving NVIDIA's signing key for Fedora ${RELEASE}..."
-REPO_KEY=$(curl -fsSL "${REPO_BASE}/" | grep -oE '[A-Za-z0-9._-]+\.pub' | sort -u | head -1)
-if [[ -z "$REPO_KEY" ]]; then
-  echo "No signing key found in ${REPO_BASE}/." >&2
-  echo "Nothing was changed. Check the directory listing and re-run." >&2
+# only 1940C73E.pub and fedora44 only 73CD9B30.pub -- and signs each release's packages
+# with that release's key. So the name cannot be written into a $releasever URL the way
+# the baseurl can, and reading it out of the repository is only half the job.
+#
+# The other half: this repository has to trust the *next* release's key as well as the
+# current one. `dnf system-upgrade` verifies fc(N+1) packages while the machine is still
+# running N, so a gpgkey naming only the current release fails the offline transaction
+# with "Import of the key didn't help, wrong key?" -- and it fails after the multi-
+# gigabyte download, which is a late and expensive place to learn it. Trusting the next
+# key in advance is what makes the upgrade work unattended.
+resolve_key() {
+  curl -fsSL "$1/" 2>/dev/null | grep -oE '[A-Za-z0-9._-]+\.pub' | sort -u | head -1
+}
+
+echo "Resolving NVIDIA's signing keys..."
+REPO_KEYS=""
+for rel in "$RELEASE" "$((RELEASE + 1))"; do
+  key_base="https://developer.download.nvidia.com/compute/cuda/repos/fedora${rel}/x86_64"
+  key=$(resolve_key "$key_base")
+  if [[ -n "$key" ]]; then
+    echo "  Fedora ${rel}: ${key}"
+    REPO_KEYS="${REPO_KEYS:+$REPO_KEYS }${key_base}/${key}"
+  else
+    # Not an error: NVIDIA lags a new Fedora by weeks, so the next release usually has
+    # no repository yet. Re-run this script once it appears and before upgrading.
+    echo "  Fedora ${rel}: nothing published yet"
+  fi
+done
+
+if [[ -z "$REPO_KEYS" ]]; then
+  echo "No signing key found for Fedora ${RELEASE}." >&2
+  echo "Nothing was changed. Check ${REPO_BASE}/ and re-run." >&2
   exit 1
 fi
-echo "  found ${REPO_KEY}"
 
 # A repository added by hand before this script existed sits in a differently named file
 # with the release number baked into its baseurl. Left in place it survives a Fedora
@@ -68,15 +89,16 @@ done
 # The check above is what keeps that from silently breaking: dnf is deliberately left
 # to fail loudly on a missing repo, since a driver quietly not updating is worse.
 #
-# The key is the one exception, pinned to the release it was resolved from for the
-# reason above. Re-run this script after a Fedora upgrade to refresh it.
+# The keys are the exception, being names rather than paths. Both the current release's
+# and the next one's are listed, so an upgrade verifies; re-run this script afterwards
+# to pick up the release after that.
 sudo tee "$REPO_FILE" >/dev/null <<EOF
 [cuda-fedora-nvidia]
 name=NVIDIA CUDA for Fedora \$releasever
 baseurl=https://developer.download.nvidia.com/compute/cuda/repos/fedora\$releasever/x86_64
 enabled=1
 gpgcheck=1
-gpgkey=${REPO_BASE}/${REPO_KEY}
+gpgkey=${REPO_KEYS}
 EOF
 
 # The module is built by DKMS against the running kernel, so its headers have to be

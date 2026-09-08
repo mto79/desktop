@@ -158,4 +158,28 @@ if [[ -d /etc/yum.repos.d ]]; then
 else
   pass "skipped, no /etc/yum.repos.d on this machine"
 fi
+
+# The upgrade-shaped failure, which the checks above do not catch: NVIDIA signs each
+# release's packages with that release's key, and `dnf system-upgrade` verifies fc(N+1)
+# packages while the machine still runs N. A gpgkey naming only the current release
+# passes every static check, then fails the offline transaction after the whole
+# multi-gigabyte download. So the next release's key has to be trusted in advance --
+# but only once NVIDIA has published it, which is why this asks the network.
+cuda_repo=/etc/yum.repos.d/cuda-fedora-nvidia.repo
+if [[ -f $cuda_repo ]] && have curl && have rpm; then
+  next=$(($(rpm -E %fedora) + 1))
+  next_base="https://developer.download.nvidia.com/compute/cuda/repos/fedora${next}/x86_64"
+  if curl -fsSL --max-time 10 -o /dev/null "$next_base/repodata/repomd.xml" 2>/dev/null; then
+    if grep -q "^gpgkey=.*fedora${next}/" "$cuda_repo"; then
+      pass "the CUDA repo trusts Fedora ${next}'s signing key"
+    else
+      fail "the CUDA repo trusts Fedora ${next}'s signing key" \
+        "NVIDIA publishes fedora${next} but the repo trusts only older keys — a system-upgrade would fail verification after downloading everything"
+    fi
+  else
+    pass "skipped, NVIDIA has published no fedora${next} repository yet"
+  fi
+else
+  pass "skipped, no CUDA repo or no curl on this machine"
+fi
 finish
