@@ -23,6 +23,10 @@ Item {
   // Not `width`: that is final on Item, and shadowing it fails the whole config load.
   readonly property int toastWidth: (config && config.width) ? config.width : 380
   readonly property int maxVisible: (config && config.maxVisible) ? config.maxVisible : 5
+  // The toasts' base text size, and everything in them is sized from it. A step above
+  // the shell's 13, which panels are laid out around: a toast is read in a glance from
+  // wherever you were looking, not studied. Overridable with notifications.fontSize.
+  readonly property int fontSize: (config && config.fontSize) ? config.fontSize : Style.fontSize + 2
 
   // Per-urgency defaults, used when the sender does not say. Critical stays up until
   // it is dismissed, which is the one convention every notification daemon agrees on.
@@ -182,8 +186,20 @@ Item {
       };
     }
 
-    readonly property string senderLabel: originSplit ? originSplit.origin : (notification.appName || "Notification")
+    // notify-send reports itself as the app unless it is given --app-name, and no desktop-*
+    // script gives one, so the header over most toasts read "notify-send". A sender that
+    // only names the tool it came through says nothing; leave the line out and let the
+    // title lead.
+    readonly property string senderLabel: {
+      if (originSplit)
+        return originSplit.origin;
+      var app = String(notification.appName || "");
+      return app === "notify-send" ? "" : app;
+    }
     readonly property string bodyText: originSplit ? originSplit.rest : notification.body
+    // Whitespace collapsed: desktop-toggle-nightlight follows its icon glyph with three
+    // spaces, which set that title visibly further right than every other one.
+    readonly property string summaryText: String(notification.summary || "").replace(/\s+/g, " ").trim()
 
     width: root.toastWidth
     height: layout.implicitHeight + 20
@@ -249,22 +265,23 @@ Item {
 
       Text {
         width: parent.width
+        visible: toast.senderLabel !== ""
         text: toast.senderLabel
         color: toast.accentColor
         font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 3
+        font.pixelSize: root.fontSize - 2
         font.bold: true
         elide: Text.ElideRight
       }
 
       Text {
         width: parent.width
-        visible: toast.notification.summary !== ""
-        text: toast.notification.summary
+        visible: toast.summaryText !== ""
+        text: toast.summaryText
         textFormat: Text.PlainText
         color: Color.popupText
         font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize
+        font.pixelSize: root.fontSize
         font.bold: true
         wrapMode: Text.WordWrap
         maximumLineCount: 2
@@ -280,7 +297,7 @@ Item {
         textFormat: Text.StyledText
         color: Color.popupMuted
         font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+        font.pixelSize: root.fontSize - 1
         wrapMode: Text.WordWrap
         maximumLineCount: 6
         elide: Text.ElideRight
@@ -300,7 +317,7 @@ Item {
             // "default" is the whole-toast click, not a button of its own.
             visible: modelData.identifier !== "default"
             width: visible ? actionLabel.implicitWidth + 18 : 0
-            height: visible ? 24 : 0
+            height: visible ? actionLabel.implicitHeight + 10 : 0
             radius: Style.radius
             color: actionMouse.containsMouse ? Color.popupHover : "transparent"
             border.width: 1
@@ -313,7 +330,7 @@ Item {
               text: modelData.text || modelData.identifier
               color: Color.popupText
               font.family: Style.fontFamily
-              font.pixelSize: Style.fontSize - 2
+              font.pixelSize: root.fontSize - 2
             }
 
             MouseArea {
