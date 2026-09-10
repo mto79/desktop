@@ -27,4 +27,13 @@ if grep -vE '^\s*//' "$ROOT/shell/Ui/PanelMeter.qml" | grep -q 'Style\.radius'; 
 else
   pass "meters stay pills whatever the shell's radius"
 fi
+
+# A panel joined to the bar is filled with the bar's colour. Catppuccin and Nord give the
+# bar its own background, so a panel in the popup colour would hang off it with a seam
+# that tokyo-night, where the two happen to match, never shows.
+if grep -q 'fillColor: Color.barBackground' "$ROOT/shell/Ui/Popup.qml"; then
+  pass "a joined panel is drawn in the bar's colour"
+else
+  fail "a joined panel is drawn in the bar's colour" "Popup.qml's joined outline no longer fills with Color.barBackground"
+fi
 finish

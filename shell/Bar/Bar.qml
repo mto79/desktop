@@ -169,6 +169,11 @@ Item {
     }
 
     implicitHeight: Style.barSize
+
+    // Read by Popup through its anchor's window. A panel hangs from the bar as one shape
+    // with it, which only works while there is a bar drawn to hang from.
+    readonly property bool joinsPanels: !root.transparent
+
     // The window stays transparent and the bar is drawn inside it: a window's own colour
     // fills its whole rectangle, corners and all.
     color: "transparent"

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Shapes
 import Quickshell
 import Quickshell.Wayland
 import qs.Commons
@@ -52,6 +53,20 @@ PanelWindow {
 
   readonly property var anchorWindow: (anchorItem && anchorItem.QsWindow) ? anchorItem.QsWindow.window : null
 
+  // Joined, the panel hangs from the bar as one shape with it: no gap, the bar's colour,
+  // and a concave curve where each side meets the bar's bottom edge. The bar decides --
+  // a solid panel joined to a transparent bar would be hanging from nothing -- and a
+  // panel that is not joined floats as a bordered box.
+  readonly property bool joined: anchorWindow ? anchorWindow.joinsPanels === true : false
+  // The curves are drawn in strips either side of the panel body, so the window is that
+  // much wider than the panel it shows.
+  readonly property int fillet: joined ? Style.radius : 0
+  readonly property int gap: joined ? 0 : Style.popupGap
+  // Where the bar starts on its screen. The bar is held off the edges by a margin, and
+  // the anchor's position below is measured inside the bar, not on the screen; without
+  // this every panel sat that margin left of the widget it belongs to.
+  readonly property int barLeft: (anchorWindow && anchorWindow.margins) ? anchorWindow.margins.left : 0
+
   visible: false
   screen: anchorWindow ? anchorWindow.screen : null
 
@@ -71,28 +86,36 @@ PanelWindow {
 
   color: "transparent"
 
-  implicitWidth: root.contentWidth
+  implicitWidth: root.contentWidth + root.fillet * 2
   // A long device list must not run off the bottom of the screen. Rounded because the
   // panel can move between monitors of different scale, and fractional sizes there
   // blur text.
   implicitHeight: {
     var avail = 600;
     if (screen)
-      avail = screen.height - Style.barSize - Style.popupGap - Style.popupMargin * 2;
+      avail = screen.height - Style.barInset - Style.barSize - root.gap - Style.popupMargin * 2;
     return Math.round(Math.max(80, Math.min(root.contentHeight, avail)));
   }
 
-  margins.top: Style.popupGap
+  margins.top: root.gap
 
-  // Centred under the widget, kept on screen at either end.
+  // Centred under the widget, kept on screen at either end. A joined panel also keeps its
+  // curves off the bar's rounded ends: beyond the straight part of the bar's bottom edge
+  // a curve would run out into the air beside the corner.
   function reposition() {
     if (!anchorItem || !anchorWindow)
       return;
 
-    var centre = anchorItem.mapToItem(null, anchorItem.width / 2, 0).x;
-    var limit = (screen ? screen.width : anchorWindow.width) - width - Style.popupMargin;
-    margins.left = Math.round(Math.max(Style.popupMargin, Math.min(centre - width / 2, limit)));
+    var centre = root.barLeft + anchorItem.mapToItem(null, anchorItem.width / 2, 0).x;
+    var screenWidth = screen ? screen.width : anchorWindow.width + root.barLeft * 2;
+    var edge = root.joined ? root.barLeft + Style.radius + root.fillet : Style.popupMargin;
+    var left = Math.max(edge, Math.min(centre - root.contentWidth / 2, screenWidth - root.contentWidth - edge));
+    margins.left = Math.round(left - root.fillet);
   }
+
+  // Joining changes the window's width and the edges it has to keep clear of, so the
+  // position is stale the moment the bar's transparency flips.
+  onJoinedChanged: reposition()
 
   // The anchor moves under a mapped panel -- the bar reflows whenever a window title
   // grows or an indicator appears. An xdg_popup followed its anchor for free; here the
@@ -130,11 +153,82 @@ PanelWindow {
   }
 
   Rectangle {
+    visible: !root.joined
     anchors.fill: parent
     color: Color.popupBackground
     border.width: 1
     border.color: Color.popupBorder
     radius: Style.radius
+  }
+
+  // Joined: the body and its two curves as one filled outline. In the bar's colour, not
+  // the panel's -- Catppuccin and Nord give the bar its own background, and any difference
+  // shows as a seam. No border, because the bar has none for it to continue.
+  Shape {
+    id: joinShape
+
+    visible: root.joined
+    anchors.fill: parent
+    preferredRendererType: Shape.CurveRenderer
+
+    ShapePath {
+      id: outline
+
+      readonly property real w: joinShape.width
+      readonly property real h: joinShape.height
+      readonly property real f: root.fillet
+      readonly property real r: Style.radius
+
+      fillColor: Color.barBackground
+      strokeWidth: -1
+
+      // Clockwise from the top-left, along the bar's bottom edge. The two curves at the
+      // top turn against the corners at the bottom, which is what makes them concave.
+      startX: 0
+      startY: 0
+      PathLine {
+        x: outline.w
+        y: 0
+      }
+      PathArc {
+        x: outline.w - outline.f
+        y: outline.f
+        radiusX: outline.f
+        radiusY: outline.f
+        direction: PathArc.Counterclockwise
+      }
+      PathLine {
+        x: outline.w - outline.f
+        y: outline.h - outline.r
+      }
+      PathArc {
+        x: outline.w - outline.f - outline.r
+        y: outline.h
+        radiusX: outline.r
+        radiusY: outline.r
+      }
+      PathLine {
+        x: outline.f + outline.r
+        y: outline.h
+      }
+      PathArc {
+        x: outline.f
+        y: outline.h - outline.r
+        radiusX: outline.r
+        radiusY: outline.r
+      }
+      PathLine {
+        x: outline.f
+        y: outline.f
+      }
+      PathArc {
+        x: 0
+        y: 0
+        radiusX: outline.f
+        radiusY: outline.f
+        direction: PathArc.Counterclockwise
+      }
+    }
   }
 
   // FocusScope rather than a plain Item: the panel is the keyboard focus while it is
@@ -143,7 +237,10 @@ PanelWindow {
     id: body
 
     anchors.fill: parent
-    anchors.margins: Style.popupPadding
+    anchors.topMargin: Style.popupPadding
+    anchors.bottomMargin: Style.popupPadding
+    anchors.leftMargin: Style.popupPadding + root.fillet
+    anchors.rightMargin: Style.popupPadding + root.fillet
     focus: true
 
     Keys.onPressed: event => root.keyPressed(event)
