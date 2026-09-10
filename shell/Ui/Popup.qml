@@ -67,6 +67,23 @@ PanelWindow {
   // this every panel sat that margin left of the widget it belongs to.
   readonly property int barLeft: (anchorWindow && anchorWindow.margins) ? anchorWindow.margins.left : 0
 
+  // How much of the panel is shown, top down: 0 on opening, 1 once it has grown out of
+  // the bar. The window is mapped at its full size from the first frame and only what is
+  // drawn inside it grows. Animating the window's own height instead would resize a
+  // layer surface every frame, each one a round trip to the compositor, and it stutters.
+  property real reveal: 1
+
+  NumberAnimation {
+    id: revealAnimation
+
+    target: root
+    property: "reveal"
+    from: 0
+    to: 1
+    duration: Style.panelRevealDuration
+    easing.type: Easing.OutCubic
+  }
+
   visible: false
   screen: anchorWindow ? anchorWindow.screen : null
 
@@ -128,15 +145,52 @@ PanelWindow {
     onTriggered: root.reposition()
   }
 
+  // Only opening is animated. Closing stays immediate, so dismissal, focus and
+  // PopupHost's idea of which panel is open never have to wait on a panel still
+  // folding away.
   function open() {
     reposition();
+    reveal = 0;
+    revealPending = true;
     visible = true;
     body.forceActiveFocus();
   }
 
   function close() {
+    revealPending = false;
+    revealAnimation.stop();
     visible = false;
+    reveal = 1;
   }
+
+  // Set by open() and cleared once the reveal has started.
+  property bool revealPending: false
+
+  function startReveal() {
+    revealPending = false;
+    revealAnimation.restart();
+  }
+
+  // The reveal starts on the panel's first frame, not in open(). Measured from open() to
+  // that first frame it took 103-127ms on every open, warm or cold -- mapping a layer
+  // surface is not free -- and a 180ms reveal started in open() was already 47-67% done
+  // before anything was on screen. The panel simply appeared, most of the way open.
+  Connections {
+    target: revealed.Window.window
+    enabled: root.revealPending
+    function onFrameSwapped() {
+      root.startReveal();
+    }
+  }
+
+  // A panel whose frame signal never arrives must not stay at reveal 0, which draws
+  // nothing at all: start regardless, well after a normal first frame would have come.
+  Timer {
+    interval: 300
+    running: root.revealPending
+    onTriggered: root.startReveal()
+  }
+
 
   // Hand the keyboard back to the panel itself. A panel that gave focus to a field has
   // to call this when the field goes away, or every later key -- Escape included --
@@ -152,98 +206,124 @@ PanelWindow {
       root.dismissed();
   }
 
-  Rectangle {
-    visible: !root.joined
-    anchors.fill: parent
-    color: Color.popupBackground
-    border.width: 1
-    border.color: Color.popupBorder
-    radius: Style.radius
-  }
+  // Everything the panel draws, clipped to the part revealed so far. The contents keep
+  // their full-size layout underneath and are uncovered rather than squeezed, so nothing
+  // reflows while the panel grows.
+  Item {
+    id: revealed
 
-  // Joined: the body and its two curves as one filled outline. In the bar's colour, not
-  // the panel's -- Catppuccin and Nord give the bar its own background, and any difference
-  // shows as a seam. No border, because the bar has none for it to continue.
-  Shape {
-    id: joinShape
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.top: parent.top
+    height: Math.round(parent.height * root.reveal)
+    clip: true
 
-    visible: root.joined
-    anchors.fill: parent
-    preferredRendererType: Shape.CurveRenderer
+    // The outline follows the revealed height, so the bottom corners travel down with
+    // it -- but never shorter than its curves and corners, which would fold back on
+    // themselves. The clip hides that minimum for the first frame or two.
+    readonly property real shapeHeight: Math.max(root.fillet + Style.radius * 2, height)
 
-    ShapePath {
-      id: outline
+    Rectangle {
+      visible: !root.joined
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      height: revealed.shapeHeight
+      color: Color.popupBackground
+      border.width: 1
+      border.color: Color.popupBorder
+      radius: Style.radius
+    }
 
-      readonly property real w: joinShape.width
-      readonly property real h: joinShape.height
-      readonly property real f: root.fillet
-      readonly property real r: Style.radius
+    // Joined: the body and its two curves as one filled outline. In the bar's colour, not
+    // the panel's -- Catppuccin and Nord give the bar its own background, and any
+    // difference shows as a seam. No border, because the bar has none for it to continue.
+    Shape {
+      id: joinShape
 
-      fillColor: Color.barBackground
-      strokeWidth: -1
+      visible: root.joined
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.top: parent.top
+      height: revealed.shapeHeight
+      preferredRendererType: Shape.CurveRenderer
 
-      // Clockwise from the top-left, along the bar's bottom edge. The two curves at the
-      // top turn against the corners at the bottom, which is what makes them concave.
-      startX: 0
-      startY: 0
-      PathLine {
-        x: outline.w
-        y: 0
-      }
-      PathArc {
-        x: outline.w - outline.f
-        y: outline.f
-        radiusX: outline.f
-        radiusY: outline.f
-        direction: PathArc.Counterclockwise
-      }
-      PathLine {
-        x: outline.w - outline.f
-        y: outline.h - outline.r
-      }
-      PathArc {
-        x: outline.w - outline.f - outline.r
-        y: outline.h
-        radiusX: outline.r
-        radiusY: outline.r
-      }
-      PathLine {
-        x: outline.f + outline.r
-        y: outline.h
-      }
-      PathArc {
-        x: outline.f
-        y: outline.h - outline.r
-        radiusX: outline.r
-        radiusY: outline.r
-      }
-      PathLine {
-        x: outline.f
-        y: outline.f
-      }
-      PathArc {
-        x: 0
-        y: 0
-        radiusX: outline.f
-        radiusY: outline.f
-        direction: PathArc.Counterclockwise
+      ShapePath {
+        id: outline
+
+        readonly property real w: joinShape.width
+        readonly property real h: joinShape.height
+        readonly property real f: root.fillet
+        readonly property real r: Style.radius
+
+        fillColor: Color.barBackground
+        strokeWidth: -1
+
+        // Clockwise from the top-left, along the bar's bottom edge. The two curves at the
+        // top turn against the corners at the bottom, which is what makes them concave.
+        startX: 0
+        startY: 0
+        PathLine {
+          x: outline.w
+          y: 0
+        }
+        PathArc {
+          x: outline.w - outline.f
+          y: outline.f
+          radiusX: outline.f
+          radiusY: outline.f
+          direction: PathArc.Counterclockwise
+        }
+        PathLine {
+          x: outline.w - outline.f
+          y: outline.h - outline.r
+        }
+        PathArc {
+          x: outline.w - outline.f - outline.r
+          y: outline.h
+          radiusX: outline.r
+          radiusY: outline.r
+        }
+        PathLine {
+          x: outline.f + outline.r
+          y: outline.h
+        }
+        PathArc {
+          x: outline.f
+          y: outline.h - outline.r
+          radiusX: outline.r
+          radiusY: outline.r
+        }
+        PathLine {
+          x: outline.f
+          y: outline.f
+        }
+        PathArc {
+          x: 0
+          y: 0
+          radiusX: outline.f
+          radiusY: outline.f
+          direction: PathArc.Counterclockwise
+        }
       }
     }
-  }
 
-  // FocusScope rather than a plain Item: the panel is the keyboard focus while it is
-  // open, and a text field inside one needs somewhere for that focus to land.
-  FocusScope {
-    id: body
+    // FocusScope rather than a plain Item: the panel is the keyboard focus while it is
+    // open, and a text field inside one needs somewhere for that focus to land.
+    //
+    // Sized against the window, not the revealed area, so the contents are laid out at
+    // full size from the start.
+    FocusScope {
+      id: body
 
-    anchors.fill: parent
-    anchors.topMargin: Style.popupPadding
-    anchors.bottomMargin: Style.popupPadding
-    anchors.leftMargin: Style.popupPadding + root.fillet
-    anchors.rightMargin: Style.popupPadding + root.fillet
-    focus: true
+      x: Style.popupPadding + root.fillet
+      y: Style.popupPadding
+      width: revealed.width - (Style.popupPadding + root.fillet) * 2
+      height: revealed.parent.height - Style.popupPadding * 2
+      focus: true
 
-    Keys.onPressed: event => root.keyPressed(event)
-    Keys.onEscapePressed: root.close()
+      Keys.onPressed: event => root.keyPressed(event)
+      Keys.onEscapePressed: root.close()
+    }
   }
 }

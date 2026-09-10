@@ -67,6 +67,9 @@ QtObject {
   property int popupPadding: 12
   property int popupGap: 4          // gap between the bar edge and the popup
   property int popupMargin: 8       // minimum gap to the screen edge
+  // How long a panel takes to grow out of the bar. Short enough that a panel opened to
+  // glance at a number is not slower to read than it was before it moved.
+  property int panelRevealDuration: 180
   property int rowHeight: 34
   property int rowSpacing: 2
 
