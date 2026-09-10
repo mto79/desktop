@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+
+"""desktop-monitors-watch: keep the monitor layout matched to the screens attached.
+
+Hyprland announces monitoradded/monitorremoved on its event socket, so docking at a desk
+or unplugging to leave can pick its own layout instead of waiting to be told through
+SUPER+M. The menu stays the way to overrule the choice, not the way to make it.
+
+Two details keep this from being a nuisance:
+
+  * A dock brings several screens up in a burst, so events are coalesced -- one apply
+    once the burst has been quiet for DEBOUNCE seconds, not one per screen.
+  * desktop-cmd-monitors-switch does nothing when the layout it would write is already
+    in force. That matters more than it sounds: applying a layout disables the screens
+    it does not use, which itself emits monitorremoved, and without that check the two
+    would feed each other forever.
+"""
+
+import os
+import select
+import socket
+import subprocess
+import sys
+
+DEBOUNCE = 0.5
+TRIGGERS = ("monitoradded", "monitorremoved")
+SWITCH = "desktop-cmd-monitors-switch"
+
+# Named so the test can point us at a socket of its own; in a session Hyprland's is the
+# only one that makes sense.
+SOCKET_ENV = "DESKTOP_HYPR_EVENT_SOCKET"
+
+
+def socket_path():
+    override = os.environ.get(SOCKET_ENV)
+    if override:
+        return override
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    signature = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    if not runtime or not signature:
+        sys.exit("desktop-monitors-watch: no Hyprland session to watch")
+    return os.path.join(runtime, "hypr", signature, ".socket2.sock")
+
+
+def apply_layout():
+    # Failure is the compositor's to report -- desktop-cmd-monitors-switch already
+    # notifies -- and is never a reason to stop watching.
+    subprocess.run([SWITCH], check=False)
+
+
+def main():
+    conn = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    conn.connect(socket_path())
+
+    # The screens may have changed while nothing was watching, at login most of all.
+    apply_layout()
+
+    buffer = b""
+    pending = False
+    while True:
+        ready, _, _ = select.select([conn], [], [], DEBOUNCE if pending else None)
+        if not ready:
+            pending = False
+            apply_layout()
+            continue
+
+        chunk = conn.recv(8192)
+        if not chunk:
+            return 0  # Hyprland has gone; there is nothing left to watch.
+        buffer += chunk
+        while b"\n" in buffer:
+            line, buffer = buffer.split(b"\n", 1)
+            event = line.decode("utf-8", "replace").split(">>", 1)[0]
+            if event.startswith(TRIGGERS):
+                pending = True
+
+
+if __name__ == "__main__":
+    sys.exit(main())

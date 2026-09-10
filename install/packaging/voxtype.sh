@@ -3,9 +3,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VOXTYPE_VERSION="0.4.1-4"
+VOXTYPE_VERSION="0.6.3-1"
+VOXTYPE_RELEASE="0.6.3"
 VOXTYPE_RPM="voxtype-${VOXTYPE_VERSION}.x86_64.rpm"
-VOXTYPE_URL="https://github.com/peteonrails/voxtype/releases/download/v${VOXTYPE_VERSION}/${VOXTYPE_RPM}"
+VOXTYPE_URL="https://github.com/peteonrails/voxtype/releases/download/v${VOXTYPE_RELEASE}/${VOXTYPE_RPM}"
 
 echo "▶ Checking Fedora version..."
 FEDORA_VERSION=$(rpm -E %fedora)
@@ -42,3 +43,4 @@ echo "✅ voxtype installed successfully"
 voxtype setup --download
 # Install as systemd service
 voxtype setup systemd
+systemctl --user status voxtype

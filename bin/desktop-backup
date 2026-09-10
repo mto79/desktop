@@ -1,0 +1,444 @@
+#!/usr/bin/env bash
+
+# desktop-backup: restic backups of this machine, and the way back out of them.
+#
+#   desktop-backup                     # back up now, or say plainly why it cannot
+#   desktop-backup status              # what the state of things is
+#   desktop-backup status --bar        # the same, as bar JSON
+#   desktop-backup status --json       # the full report the Quickshell panel reads
+#   desktop-backup snapshots           # what is in the repository
+#   desktop-backup browse              # mount it read-only and open a file manager
+#   desktop-backup init                # create the repository, once
+#   desktop-backup restore <id> [path] # into ~/Restored -- never over the original
+#   desktop-backup forget              # apply the retention policy and prune
+#
+# Snapper covers the other half of "backup": its snapshots undo a bad dnf transaction
+# in seconds. They live on the same LUKS volume as the data, so they are not a backup --
+# one failed disk takes the data and every snapshot of it. This is the copy that leaves
+# the machine.
+#
+# Two things make the difference between a backup that runs and one that nags. It skips
+# cleanly when the repository is unreachable rather than hanging on a dead host, and it
+# remembers when it last succeeded in a local state file, so the bar can say "nine days"
+# without a network round trip.
+
+set -uo pipefail
+
+CONF="${DESKTOP_BACKUP_CONF:-$HOME/.config/desktop/backup.conf}"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/desktop"
+LAST_FILE="$STATE_DIR/backup-last"
+CACHE_FILE="$STATE_DIR/backup-snapshots.json"
+LOCK_FILE="$STATE_DIR/backup.lock"
+LOG_FILE="$STATE_DIR/backup.log"
+
+# A backup older than this is worth colouring the bar for.
+STALE_DAYS="${DESKTOP_BACKUP_STALE_DAYS:-3}"
+CACHE_SECONDS=300
+# Long enough to cross a slow VPN, short enough that a dead NAS does not stall the bar.
+PROBE_TIMEOUT=3
+
+mkdir -p "$STATE_DIR"
+
+# ---------------------------------------------------------------- configuration
+
+write_default_config() {
+  mkdir -p "$(dirname "$CONF")"
+  cat >"$CONF" <<'CONFIG'
+# desktop-backup configuration. Written once, never overwritten -- edit freely.
+
+# Where the backups go. restic's own sftp transport, so it needs an SSH key that
+# reaches the NAS unprompted; `ssh <host>` working is the whole prerequisite.
+BACKUP_REPOSITORY="sftp:mto@192.168.2.153:/mnt/tank/backups/desktop-na"
+
+# The host desktop-backup probes before trying, so an absent NAS is a clean skip
+# rather than a hung restic. Leave empty to always attempt the backup.
+BACKUP_HOST="192.168.2.153"
+BACKUP_PORT=22
+
+# Mode 0600, on an already-encrypted disk. Losing this file loses every backup in the
+# repository: restic cannot be talked out of a forgotten password. Keep a copy
+# somewhere that is not this machine.
+BACKUP_PASSWORD_FILE="$HOME/.config/desktop/restic-password"
+
+# What to keep safe.
+BACKUP_PATHS=(
+  "$HOME"
+)
+
+# What not to. Caches rebuild themselves, the NAS mount is the backup target seen from
+# the other side, and VM images are enormous and rebuildable.
+BACKUP_EXCLUDES=(
+  "$HOME/.cache"
+  "$HOME/.local/share/Trash"
+  "$HOME/Nas"
+  "$HOME/VMs"
+  "$HOME/.local/share/containers"
+  "**/node_modules"
+  "**/.venv"
+  "**/target/debug"
+  "*.qcow2"
+)
+
+# Retention, applied by `desktop-backup forget`.
+BACKUP_KEEP_DAILY=7
+BACKUP_KEEP_WEEKLY=5
+BACKUP_KEEP_MONTHLY=12
+CONFIG
+  chmod 600 "$CONF"
+}
+
+[[ -f "$CONF" ]] || write_default_config
+# shellcheck source=/dev/null
+source "$CONF"
+
+BACKUP_REPOSITORY="${BACKUP_REPOSITORY:-}"
+BACKUP_HOST="${BACKUP_HOST:-}"
+BACKUP_PORT="${BACKUP_PORT:-22}"
+BACKUP_PASSWORD_FILE="${BACKUP_PASSWORD_FILE:-$HOME/.config/desktop/restic-password}"
+
+export RESTIC_REPOSITORY="$BACKUP_REPOSITORY"
+export RESTIC_PASSWORD_FILE="$BACKUP_PASSWORD_FILE"
+
+# ---------------------------------------------------------------- small helpers
+
+have_password() { [[ -s "$BACKUP_PASSWORD_FILE" ]]; }
+
+configured() { [[ -n "$BACKUP_REPOSITORY" ]] && have_password; }
+
+reachable() {
+  [[ -n "$BACKUP_HOST" ]] || return 0
+  timeout "$PROBE_TIMEOUT" bash -c "exec 3<>/dev/tcp/$BACKUP_HOST/$BACKUP_PORT" 2>/dev/null
+}
+
+running() {
+  # The lock is held for the whole run, so a held lock is a running backup. Testing it
+  # with flock -n rather than looking for a restic process catches the setup and the
+  # forget pass either side of it too.
+  ! flock -n "$LOCK_FILE" true 2>/dev/null
+}
+
+last_epoch() {
+  [[ -f "$LAST_FILE" ]] || return 0
+  awk 'NR==1 {print $1}' "$LAST_FILE"
+}
+
+last_snapshot() {
+  [[ -f "$LAST_FILE" ]] || return 0
+  awk 'NR==1 {print $2}' "$LAST_FILE"
+}
+
+age_days() {
+  local epoch="${1:-}"
+  [[ -n "$epoch" ]] || return 0
+  echo $(((  $(date +%s) - epoch ) / 86400 ))
+}
+
+# "9 days ago", "3 hours ago", "never".
+age_text() {
+  local epoch="${1:-}"
+  [[ -n "$epoch" ]] || {
+    echo "never"
+    return
+  }
+  local seconds=$(($(date +%s) - epoch))
+  ((seconds < 3600)) && {
+    echo "$((seconds / 60)) min ago"
+    return
+  }
+  ((seconds < 86400)) && {
+    echo "$((seconds / 3600))h ago"
+    return
+  }
+  echo "$((seconds / 86400))d ago"
+}
+
+restic_json() {
+  timeout 120 restic --json "$@" 2>/dev/null
+}
+
+# ---------------------------------------------------------------- the operations
+
+do_init() {
+  configured || {
+    echo "desktop-backup: set BACKUP_REPOSITORY in $CONF first" >&2
+    return 1
+  }
+
+  if restic cat config >/dev/null 2>&1; then
+    echo "Repository already initialised at $BACKUP_REPOSITORY"
+    return 0
+  fi
+
+  restic init
+}
+
+do_backup() {
+  configured || {
+    notify-send -u critical "Backup" "Not configured yet -- see $CONF"
+    echo "desktop-backup: no repository or no password file" >&2
+    return 1
+  }
+
+  reachable || {
+    echo "desktop-backup: $BACKUP_HOST is not reachable, skipping"
+    return 0
+  }
+
+  local excludes=()
+  local pattern
+  for pattern in "${BACKUP_EXCLUDES[@]:-}"; do
+    [[ -n "$pattern" ]] && excludes+=(--exclude "$pattern")
+  done
+
+  # flock keeps a hurried second click, or a timer firing over a long run, from
+  # starting a backup on top of one already going.
+  exec 9>"$LOCK_FILE"
+  flock -n 9 || {
+    echo "desktop-backup: a backup is already running"
+    return 0
+  }
+
+  local started
+  started=$(date +%s)
+  echo "=== $(date -Is) backup started" >>"$LOG_FILE"
+
+  local output status
+  output=$(restic backup --tag desktop --exclude-caches "${excludes[@]}" "${BACKUP_PATHS[@]}" 2>&1)
+  status=$?
+  printf '%s\n' "$output" >>"$LOG_FILE"
+
+  if ((status != 0)); then
+    notify-send -u critical "Backup failed" "$(printf '%s' "$output" | tail -2)"
+    echo "=== $(date -Is) backup FAILED ($status)" >>"$LOG_FILE"
+    return "$status"
+  fi
+
+  local id
+  id=$(printf '%s' "$output" | sed -n 's/^snapshot \([a-f0-9]\{6,\}\) saved$/\1/p' | tail -1)
+  printf '%s %s\n' "$(date +%s)" "${id:-unknown}" >"$LAST_FILE"
+  rm -f "$CACHE_FILE"
+
+  local summary
+  summary=$(printf '%s' "$output" | grep -E "^(Added to the repository|processed)" | paste -sd' · ' -)
+  notify-send "Backup complete" "${summary:-snapshot ${id:-saved}} · took $(($(date +%s) - started))s"
+  echo "=== $(date -Is) backup finished in $(($(date +%s) - started))s" >>"$LOG_FILE"
+}
+
+# Snapshots, cached: the panel asks on every open, and the answer changes once a day.
+snapshots_json() {
+  if [[ -f "$CACHE_FILE" ]]; then
+    local age=$(($(date +%s) - $(stat -c %Y "$CACHE_FILE")))
+    if ((age < CACHE_SECONDS)); then
+      cat "$CACHE_FILE"
+      return 0
+    fi
+  fi
+
+  configured && reachable || {
+    [[ -f "$CACHE_FILE" ]] && cat "$CACHE_FILE"
+    return 0
+  }
+
+  local out
+  out=$(restic_json snapshots --latest 20)
+  [[ -n "$out" ]] || {
+    [[ -f "$CACHE_FILE" ]] && cat "$CACHE_FILE"
+    return 0
+  }
+
+  printf '%s' "$out" >"$CACHE_FILE"
+  printf '%s' "$out"
+}
+
+do_snapshots() {
+  local snaps
+  snaps=$(snapshots_json)
+  [[ -n "$snaps" ]] || {
+    echo "No snapshots to show (repository unreachable, or none taken yet)"
+    return 0
+  }
+  jq -r '.[] | "\(.short_id)  \(.time[0:16] | sub("T"; " "))  \(.paths | join(", "))"' <<<"$snaps"
+}
+
+# The state of things, as one JSON object. Every reader below is a view of this.
+report() {
+  local epoch snaps state
+  epoch=$(last_epoch)
+  snaps=$(snapshots_json)
+  [[ -n "$snaps" ]] || snaps='[]'
+
+  if ! configured; then
+    state="unconfigured"
+  elif running; then
+    state="running"
+  elif ! reachable; then
+    state="unreachable"
+  elif [[ -z "$epoch" ]]; then
+    state="never"
+  elif (($(age_days "$epoch") >= STALE_DAYS)); then
+    state="stale"
+  else
+    state="ok"
+  fi
+
+  jq -cn \
+    --arg state "$state" \
+    --arg repo "$BACKUP_REPOSITORY" \
+    --arg host "$BACKUP_HOST" \
+    --arg age "$(age_text "$epoch")" \
+    --arg snapshot "$(last_snapshot)" \
+    --argjson at "${epoch:-0}" \
+    --argjson snapshots "$snaps" \
+    '{
+       state: $state,
+       repository: $repo,
+       host: $host,
+       lastAge: $age,
+       lastAt: $at,
+       lastSnapshot: $snapshot,
+       snapshots: ($snapshots | map({
+         id: .short_id,
+         time: (.time[0:16] | sub("T"; " ")),
+         paths: (.paths // []),
+         host: (.hostname // "")
+       }))
+     }'
+}
+
+do_status() {
+  case "${1:-}" in
+  --json) report ;;
+  --bar)
+    # Icon-only on the bar: the state colours it, the tooltip explains it.
+    report | jq -c '{
+      text: "",
+      class: .state,
+      tooltip: (
+        if .state == "unconfigured" then "Backups are not set up yet"
+        elif .state == "running" then "Backing up now"
+        elif .state == "never" then "No backup has ever run"
+        elif .state == "unreachable" then "Last backup " + .lastAge + " -- " + .host + " is not reachable"
+        else "Last backup " + .lastAge
+        end
+      )
+    }'
+    ;;
+  *)
+    local data
+    data=$(report)
+    printf 'Repository  %s\n' "$(jq -r .repository <<<"$data")"
+    printf 'State       %s\n' "$(jq -r .state <<<"$data")"
+    printf 'Last backup %s (%s)\n' "$(jq -r .lastAge <<<"$data")" \
+    "$(jq -r 'if .lastSnapshot == "" then "none" else .lastSnapshot end' <<<"$data")"
+    printf 'Snapshots   %s\n' "$(jq -r '.snapshots | length' <<<"$data")"
+    ;;
+  esac
+}
+
+# Restores land in a dated directory and never over the original. Wanting the file back
+# and wanting it back *there* are different wishes, and only one of them is undoable.
+do_restore() {
+  local id="${1:-latest}"
+  shift 2>/dev/null || true
+
+  configured || {
+    echo "desktop-backup: not configured" >&2
+    return 1
+  }
+  reachable || {
+    echo "desktop-backup: $BACKUP_HOST is not reachable" >&2
+    return 1
+  }
+
+  local target="$HOME/Restored/$id-$(date +%Y-%m-%d_%H-%M-%S)"
+  mkdir -p "$target"
+
+  local includes=()
+  local path
+  for path in "$@"; do
+    includes+=(--include "$path")
+  done
+
+  echo "Restoring $id into $target"
+  if restic restore "$id" --target "$target" "${includes[@]}"; then
+    echo
+    echo "Restored to $target"
+    echo "Nothing outside that directory was touched -- move what you want back yourself."
+    notify-send "Restore complete" "$target"
+  else
+    notify-send -u critical "Restore failed" "$id"
+    return 1
+  fi
+}
+
+# Browsing beats restoring for the common case, which is one file from last Tuesday.
+# restic mount exposes every snapshot read-only, so the file manager does the choosing
+# and nothing can be overwritten by picking wrong.
+do_browse() {
+  configured || {
+    echo "desktop-backup: not configured" >&2
+    return 1
+  }
+  reachable || {
+    echo "desktop-backup: $BACKUP_HOST is not reachable" >&2
+    return 1
+  }
+
+  local mount="$HOME/Restored/browse"
+  mkdir -p "$mount"
+
+  echo "Mounting $BACKUP_REPOSITORY read-only at $mount"
+  restic mount "$mount" &
+  local pid=$!
+
+  local waited=0
+  while ! mountpoint -q "$mount" && ((waited < 40)); do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.25
+    waited=$((waited + 1))
+  done
+
+  if mountpoint -q "$mount"; then
+    echo "Every snapshot is under snapshots/. Nothing here can be written to."
+    yazi "$mount/snapshots" || true
+  else
+    echo "restic mount did not come up -- see the output above" >&2
+  fi
+
+  fusermount3 -u "$mount" 2>/dev/null
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+}
+
+do_forget() {
+  configured && reachable || {
+    echo "desktop-backup: nothing to do" >&2
+    return 1
+  }
+  restic forget --prune \
+    --keep-daily "${BACKUP_KEEP_DAILY:-7}" \
+    --keep-weekly "${BACKUP_KEEP_WEEKLY:-5}" \
+    --keep-monthly "${BACKUP_KEEP_MONTHLY:-12}"
+  rm -f "$CACHE_FILE"
+}
+
+case "${1:-backup}" in
+backup) do_backup ;;
+init) do_init ;;
+status)
+  shift
+  do_status "$@"
+  ;;
+snapshots) do_snapshots ;;
+browse) do_browse ;;
+restore)
+  shift
+  do_restore "$@"
+  ;;
+forget) do_forget ;;
+config) echo "$CONF" ;;
+*)
+  echo "desktop-backup: unknown command $1" >&2
+  exit 2
+  ;;
+esac

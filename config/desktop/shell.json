@@ -47,17 +47,30 @@
         },
         {
           "id": "clock",
-          "format": "ddd dd HH:mm:ss",
+          "format": "ddd dd HH:mm",
           "firstDay": "monday"
         },
         {
           "id": "spacer"
         },
         {
-          "id": "update"
+          "id": "monitors",
+          "type": "command",
+          "exec": "desktop-status-monitors",
+          "interval": 10,
+          "icon": "󰍹",
+          "hideWhenEmpty": false,
+          "colors": {
+            "laptop": "muted",
+            "unknown": "urgent"
+          },
+          "onClick": "desktop-menu monitors"
         },
         {
-          "id": "screenrecording"
+          "id": "toggles"
+        },
+        {
+          "id": "update"
         }
       ],
       "right": [
@@ -104,10 +117,13 @@
           "interval": 15,
           "icon": "󰚩",
           "colors": {
+            "critical": "urgent",
+            "warning": "accent",
             "busy": "accent",
             "active": "muted"
           },
-          "onClick": "desktop-menu agents"
+          "panel": "ai",
+          "onRightClick": "desktop-menu agents"
         },
         {
           "id": "camera",
@@ -121,16 +137,23 @@
           "onClick": "desktop-menu camera"
         },
         {
-          "id": "voxtype",
+          "id": "spacer"
+        },
+        {
+          "id": "backup",
           "type": "command",
-          "exec": "desktop-status-voxtype",
-          "follow": true,
-          "icon": "",
+          "exec": "desktop-backup status --bar",
+          "interval": 300,
+          "icon": "󰅧",
+          "hideWhenEmpty": false,
           "colors": {
-            "recording": "urgent",
-            "transcribing": "accent"
+            "stale": "urgent",
+            "never": "urgent",
+            "running": "accent",
+            "unconfigured": "accent",
+            "unreachable": "muted"
           },
-          "onClick": "voxtype record toggle"
+          "panel": "backup"
         },
         {
           "id": "spacer"

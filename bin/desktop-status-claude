@@ -1,22 +1,38 @@
 #!/usr/bin/env python3
 
-"""Claude Code usage over the last five hours, as bar-friendly JSON.
+"""Claude Code usage limits, as bar-friendly JSON.
 
-Read from the transcripts in ~/.claude/projects and nothing else: no credentials, no
-network. That makes this an honest local estimate rather than the authoritative rate
-limit -- Anthropic's own numbers live behind the OAuth usage endpoint, which needs the
-token in ~/.claude/.credentials.json. The window is five hours because that is the one
-Claude Code's limits are measured over, so the shape of the number is comparable even
-when the value is not.
+The headline number is how full the fullest limit is, which is the one thing worth a
+glance mid-session: the five-hour window, the week, and the extra-usage cap all move
+independently, and only the one nearest its ceiling changes what you do next.
+
+Those numbers come from the endpoint Claude Code's own /usage reads, authenticated with
+the OAuth token it already keeps in ~/.claude/.credentials.json. Nothing is sent
+anywhere except to Anthropic, the token is read at the moment of the call and never
+written down, and the response is cached in the runtime directory -- the endpoint is
+undocumented and rate-limits hard below five minutes, while the bar polls every fifteen
+seconds, so the cache is what keeps this from earning a 429.
+
+The transcripts under ~/.claude/projects are still read. They carry the token counts the
+endpoint does not report at all, and they are what is left to show when the endpoint
+cannot be reached -- on a train, or once the token has expired.
 """
 
 import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 WINDOW_SECONDS = 5 * 60 * 60
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+
+# Just above the five minutes below which the endpoint starts answering 429.
+CACHE_SECONDS = 330
+REQUEST_TIMEOUT = 8
 
 
 def compact(value):
@@ -26,67 +42,300 @@ def compact(value):
     return str(value)
 
 
-def main():
-    root = Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser() / "projects"
+def config_dir():
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude")).expanduser()
+
+
+def credentials():
+    """The OAuth token and the plan it belongs to, or (None, None).
+
+    An expired token is treated as absent: the refresh is Claude Code's job, and asking
+    the endpoint anyway buys a 401 rather than an answer.
+    """
+    try:
+        with (config_dir() / ".credentials.json").open() as handle:
+            oauth = json.load(handle).get("claudeAiOauth") or {}
+    except (OSError, ValueError):
+        return None, None
+
+    expires = oauth.get("expiresAt")
+    if isinstance(expires, (int, float)) and expires / 1000 <= time.time():
+        return None, oauth.get("subscriptionType")
+    return oauth.get("accessToken"), oauth.get("subscriptionType")
+
+
+def cache_file():
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(runtime) / "desktop" / "claude-usage.json"
+
+
+def cached_usage(max_age):
+    path = cache_file()
+    try:
+        age = time.time() - path.stat().st_mtime
+        if max_age is not None and age > max_age:
+            return None
+        with path.open() as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def store_usage(data):
+    path = cache_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # The response says how much of a limit is gone, not who you are, but it is
+        # still nobody else's business on a shared machine.
+        with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+            json.dump(data, handle)
+    except OSError:
+        pass
+
+
+def fetch_usage(token):
+    request = urllib.request.Request(
+        USAGE_URL,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "anthropic-beta": "oauth-2025-04-20",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT) as response:
+            return json.load(response)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
+def usage():
+    """The usage report, from the cache when it is fresh enough to reuse.
+
+    A failed call falls back to the cache at any age: a number from twenty minutes ago
+    is worth more than no number, and the alternative is a module that empties itself
+    every time the network hiccups.
+    """
+    fresh = cached_usage(CACHE_SECONDS)
+    if fresh is not None:
+        return fresh
+
+    token, _ = credentials()
+    if token:
+        report = fetch_usage(token)
+        if report is not None:
+            store_usage(report)
+            return report
+
+    return cached_usage(None)
+
+
+def local_tokens():
+    """Token counts for the last five hours, read from the transcripts."""
+    root = config_dir() / "projects"
     cutoff = time.time() - WINDOW_SECONDS
 
     tokens_in = tokens_out = cached = 0
     sessions = set()
 
-    if root.is_dir():
-        for path in root.glob("*/*.jsonl"):
-            # A transcript untouched inside the window cannot hold a message inside it.
-            try:
-                if path.stat().st_mtime < cutoff:
-                    continue
-            except OSError:
-                continue
+    if not root.is_dir():
+        return tokens_in, tokens_out, cached, sessions
 
-            try:
-                with path.open(errors="replace") as handle:
-                    for line in handle:
+    for path in root.glob("*/*.jsonl"):
+        # A transcript untouched inside the window cannot hold a message inside it.
+        try:
+            if path.stat().st_mtime < cutoff:
+                continue
+        except OSError:
+            continue
+
+        try:
+            with path.open(errors="replace") as handle:
+                for line in handle:
+                    try:
+                        record = json.loads(line)
+                    except ValueError:
+                        continue
+
+                    stamp = record.get("timestamp")
+                    if isinstance(stamp, str):
                         try:
-                            record = json.loads(line)
+                            seconds = time.mktime(time.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S"))
                         except ValueError:
                             continue
-
-                        stamp = record.get("timestamp")
-                        if isinstance(stamp, str):
-                            try:
-                                seconds = time.mktime(time.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S"))
-                            except ValueError:
-                                continue
-                            # Transcript timestamps are UTC; compare in the same frame.
-                            if seconds - time.timezone < cutoff:
-                                continue
-
-                        message = record.get("message")
-                        usage = message.get("usage") if isinstance(message, dict) else None
-                        if not isinstance(usage, dict):
+                        # Transcript timestamps are UTC; compare in the same frame.
+                        if seconds - time.timezone < cutoff:
                             continue
 
-                        tokens_in += usage.get("input_tokens", 0) + usage.get("cache_creation_input_tokens", 0)
-                        cached += usage.get("cache_read_input_tokens", 0)
-                        tokens_out += usage.get("output_tokens", 0)
-                        sessions.add(path.stem)
-            except OSError:
-                continue
+                    message = record.get("message")
+                    usage_record = message.get("usage") if isinstance(message, dict) else None
+                    if not isinstance(usage_record, dict):
+                        continue
+
+                    tokens_in += usage_record.get("input_tokens", 0) + usage_record.get(
+                        "cache_creation_input_tokens", 0
+                    )
+                    cached += usage_record.get("cache_read_input_tokens", 0)
+                    tokens_out += usage_record.get("output_tokens", 0)
+                    sessions.add(path.stem)
+        except OSError:
+            continue
+
+    return tokens_in, tokens_out, cached, sessions
+
+
+def until(stamp):
+    """"in 2h35m" for a reset inside the day, a weekday and time beyond it."""
+    if not isinstance(stamp, str):
+        return ""
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return ""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    # These land a fraction either side of the minute they mean -- a weekly window that
+    # resets at 11:00 comes back as 10:59:59.6 -- so a plain truncation reads a minute
+    # early. Round instead.
+    moment = (moment + timedelta(seconds=30)).replace(second=0, microsecond=0)
+
+    remaining = moment - datetime.now(timezone.utc)
+    seconds = int(remaining.total_seconds())
+    if seconds <= 0:
+        return "now"
+    if seconds < 24 * 3600:
+        hours, minutes = divmod(seconds // 60, 60)
+        return f"in {hours}h{minutes:02d}m" if hours else f"in {minutes}m"
+    return moment.astimezone().strftime("%a %H:%M")
+
+
+def money(amount):
+    """A {amount_minor, currency, exponent} figure, as text."""
+    if not isinstance(amount, dict):
+        return ""
+    minor = amount.get("amount_minor")
+    if not isinstance(minor, (int, float)):
+        return ""
+    symbol = {"EUR": "€", "USD": "$", "GBP": "£"}.get(amount.get("currency"), "")
+    return f"{symbol}{minor / (10 ** amount.get('exponent', 2)):.2f}"
+
+
+LIMIT_NAMES = {
+    "session": "Session",
+    "weekly_all": "Weekly",
+    "weekly_opus": "Weekly Opus",
+    "weekly_sonnet": "Weekly Sonnet",
+}
+
+SEVERITY_RANK = {"normal": 0, "warning": 1, "critical": 2}
+
+
+def build():
+    """Everything known about the current usage, formatted for display.
+
+    One structure serves both readers: the bar line below, and the panel behind it via
+    --report. The formatting lives here rather than in QML because a percentage that
+    reads "94%" in one place and "94.03%" in the other is the kind of difference nobody
+    notices until they are comparing the two.
+    """
+    report = usage() or {}
+    tokens_in, tokens_out, cached, sessions = local_tokens()
+    _, plan = credentials()
+
+    limits = []
+    worst = "normal"
+    for entry in sorted(
+        (e for e in (report.get("limits") or []) if isinstance(e, dict)),
+        key=lambda e: -(e.get("percent") or 0),
+    ):
+        percent = entry.get("percent")
+        if not isinstance(percent, (int, float)):
+            continue
+        severity = entry.get("severity") or "normal"
+        limits.append({
+            "name": LIMIT_NAMES.get(entry.get("kind"), entry.get("kind") or "Limit"),
+            "percent": int(percent),
+            "resets": until(entry.get("resets_at")),
+            "severity": severity,
+        })
+        if SEVERITY_RANK.get(severity, 0) > SEVERITY_RANK[worst]:
+            worst = severity
+
+    spend = None
+    raw_spend = report.get("spend")
+    if (
+        isinstance(raw_spend, dict)
+        and raw_spend.get("enabled")
+        and isinstance(raw_spend.get("percent"), (int, float))
+    ):
+        spend = {
+            "percent": int(raw_spend["percent"]),
+            "used": money(raw_spend.get("used")),
+            "limit": money(raw_spend.get("limit")),
+            "severity": raw_spend.get("severity") or "normal",
+        }
+        if SEVERITY_RANK.get(spend["severity"], 0) > SEVERITY_RANK[worst]:
+            worst = spend["severity"]
 
     total = tokens_in + tokens_out
-    if total == 0:
-        print(json.dumps({"text": "", "class": "idle", "tooltip": "No Claude usage in the last 5h"}))
-        return 0
+    return {
+        "plan": plan or "",
+        "limits": limits,
+        "spend": spend,
+        "tokens": {
+            "in": compact(tokens_in),
+            "out": compact(tokens_out),
+            "cached": compact(cached),
+            "total": compact(total),
+            "sessions": len(sessions),
+            "any": total > 0,
+        },
+        # False when the endpoint has never answered on this machine, which is what
+        # tells the panel to explain itself rather than show an empty set of meters.
+        "available": bool(limits),
+        "severity": worst,
+    }
 
-    # Cache reads are counted separately: they dominate the raw total and are billed
-    # and rate-limited at a fraction of fresh input, so folding them into the headline
-    # would make the number look alarming and mean nothing.
-    tooltip = (
-        f"Claude Code, last 5h\n"
-        f"{compact(tokens_in)} in / {compact(tokens_out)} out across {len(sessions)} session(s)\n"
-        f"{compact(cached)} read from cache\n"
-        f"Local transcript totals, not the authoritative limit"
-    )
-    print(json.dumps({"text": compact(total), "class": "active", "tooltip": tooltip}))
+
+def bar_line(data):
+    lines = []
+    if data["plan"]:
+        lines.append(f"Claude Code ({data['plan']})")
+
+    for limit in data["limits"]:
+        resets = f" -- resets {limit['resets']}" if limit["resets"] else ""
+        lines.append(f"{limit['name']} {limit['percent']}%{resets}")
+
+    # The extra-usage cap is money rather than tokens, so it colours the module and
+    # explains itself in the tooltip, but it never becomes the headline percentage --
+    # a bar reading "94%" that turns out to be euros would be a lie worth avoiding.
+    spend = data["spend"]
+    if spend:
+        detail = f" ({spend['used']} of {spend['limit']})" if spend["used"] and spend["limit"] else ""
+        lines.append(f"Extra usage {spend['percent']}%{detail}")
+
+    tokens = data["tokens"]
+    if tokens["any"]:
+        lines.append(
+            f"{tokens['in']} in / {tokens['out']} out, {tokens['cached']} cached"
+            f" -- last 5h across {tokens['sessions']} session(s), counted locally"
+        )
+
+    if not data["available"]:
+        if not tokens["any"]:
+            return {"text": "", "class": "idle", "tooltip": "No Claude usage in the last 5h"}
+        lines.append("Usage limits unavailable -- showing local transcript totals")
+        return {"text": tokens["total"], "class": "active", "tooltip": "\n".join(lines)}
+
+    state = {"critical": "critical", "warning": "warning"}.get(data["severity"], "active")
+    return {"text": f"{data['limits'][0]['percent']}%", "class": state, "tooltip": "\n".join(lines)}
+
+
+def main():
+    data = build()
+    # --report is what the panel reads: the same numbers, before they are flattened
+    # into one line and a tooltip.
+    print(json.dumps(data if "--report" in sys.argv[1:] else bar_line(data)))
     return 0
 
 

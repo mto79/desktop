@@ -2,8 +2,8 @@ import QtQuick
 import qs.Commons
 
 // A single-line field for a panel: the passphrase box, and whatever else needs typing
-// later. Panels hold exclusive keyboard focus while open, so this is somewhere for that
-// focus to land -- which is the whole reason the panels moved off xdg_popup.
+// later. Panels hold keyboard focus while open, so this is somewhere for that focus to
+// land -- which is the whole reason the panels moved off xdg_popup.
 Rectangle {
   id: root
 

@@ -5,7 +5,8 @@
 # We track the 2.8.0 snapshot rather than Fedora's keepassxc RPM (2.7.12),
 # so this deliberately does NOT install the package -- having both left
 # Hyprland launching /usr/bin/keepassxc while the app menu launched the
-# AppImage. Installs to ~/.local/bin, writes a .desktop entry, and points
+# AppImage. Installs to ~/.local/bin, writes a .desktop entry, symlinks
+# keepassxc-cli back onto PATH (the RPM used to provide it), and points
 # the browser native-messaging manifests at the AppImage (which serves as
 # its own proxy; the separate keepassxc-proxy binary links against system
 # Qt that is not installed once the RPM is gone).
@@ -24,6 +25,7 @@ SNAPSHOT_INDEX="https://snapshot.keepassxc.org"
 APPIMAGE_NAME="KeePassXC-${VERSION}-x86_64.AppImage"
 APPIMAGE_DIR="${HOME}/.local/bin"
 APPIMAGE_PATH="${APPIMAGE_DIR}/KeePassXC.AppImage"
+CLI_PATH="${APPIMAGE_DIR}/keepassxc-cli"
 VERSION_FILE="${APPIMAGE_DIR}/.keepassxc-version"
 DESKTOP_DIR="${HOME}/.local/share/applications"
 ICON_DIR="${HOME}/.local/share/icons"
@@ -84,6 +86,15 @@ download_appimage() {
   chmod +x "$APPIMAGE_PATH"
   echo "${VERSION} (build ${build})" >"$VERSION_FILE"
   ok "KeePassXC ${VERSION} installed at ${APPIMAGE_PATH}"
+}
+
+link_cli() {
+  # keepassxc-cli lives inside the AppImage, but AppRun only dispatches to it when the
+  # name it was invoked as says so -- `KeePassXC.AppImage cli` or an argv[0] of
+  # keepassxc-cli. Dropping the RPM took /usr/bin/keepassxc-cli with it, so a symlink
+  # named after the binary is what puts the CLI back on PATH.
+  ln -sfn "$APPIMAGE_PATH" "$CLI_PATH"
+  ok "keepassxc-cli linked at ${CLI_PATH}"
 }
 
 create_desktop_entry() {
@@ -178,6 +189,7 @@ do_install() {
   install_fuse
   remove_rpm
   download_appimage
+  link_cli
   create_desktop_entry
   install_polkit_policy
   link_browser_integration
@@ -192,6 +204,7 @@ install)
   ;;
 update)
   download_appimage
+  link_cli
   create_desktop_entry
   install_polkit_policy
   ;;

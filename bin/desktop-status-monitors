@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+# desktop-status-monitors: report the monitor layout in force as bar-friendly JSON.
+#
+# desktop-monitors-watch picks the layout on its own now, when a screen comes or goes,
+# so the bar is the only place that choice is visible without opening a menu. Clicking
+# the module opens that menu -- see the "monitors" widget in config/desktop/shell.json.
+#
+# The layout name comes from the generated file rather than from the screens attached:
+# what is in force is the question, and a desk can match a layout it has not been given.
+#
+# The module is the icon alone -- the name goes to the tooltip and the state to `class`,
+# which colours it. A desk changes a few times a week at most, so a word spelling out
+# what has not changed since Monday is a word the middle of the bar can do without.
+
+set -euo pipefail
+
+layout=$(desktop-cmd-monitors-switch --current 2>/dev/null || true)
+
+screens=$(hyprctl monitors -j 2>/dev/null |
+  jq -r '[.[] | "\(.name) \(.width)x\(.height)"] | join(", ")' 2>/dev/null || true)
+[[ -n "$screens" ]] || screens="no screens"
+
+# No layout recorded means the file was never written here -- a fresh install, or an
+# edit by hand. Worth saying rather than showing an empty module, since the menu is
+# the fix and the module is what opens it.
+if [[ -z "$layout" ]]; then
+  jq -cn --arg tooltip "No layout applied yet -- $screens" \
+    '{text: "", class: "unknown", tooltip: $tooltip}'
+  exit 0
+fi
+
+jq -cn --arg layout "$layout" --arg tooltip "$layout layout -- $screens" \
+  '{text: "", class: $layout, tooltip: $tooltip}'

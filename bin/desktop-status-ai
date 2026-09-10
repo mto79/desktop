@@ -8,10 +8,11 @@
 # one paid the bar's full padding for the privilege. Merging them costs a separator and
 # saves a widget's worth of horizontal space.
 #
-# Composed from the two existing scripts rather than reimplementing either: the token
+# Composed from the two existing scripts rather than reimplementing either: the limit
 # accounting in desktop-status-claude is the fiddly part, and there is no reason for two
-# copies of it. `class` follows the agents, since a running agent is the thing worth
-# colouring the bar for; the token figure is context, not an alert.
+# copies of it. `class` follows the agents -- a running agent is the thing worth
+# colouring the bar for -- except when the usage figure has turned into an alert of its
+# own. A week that is 95% spent outranks the news that something is running.
 
 set -uo pipefail
 
@@ -32,7 +33,12 @@ jq -c -n --argjson a "$agents" --argjson c "$claude" '
         else $tokenText
         end
       ),
-      class: (if $agentText != "" then ($a.class // "busy") else ($c.class // "idle") end),
+      class: (
+        if (($c.class // "") | IN("warning", "critical")) then $c.class
+        elif $agentText != "" then ($a.class // "busy")
+        else ($c.class // "idle")
+        end
+      ),
       tooltip: (
         [($a.tooltip // ""), ($c.tooltip // "")]
         | map(select(. != ""))

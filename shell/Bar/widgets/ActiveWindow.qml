@@ -26,7 +26,8 @@ BarItem {
     id: metrics
 
     font.family: Style.fontFamily
-    font.pixelSize: Style.fontSize
+    font.pixelSize: Style.barLabelSize
+    font.weight: Style.barLabelWeight
     text: root.title
   }
 
@@ -44,9 +45,10 @@ BarItem {
     width: Math.min(root.maxWidth, metrics.width)
     text: root.title
     textFormat: Text.PlainText
-    color: Color.barMuted
+    color: Color.barText
     font.family: Style.fontFamily
-    font.pixelSize: Style.fontSize
+    font.pixelSize: Style.barLabelSize
+    font.weight: Style.barLabelWeight
     elide: Text.ElideRight
   }
 }

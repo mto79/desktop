@@ -2,7 +2,7 @@
 
 set -e
 
-echo -e "\e[32mUpdate Omadora\e[0m"
+echo -e "\e[32mUpdate Desktop\e[0m"
 
 git -C "$DESKTOP_PATH" pull --autostash
-git -C "$DESKTOP_PATH" --no-pager diff --check || git -C "$OMADORA_PATH" reset --merge
+git -C "$DESKTOP_PATH" --no-pager diff --check || git -C "$DESKTOP_PATH" reset --merge

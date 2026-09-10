@@ -15,5 +15,6 @@ echo "▶ Restarting NetworkManager..."
 sudo systemctl restart NetworkManager
 
 echo "✅ WireGuard installed successfully!"
-echo "▶ Import a config with: nmcli connection import type wireguard file <config.conf>"
+echo "▶ Import a config with: nmcli connection import type wireguard file <interface>.conf"
+echo "   (filename must be a valid interface name, e.g. wg0.conf)"
 echo "▶ Or use nm-connection-editor / Settings → VPN to add a WireGuard connection."

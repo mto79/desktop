@@ -21,10 +21,36 @@ import qs.Ui
 // Each icon is its own hover target, so a tray item behaves like every other thing in
 // the bar: it lights up under the pointer, it says what it is, and its highlight is the
 // width of the thing you are about to click.
+//
+// The icons live behind a chevron and unfold on hover, which is what waybar's
+// group/tray-expander and Omarchy's bar both do. A tray is the one group in the bar
+// worth hiding: its contents are decided by whatever happens to be running, it is four
+// anonymous glyphs most of the time, and none of them is a control you go looking for --
+// which is the argument Toggles.qml makes for the opposite decision about a cluster of
+// two buttons you press on purpose.
+//
+// One departure from waybar: an item that asks for attention is never folded away. The
+// whole point of NeedsAttention is to be seen, and a drawer that swallows it turns the
+// tray's only urgent signal into something you find by accident.
 BarWidget {
   id: root
 
   readonly property int iconSize: (widgetConfig && widgetConfig.iconSize) ? widgetConfig.iconSize : Style.trayIconSize
+
+  // {"id": "tray", "fold": false} keeps every icon out, the way this widget used to be.
+  readonly property bool foldable: !(widgetConfig && widgetConfig.fold === false)
+
+  readonly property var items: SystemTray.items ? SystemTray.items.values : []
+
+  // Driven by the hover handler through the two timers below, never set directly: a
+  // pointer crossing the bar should not be able to open or shut this on its own.
+  property bool open: false
+  readonly property bool expanded: !foldable || open
+
+  // An item shouting for attention is shown whether the drawer is open or not.
+  function pinned(item) {
+    return !!item && item.status === Status.NeedsAttention;
+  }
 
   // Recolour icons to the bar's foreground. Off by default and deliberately not
   // automatic: it makes a monochrome icon match the bar and flattens a deliberately
@@ -34,20 +60,28 @@ BarWidget {
   //   {"id": "tray", "tint": ["nm-applet", "..."]}  only these, matched on the item id
   readonly property var tintConfig: (widgetConfig && widgetConfig.tint !== undefined) ? widgetConfig.tint : false
 
-  // Replace an item's icon with a glyph from the bar font, keyed on the item id:
+  // A glyph from the bar font to fall back to when an item's own icon will not load,
+  // keyed on the item id:
   //
   //   {"id": "tray", "glyphs": {"keepassxc": "\uf084", "nm-applet": "\uf1eb"}}
   //
-  // This is the only way a tray icon can genuinely match the rest of the bar. The icons
-  // themselves arrive from the applications as names or pixmaps and cannot be restyled
-  // -- Omarchy does not restyle them either, it hides them behind a hover drawer -- so
-  // looking like the bar means not using them at all. Anything unmapped keeps its own
-  // icon, which is the sane default for a tray whose contents change.
+  // A rescue, not a restyle. Two icons on this machine genuinely cannot be resolved --
+  // keepassxc-locked, because KeePassXC is an AppImage and only its main icon was copied
+  // out, and nm-no-connection-secure -- and both would otherwise be Qt's magenta
+  // checkerboard. Everything that does resolve keeps the icon the application shipped,
+  // in the colours it shipped it in, because a tray of identical monochrome glyphs is
+  // harder to read at a glance than a row of icons you already recognise by shape and
+  // colour from every other desktop you have used.
   //
-  // It also rescues an icon the theme cannot resolve: keepassxc-locked exists nowhere on
-  // this machine, because KeePassXC is an AppImage and only its main icon was copied
-  // out, and it would otherwise be Qt's magenta checkerboard.
+  // This used to force the glyph whether the icon loaded or not, which is why every item
+  // in the tray looked alike.
   readonly property var glyphMap: (widgetConfig && widgetConfig.glyphs) ? widgetConfig.glyphs : ({})
+
+  // What an item with no icon and no mapping of its own falls back to. Without it the
+  // checkerboard is back the first time some new tray application ships a bad icon name
+  // -- which is the whole failure this mechanism exists to prevent, so it should not
+  // depend on someone having predicted the offender by name.
+  readonly property string fallbackGlyph: (widgetConfig && widgetConfig.fallbackGlyph) ? widgetConfig.fallbackGlyph : "\uf013"
 
   function glyphFor(item) {
     if (!item)
@@ -148,6 +182,45 @@ BarWidget {
   }
 
   implicitWidth: layout.implicitWidth
+  // Nothing to fold out of, and no chevron worth showing, when the tray is empty.
+  visible: items.length > 0
+
+  // A HoverHandler rather than a MouseArea over the group: a MouseArea would have to sit
+  // above the per-icon ones to see the pointer, and would then eat the clicks they exist
+  // to receive. A handler sees the pointer without competing for it.
+  HoverHandler {
+    id: groupHover
+  }
+
+  onExpandedChanged: if (!expanded && root.tooltips)
+    root.tooltips.release(chevron)
+
+  Timer {
+    id: openTimer
+
+    interval: Style.trayOpenDelay
+    onTriggered: root.open = true
+  }
+
+  Timer {
+    id: closeTimer
+
+    interval: Style.trayCloseDelay
+    onTriggered: root.open = false
+  }
+
+  // One writer for both timers, so a pointer that crosses the boundary twice inside a
+  // single delay cannot leave the drawer half-committed.
+  onHoveredByPointerChanged: {
+    openTimer.stop();
+    closeTimer.stop();
+    if (hoveredByPointer && !root.open)
+      openTimer.start();
+    else if (!hoveredByPointer && root.open)
+      closeTimer.start();
+  }
+
+  readonly property bool hoveredByPointer: groupHover.hovered
 
   RowLayout {
     id: layout
@@ -156,6 +229,59 @@ BarWidget {
     // Was a hardcoded 12, which put the tray on a different rhythm from the rest of the
     // bar. The gap only has to keep two hover highlights from touching.
     spacing: Style.itemSpacing
+
+    // The handle. Points the way the icons will go: left while they are folded away,
+    // back to the right once they are out.
+    Item {
+      id: chevron
+
+      visible: root.foldable
+      Layout.fillHeight: true
+      implicitWidth: root.iconSize + Style.itemPaddingH
+
+      readonly property bool hovered: chevronArea.containsMouse
+
+      onHoveredChanged: if (root.tooltips) {
+        if (hovered)
+          root.tooltips.request(chevron, root.expanded ? "Hide the tray" : root.items.length + (root.items.length === 1 ? " tray icon" : " tray icons"));
+        else
+          root.tooltips.release(chevron);
+      }
+
+      Rectangle {
+        anchors.fill: parent
+        color: chevron.hovered ? Color.barHover : "transparent"
+        radius: Style.barRadius
+
+        Behavior on color {
+          ColorAnimation {
+            duration: 100
+          }
+        }
+      }
+
+      Text {
+        anchors.centerIn: parent
+        text: root.expanded ? "\uf054" : "\uf053"
+        color: chevron.hovered ? Color.barText : Color.barMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.iconSize
+      }
+
+      // Hover is what opens the drawer; the click is here so that a tray reached by
+      // touchpad tap -- which sends no hover -- is not a tray you cannot open.
+      MouseArea {
+        id: chevronArea
+
+        anchors.fill: parent
+        hoverEnabled: true
+        onClicked: {
+          openTimer.stop();
+          closeTimer.stop();
+          root.open = !root.open;
+        }
+      }
+    }
 
     Repeater {
       model: SystemTray.items
@@ -166,18 +292,69 @@ BarWidget {
         required property SystemTrayItem modelData
 
         readonly property bool tinted: root.shouldTint(modelData)
-        readonly property string glyph: root.glyphFor(modelData)
+
+        // The name inside the provider URL the tray hands us -- "keepassxc-locked" out of
+        // "image://icon/keepassxc-locked". Anything after a '?' is the provider's own
+        // query, not part of the name.
+        readonly property string iconName: {
+          var src = String(modelData.icon || "");
+          var marker = "image://icon/";
+          if (src.indexOf(marker) !== 0)
+            return "";
+          var name = src.substring(marker.length);
+          var query = name.indexOf("?");
+          return query === -1 ? name : name.substring(0, query);
+        }
+
+        // Image.status is not enough on its own, and this is the trap that made the
+        // glyphs an override in the first place. A themed icon the theme cannot resolve
+        // does not fail to load: Quickshell's provider answers with Qt's magenta
+        // checkerboard at status Ready, so the Image is perfectly happy and the widget
+        // has no idea it is drawing a placeholder. Asking whether the name resolves is
+        // the only way to find out.
+        readonly property bool iconFailed: {
+          if (iconImage.status === Image.Error)
+            return true;
+          if (iconName === "")
+            return false;
+          return Quickshell.iconPath(iconName, true) === "";
+        }
+        readonly property string glyph: {
+          if (!iconFailed)
+            return "";
+          var mapped = root.glyphFor(modelData);
+          return mapped !== "" ? mapped : root.fallbackGlyph;
+        }
+
+        readonly property bool shown: root.expanded || root.pinned(modelData)
 
         // Half of BarItem's padding either side. The full amount is sized for an icon
         // with a label beside it; a bare icon in it looks marooned.
-        implicitWidth: root.iconSize + Style.itemPaddingH
+        readonly property int fullWidth: root.iconSize + Style.itemPaddingH
+        implicitWidth: shown ? fullWidth : 0
         implicitHeight: root.height
+        // Each icon folds on its own width rather than the row sliding behind a mask:
+        // that is what lets a pinned item stay out while the ones beside it close, and
+        // it costs nothing -- RowLayout drops a zero-width item and reflows.
+        clip: true
+        visible: implicitWidth > 0
+
+        Behavior on implicitWidth {
+          NumberAnimation {
+            duration: Style.trayFoldDuration
+            easing.type: Easing.OutCubic
+          }
+        }
+
+        // A folded icon must not answer the pointer, or the drawer would reopen from
+        // under a zero-width sliver the moment it finished closing.
+        enabled: shown
 
         // The same highlight, radius and fade BarItem uses.
         Rectangle {
           anchors.fill: parent
           color: mouseArea.containsMouse ? Color.barHover : "transparent"
-          radius: Style.radius
+          radius: Style.barRadius
 
           Behavior on color {
             ColorAnimation {
@@ -199,13 +376,13 @@ BarWidget {
           smooth: true
           // Hidden while tinted: the effect below draws it instead. Still a texture
           // provider, which is all MultiEffect needs from it.
-          visible: !trayItem.tinted && trayItem.glyph === ""
+          visible: !trayItem.tinted && !trayItem.iconFailed
         }
 
         MultiEffect {
           anchors.fill: iconImage
           source: iconImage
-          visible: trayItem.tinted && trayItem.glyph === ""
+          visible: trayItem.tinted && !trayItem.iconFailed
           colorization: 1.0
           colorizationColor: Color.barText
         }

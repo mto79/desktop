@@ -14,11 +14,20 @@ import qs.Commons
 //   * PopupHost puts a transparent catcher window under the open panel for
 //     click-outside. It deliberately does not cover the bar, so clicking a different
 //     bar widget still reaches that widget rather than being eaten.
-//   * Keyboard focus is exclusive, which is what makes Escape work and what a text
-//     field inside a panel would need. It is a constant rather than a binding on
-//     `visible`: bound, the surface mapped while the binding still read None and never
-//     took focus, so Escape did nothing. A hidden window has no surface to hold focus
-//     with, so there is nothing to switch off.
+//   * Keyboard focus is on-demand, which is enough for Escape and for a text field
+//     inside a panel. It is a constant rather than a binding on `visible`: bound, the
+//     surface mapped while the binding still read None and never took focus, so Escape
+//     did nothing. A hidden window has no surface to hold focus with, so there is
+//     nothing to switch off.
+//
+//     Not Exclusive, which this was until it was measured. Exclusive is an input grab in
+//     Hyprland and not merely a keyboard one: with a panel open the bar stopped getting
+//     pointer events at all -- no hover highlight, and a click on another widget going
+//     nowhere -- so moving between panels meant pressing Escape first every time. The
+//     seam is invisible from the QML side, which is why it survived so long: nothing
+//     errors, the bar simply goes deaf. OnDemand still takes real focus -- Escape
+//     reaches the panel, and keeps reaching it after switching from one widget to
+//     another -- and leaves the pointer alone.
 PanelWindow {
   id: root
 
@@ -50,7 +59,7 @@ PanelWindow {
   // Above the bar's Top layer, so the panel is never drawn under it, and above the
   // catcher window, which is what makes the catcher safe to stretch full-screen.
   WlrLayershell.layer: WlrLayer.Overlay
-  WlrLayershell.keyboardFocus: WlrKeyboardFocus.Exclusive
+  WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand
 
   // Anchored into the top-left of what the bar does not occupy, then pushed across with
   // a margin. ExclusionMode.Normal with a zero zone is the combination that reserves no

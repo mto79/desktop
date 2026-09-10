@@ -4,8 +4,37 @@ font_name="$1"
 
 if [[ -n "$font_name" && "$font_name" != "CNCLD" ]]; then
   if fc-list | grep -iq "$font_name"; then
+    # Ghostty gets the Mono cut of a Nerd Font, never the Propo one. The two differ only
+    # in how wide the icon glyphs are: Propo gives each its natural width, which is what
+    # the bar wants, and Mono squeezes every one into a single cell, which is the only
+    # thing a terminal grid can lay out. Feeding the bar's font to ghostty knocks every
+    # powerline segment and every glyph in a prompt out of its column.
+    terminal_font="$font_name"
+    for swap in "NFP:NFM" "Nerd Font Propo:Nerd Font Mono"; do
+      propo=${swap%%:*}
+      mono=${swap#*:}
+      case "$font_name" in
+      *"$propo"*)
+        candidate=${font_name/$propo/$mono}
+        fc-list | grep -q "$candidate" && terminal_font="$candidate"
+        break
+        ;;
+      esac
+    done
+
     if [[ -f ~/.config/ghostty/config ]]; then
-      sed -i "s/^\(font-family[^=]*=\) \".*\"$/\1 \"$font_name\"/" ~/.config/ghostty/config
+      # The line arrives commented out -- ghostty's own default is a reasonable one, so
+      # the config ships without overriding it -- and a sed anchored at ^font-family
+      # slid straight past that for as long as it has existed, changing the bar's font
+      # and leaving the terminal on whatever it had. Set the line whatever state it is
+      # in: live, commented, or absent.
+      if grep -q '^ *# *font-family' ~/.config/ghostty/config; then
+        sed -i "s|^ *# *font-family.*|font-family = \"$terminal_font\"|" ~/.config/ghostty/config
+      elif grep -q '^font-family' ~/.config/ghostty/config; then
+        sed -i "s|^font-family.*|font-family = \"$terminal_font\"|" ~/.config/ghostty/config
+      else
+        printf 'font-family = "%s"\n' "$terminal_font" >>~/.config/ghostty/config
+      fi
       pkill -SIGUSR2 ghostty
     fi
 

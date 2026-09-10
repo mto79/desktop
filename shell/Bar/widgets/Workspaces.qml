@@ -19,7 +19,7 @@ BarWidget {
     id: layout
 
     anchors.fill: parent
-    spacing: Style.itemSpacing
+    spacing: Style.barWorkspaceSpacing
 
     Repeater {
       model: Hyprland.workspaces
@@ -36,15 +36,27 @@ BarWidget {
 
         visible: onThisMonitor
         Layout.fillHeight: true
-        implicitWidth: visible ? label.implicitWidth + Style.itemPaddingH : 0
+        implicitWidth: visible ? label.implicitWidth + Style.barWorkspacePaddingH * 2 : 0
 
+        // The pill, and the hover on top of it as a second layer rather than a swapped
+        // colour: two translucent lifts compose to a brighter one, so hovering reads
+        // without either state needing a colour of its own.
         Rectangle {
           anchors.fill: parent
-          color: hover.containsMouse ? Color.barHover : "transparent"
+          anchors.topMargin: Style.barWorkspaceInsetV
+          anchors.bottomMargin: Style.barWorkspaceInsetV
+          radius: Style.barWorkspaceRadius
+          color: Color.barWorkspaceBackground
 
-          Behavior on color {
-            ColorAnimation {
-              duration: 100
+          Rectangle {
+            anchors.fill: parent
+            radius: parent.radius
+            color: hover.containsMouse ? Color.barHover : "transparent"
+
+            Behavior on color {
+              ColorAnimation {
+                duration: 100
+              }
             }
           }
         }
@@ -54,10 +66,14 @@ BarWidget {
 
           anchors.centerIn: parent
           text: workspace.modelData.name
-          color: workspace.focused ? Color.barActiveWorkspace : (workspace.modelData.urgent ? Color.barUrgent : Color.barMuted)
+          // Full strength when idle, the way waybar drew them: a workspace number is a
+          // label for a place you can go, not a readout that only matters when it
+          // changes. The focused one is told apart by colour alone, as it was there --
+          // a weight change as well would shift every number beside it.
+          color: workspace.focused ? Color.barActiveWorkspace : (workspace.modelData.urgent ? Color.barUrgent : Color.barText)
           font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize
-          font.bold: workspace.focused
+          font.pixelSize: Style.barLabelSize
+          font.weight: Style.barLabelWeight
 
           Behavior on color {
             ColorAnimation {

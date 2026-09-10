@@ -14,3 +14,7 @@ flatpak install flathub io.podman_desktop.PodmanDesktop
 
 echo "✅ Podman installed successfully!"
 echo "▶ Run it with: flatpak run io.podman_desktop.PodmanDesktop"
+
+# flatpak override --user \
+#   --env=ELECTRON_FORCE_DEVICE_SCALE_FACTOR=1.5 \
+#   io.podman_desktop.PodmanDesktop

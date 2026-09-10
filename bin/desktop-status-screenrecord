@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+# desktop-status-screenrecord: whether a screen recording is running, and for how long.
+#
+# The bar needs two things the old waybar indicator never reported: how long the
+# recording has been going, so the button can count up, and which tool holds it, since
+# wf-recorder is what desktop-cmd-screenrecord starts but wl-screenrec is what a
+# hardware-encoding setup uses instead.
+#
+# Elapsed time comes from ps rather than /proc/<pid>/stat: field 22 is only reliable
+# when the process name contains no spaces or brackets, and nothing guarantees that.
+
+set -uo pipefail
+
+pid=""
+tool=""
+for candidate in wf-recorder wl-screenrec; do
+  pid=$(pgrep -x "$candidate" 2>/dev/null | head -1)
+  if [[ -n "$pid" ]]; then
+    tool="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$pid" ]]; then
+  jq -cn '{active: false, elapsed: 0, tool: "", tooltip: "Record a region -- right-click for a whole screen"}'
+  exit 0
+fi
+
+elapsed=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+elapsed=${elapsed:-0}
+
+jq -cn --argjson elapsed "$elapsed" --arg tool "$tool" \
+  '{active: true, elapsed: $elapsed, tool: $tool, tooltip: ("Recording with " + $tool + " -- click to stop")}'

@@ -34,6 +34,10 @@ QtObject {
   property color barAccent: accent
   property color barUrgent: urgent
   property color barActiveWorkspace: accent
+  // The filled box behind each workspace number. Derived from barText rather than named
+  // as a hex the way waybar's #1e1e2e was: a fixed colour is only right for one theme,
+  // and a lift off whatever the bar is sitting on is right for all of them.
+  property color barWorkspaceBackground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.08)
   property color barHover: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.1)
 
   // Popup surfaces. Same contract as the bar roles: each defaults to a foundational
@@ -89,6 +93,7 @@ QtObject {
     barUrgent = pick(bar, "urgent", urgent);
     barActiveWorkspace = pick(bar, "activeWorkspace", barAccent);
     barHover = Qt.rgba(barText.r, barText.g, barText.b, 0.1);
+    barWorkspaceBackground = pick(bar, "workspaceBackground", Qt.rgba(barText.r, barText.g, barText.b, 0.08));
 
     var popup = parsed.popup || {};
     popupBackground = pick(popup, "background", background);

@@ -40,6 +40,14 @@ unknown = sorted({w["id"] for sec in layout.values() for w in sec
 ok("every widget id in shell.json has a component") if not unknown else no(
     "every widget id in shell.json has a component", " ".join(unknown))
 
+# Every component the registry names has a file behind it. A widget deleted without its
+# registry entry takes the whole config down at load; one renamed without it renders
+# nothing and says nothing.
+declared = set(re.findall(r"^\s{4}(\w+) \{\}$", registry, re.M))
+missing = sorted(t for t in declared if not (root / "shell/Bar/widgets" / f"{t}.qml").exists())
+ok("every widget the registry names exists") if not missing else no(
+    "every widget the registry names exists", " ".join(missing))
+
 # Every command widget points at a script that exists.
 gone = sorted({w["exec"].split()[0] for sec in layout.values() for w in sec
                if w.get("type") == "command" and w.get("exec")
@@ -81,5 +89,48 @@ if pgrep -x quickshell >/dev/null && have busctl; then
   esac
 else
   pass "skipped, no running shell to check the notification bus against"
+fi
+
+# Exclusive keyboard focus on a panel is an input grab in Hyprland, not just a keyboard
+# one: it stops the bar receiving pointer events for as long as a panel is open, so
+# hovering a widget does nothing and clicking one to switch panels does nothing -- you
+# have to press Escape first. Nothing errors when it is wrong; the bar just goes deaf,
+# which is why it went unnoticed. OnDemand takes focus just as well for Escape and for
+# the passphrase field.
+if grep -q "WlrKeyboardFocus.Exclusive" "$ROOT/shell/Ui/Popup.qml"; then
+  fail "panels do not grab the pointer away from the bar" \
+    "Popup.qml asks for WlrKeyboardFocus.Exclusive"
+else
+  pass "panels do not grab the pointer away from the bar"
+fi
+
+# A panel with no keyboard focus at all cannot see Escape, and the passphrase field
+# would have nowhere to put the keyboard.
+if grep -q "WlrLayershell.keyboardFocus: WlrKeyboardFocus.OnDemand" "$ROOT/shell/Ui/Popup.qml"; then
+  pass "panels still take keyboard focus"
+else
+  fail "panels still take keyboard focus" "Popup.qml sets no OnDemand keyboard focus"
+fi
+
+# The three bar sections are positioned independently, so nothing but this clamp stops
+# the right one growing leftwards over the centre on a full bar -- silently, with the
+# covered widgets still taking the clicks. Twenty pixels of tray chevron were enough to
+# reach it on a 1920-wide screen.
+if grep -q "rightSection.x - width" "$ROOT/shell/Bar/Bar.qml"; then
+  pass "the centre section cannot be overlapped by the right"
+else
+  fail "the centre section cannot be overlapped by the right" \
+    "Bar.qml no longer clamps centerSection.x against rightSection"
+fi
+
+# An icon name the theme cannot resolve does not make the Image fail -- Quickshell's
+# provider answers with Qt's magenta checkerboard at status Ready. Checking the name is
+# the only way to catch it, and without that check keepassxc-locked is a pink square in
+# the tray every time the database is locked.
+if grep -q "Quickshell.iconPath(iconName, true)" "$ROOT/shell/Bar/widgets/Tray.qml"; then
+  pass "an unresolvable tray icon is caught before it draws"
+else
+  fail "an unresolvable tray icon is caught before it draws" \
+    "Tray.qml trusts Image.status, which is Ready for the checkerboard"
 fi
 finish

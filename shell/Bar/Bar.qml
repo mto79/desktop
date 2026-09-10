@@ -67,8 +67,22 @@ Item {
 
   // The single instance of each panel. Registered by id so widgets can open one by
   // name without Bar.qml having to expose each panel individually.
+  AiPanel {
+    id: aiPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   AudioPanel {
     id: audioPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
+  BackupPanel {
+    id: backupPanel
 
     Component.onCompleted: popupHost.register(panelId, this)
     onDismissed: popupHost.notifyClosed(panelId)
@@ -147,7 +161,6 @@ Item {
       right: Style.barInset
     }
 
-
     anchors {
       top: root.position === "top"
       bottom: root.position === "bottom"
@@ -165,7 +178,6 @@ Item {
       radius: Style.radius
       color: root.transparent ? "transparent" : Color.barBackground
     }
-
 
     // Sections are positioned independently so the centre section stays centred on the
     // screen regardless of how wide the left and right sections grow. Anchoring centre
@@ -185,9 +197,24 @@ Item {
       model: root.layoutConfig.center || []
       barScreen: barWindow.screen
       anchorId: root.centerAnchor
-      // Never negative: a centre section wider than half the bar would otherwise be
-      // pushed off the left edge to keep its anchor centred.
-      x: Math.max(0, Math.round(parent.width / 2 - anchorOffset))
+      // Centred on the anchor, but never over the top of the right section, and never
+      // off the left edge -- a centre wider than half the bar would be pushed off it to
+      // keep its anchor centred.
+      //
+      // The clamp is what stops the sections silently drawing on each other. They are
+      // positioned independently, so nothing was ever stopping them: on a full bar the
+      // right section simply grew leftwards until it was painting over the centre, and
+      // the widgets underneath went on claiming clicks nobody could see they owned. It
+      // takes a narrow screen or a wide right section to reach, which is why it went
+      // unnoticed -- the tray drawer, twenty pixels wider open than shut, was enough.
+      //
+      // The anchor stops being centred only once it is that or overlap, so the drift the
+      // anchorId exists to prevent still cannot happen on a bar with room to spare.
+      x: {
+        var ideal = Math.round(parent.width / 2 - anchorOffset);
+        var limit = rightSection.x - width - Style.sectionSpacing;
+        return Math.max(0, Math.min(ideal, limit));
+      }
     }
 
     BarSection {

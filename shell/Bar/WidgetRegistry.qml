@@ -15,7 +15,7 @@ QtObject {
       "window": activeWindow,
       "clock": clock,
       "update": systemUpdate,
-      "screenrecording": screenRecording,
+      "toggles": toggles,
       "spacer": spacer,
       "tray": tray,
       "bluetooth": bluetooth,
@@ -76,8 +76,8 @@ QtObject {
   property Component systemUpdate: Component {
     SystemUpdate {}
   }
-  property Component screenRecording: Component {
-    ScreenRecording {}
+  property Component toggles: Component {
+    Toggles {}
   }
   property Component tray: Component {
     Tray {}

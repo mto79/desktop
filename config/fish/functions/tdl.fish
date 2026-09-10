@@ -19,7 +19,7 @@ function tdl
     set editor_pane $TMUX_PANE
 
     # Name window after directory
-    tmux rename-window -t $editor_pane (basename $current_dir)
+    #tmux rename-window -t $editor_pane (basename $current_dir)
 
     # Bottom pane (15%)
     tmux split-window -v -p 15 -t $editor_pane -c $current_dir

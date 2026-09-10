@@ -12,13 +12,13 @@ has_session() {
   tmux list-sessions | grep -q "^$1:"
 }
 
-hydrate() {
-  if [ -f $2/.tmux-sessionizer ]; then
-    tmux send-keys -t $1 "source $2/.tmux-sessionizer" c-M
-  elif [ -f $HOME/.tmux-sessionizer ]; then
-    tmux send-keys -t $1 "source $HOME/.tmux-sessionizer" c-M
-  fi
-}
+# hydrate() {
+#   if [ -f $2/.tmux-sessionizer ]; then
+#     tmux send-keys -t $1 "source $2/.tmux-sessionizer" c-M
+#   elif [ -f $HOME/.tmux-sessionizer ]; then
+#     tmux send-keys -t $1 "source $HOME/.tmux-sessionizer" c-M
+#   fi
+# }
 
 if [[ $# -eq 1 ]]; then
   selected=$1
@@ -34,24 +34,18 @@ selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
 
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-  # Create session with first window named "editor" running nvim +explorer (snack or neotree)
-  tmux new-session -s "$selected_name" -n editor -c "$selected" "nvim +\"lua require('snacks').explorer()\""
-  hydrate $selected_name $selected
-  # Add lazygit window
-  tmux new-window -t "$selected_name:" -n lazygit -c "$selected" 'lazygit'
-  # Re-select the "editor" window
-  tmux select-window -t "$selected_name:editor"
+  tmux new-session -s "$selected_name" -n ide -c "$selected"
+  tmux send-keys -t $selected_name "tdl cx" c-M
+  tmux new-window -t "$selected_name:" -n git -c "$selected" 'lazygit'
+  tmux select-window -t "$selected_name:ide"
   exit 0
 fi
 
 if ! has_session $selected_name; then
-  # Create session with first window named "editor" running nvim +explorer (snack or neo tree)
-  tmux new-session -ds "$selected_name" -n editor -c "$selected" "nvim +\"lua require('snacks').explorer()\""
-  hydrate $selected_name $selected
-  # Add lazygit window
-  tmux new-window -t "$selected_name:" -n lazygit -c "$selected" 'lazygit'
-  # Re-select the "editor" window
-  tmux select-window -t "$selected_name:editor"
+  tmux new-session -ds "$selected_name" -n ide -c "$selected"
+  tmux send-keys -t $selected_name "tdl cx" c-M
+  tmux new-window -t "$selected_name:" -n git -c "$selected" 'lazygit'
+  tmux select-window -t "$selected_name:ide"
 fi
 
 switch_to $selected_name

@@ -87,7 +87,7 @@ BarWidget {
   Rectangle {
     anchors.fill: parent
     color: root.hoverEnabled && mouseArea.containsMouse ? root.hoverColor : "transparent"
-    radius: Style.radius
+    radius: Style.barRadius
 
     Behavior on color {
       ColorAnimation {

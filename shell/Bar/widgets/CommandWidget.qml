@@ -43,7 +43,15 @@ BarItem {
     return ["bash", "-c", value];
   }
 
-  command: shell(widgetConfig ? widgetConfig.onClick : null)
+  // "panel": "ai" hands the left click to a panel instead of a command. The two are
+  // mutually exclusive by construction -- a click cannot both open a popup and launch
+  // something -- so onRightClick is where the command goes when a panel takes the left.
+  panelId: (widgetConfig && widgetConfig.panel) ? widgetConfig.panel : ""
+
+  onClicked: if (root.panelId !== "" && popups)
+    popups.toggle(root.panelId, this)
+
+  command: root.panelId !== "" ? null : shell(widgetConfig ? widgetConfig.onClick : null)
   rightCommand: shell(widgetConfig ? widgetConfig.onRightClick : null)
   scrollUpCommand: shell(widgetConfig ? widgetConfig.onScrollUp : null)
   scrollDownCommand: shell(widgetConfig ? widgetConfig.onScrollDown : null)
