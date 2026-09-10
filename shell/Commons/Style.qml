@@ -27,7 +27,10 @@ QtObject {
   // sectionSpacing, which sizes gaps inside popups: this one only has to beat
   // itemPaddingH by enough that the eye reads a break, and 8 did not.
   property int barGroupSpacing: 14
-  property int radius: 0
+  property int radius: 8
+  // The gap between the bar and the screen edges it is anchored to. The bar's corners are
+  // `radius`, and a bar flush with the edge has no visible corner to round.
+  property int barInset: 4
 
   // Popup / panel geometry.
   property int popupWidth: 360

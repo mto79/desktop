@@ -202,7 +202,7 @@ Item {
     readonly property string summaryText: String(notification.summary || "").replace(/\s+/g, " ").trim()
 
     width: root.toastWidth
-    height: layout.implicitHeight + 20
+    height: layout.implicitHeight + 24
     radius: Style.radius
     color: Color.popupBackground
     border.width: 1
@@ -217,15 +217,31 @@ Item {
     }
 
     // A stripe rather than a tinted background: the urgency has to be legible without
-    // making the text harder to read.
+    // making the text harder to read. It runs along the top edge and follows the rounded
+    // corners: a rounded rectangle in the accent colour, with the background laid square
+    // over all but its top few pixels. A 3px-tall rectangle cannot do it alone -- Qt
+    // clamps a radius to half the height, so its corners would poke out past the curve.
     Rectangle {
+      id: stripe
+
+      readonly property int thickness: 3
+
       anchors.left: parent.left
+      anchors.right: parent.right
       anchors.top: parent.top
-      anchors.bottom: parent.bottom
-      anchors.margins: 1
-      width: 3
-      radius: width / 2
+      anchors.margins: toast.border.width
+      height: Math.max(Style.radius, thickness) * 2
+      radius: Math.max(0, Style.radius - toast.border.width)
       color: toast.accentColor
+    }
+
+    Rectangle {
+      anchors.left: stripe.left
+      anchors.right: stripe.right
+      anchors.top: stripe.top
+      anchors.topMargin: stripe.thickness
+      height: stripe.height
+      color: toast.color
     }
 
     MouseArea {
@@ -256,11 +272,14 @@ Item {
     Column {
       id: layout
 
+      // Even on both sides now that the stripe is along the top, and nudged down by about
+      // the stripe so the text sits centred in what is left under it.
       anchors.left: parent.left
-      anchors.leftMargin: 16
+      anchors.leftMargin: 14
       anchors.right: parent.right
-      anchors.rightMargin: 12
+      anchors.rightMargin: 14
       anchors.verticalCenter: parent.verticalCenter
+      anchors.verticalCenterOffset: 2
       spacing: 3
 
       Text {

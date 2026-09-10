@@ -137,10 +137,16 @@ Item {
     // Ignoring the exclusion zone while hidden lets tiled windows reclaim the space.
     exclusionMode: root.barHidden ? ExclusionMode.Ignore : ExclusionMode.Auto
 
+    // Held off the edges it is anchored to by barInset, so that it has corners to round.
+    // The compositor adds the anchored edge's margin to the exclusive zone, so windows
+    // and panels still start below the bar rather than under its inset.
     margins {
-      top: root.barHidden && root.position === "top" ? -Style.barSize : 0
-      bottom: root.barHidden && root.position === "bottom" ? -Style.barSize : 0
+      top: root.position !== "top" ? 0 : (root.barHidden ? -Style.barSize - Style.barInset : Style.barInset)
+      bottom: root.position !== "bottom" ? 0 : (root.barHidden ? -Style.barSize - Style.barInset : Style.barInset)
+      left: Style.barInset
+      right: Style.barInset
     }
+
 
     anchors {
       top: root.position === "top"
@@ -150,7 +156,16 @@ Item {
     }
 
     implicitHeight: Style.barSize
-    color: root.transparent ? "transparent" : Color.barBackground
+    // The window stays transparent and the bar is drawn inside it: a window's own colour
+    // fills its whole rectangle, corners and all.
+    color: "transparent"
+
+    Rectangle {
+      anchors.fill: parent
+      radius: Style.radius
+      color: root.transparent ? "transparent" : Color.barBackground
+    }
+
 
     // Sections are positioned independently so the centre section stays centred on the
     // screen regardless of how wide the left and right sections grow. Anchoring centre

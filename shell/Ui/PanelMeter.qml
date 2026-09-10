@@ -29,7 +29,9 @@ Item {
     id: track
 
     anchors.fill: parent
-    radius: Style.radius > 0 ? Style.radius : height / 2
+    // Always a pill. Not Style.radius: that is the corner of a box, and a 6px-tall meter
+    // wants round ends whatever the panels around it are doing.
+    radius: height / 2
     color: Color.popupHover
   }
 
