@@ -197,6 +197,22 @@ Item {
       return app === "notify-send" ? "" : app;
     }
     readonly property string bodyText: originSplit ? originSplit.rest : notification.body
+
+    // The actions worth a button. "default" is the whole-toast click, not a button of its
+    // own. And Chromium hangs a "settings" action on every web notification, whatever the
+    // site sent, so each chat message carried a Settings button that opened Brave's
+    // notification preferences -- a site sends its own buttons as other identifiers.
+    readonly property var buttons: {
+      var out = [];
+      var actions = notification.actions;
+      for (var i = 0; i < actions.length; i++) {
+        var id = actions[i].identifier;
+        if (id === "default" || (fromBrowser && id === "settings"))
+          continue;
+        out.push(actions[i]);
+      }
+      return out;
+    }
     // Whitespace collapsed: desktop-toggle-nightlight follows its icon glyph with three
     // spaces, which set that title visibly further right than every other one.
     readonly property string summaryText: String(notification.summary || "").replace(/\s+/g, " ").trim()
@@ -324,19 +340,17 @@ Item {
 
       Row {
         spacing: 8
-        visible: toast.notification.actions.length > 0
+        visible: toast.buttons.length > 0
         topPadding: 4
 
         Repeater {
-          model: toast.notification.actions
+          model: toast.buttons
 
           delegate: Rectangle {
             required property var modelData
 
-            // "default" is the whole-toast click, not a button of its own.
-            visible: modelData.identifier !== "default"
-            width: visible ? actionLabel.implicitWidth + 18 : 0
-            height: visible ? actionLabel.implicitHeight + 10 : 0
+            width: actionLabel.implicitWidth + 18
+            height: actionLabel.implicitHeight + 10
             radius: Style.radius
             color: actionMouse.containsMouse ? Color.popupHover : "transparent"
             border.width: 1

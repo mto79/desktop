@@ -11,6 +11,11 @@ QML="$ROOT/shell/Notifications/Notifications.qml"
 
 check "notify-send is not shown as a toast's sender" grep -q 'app === "notify-send"' "$QML"
 
+# Chromium adds a "settings" action to every web notification, which put a Settings
+# button pointing at Brave's preferences under each chat message.
+check "a browser's own Settings action gets no button" grep -q 'fromBrowser && id === "settings"' "$QML"
+check "action buttons come from the filtered list" grep -q 'model: toast.buttons' "$QML"
+
 # One reference -- the default for the toasts' own fontSize. Any other means a line of
 # text went back to the panel size and will not follow notifications.fontSize.
 uses=$(grep -c 'Style\.fontSize' "$QML")
