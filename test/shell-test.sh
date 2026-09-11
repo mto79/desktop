@@ -133,4 +133,14 @@ else
   fail "an unresolvable tray icon is caught before it draws" \
     "Tray.qml trusts Image.status, which is Ready for the checkerboard"
 fi
+
+# Brave keeps an MPRIS player registered, stopped and with no track, for as long as it
+# runs after any tab has played media, so the bar showed a dimmed "Brave" with nothing
+# playing. The Media singleton leaves such idle players out of everything it offers.
+if grep -q "MprisPlaybackState.Paused && player.trackTitle" "$ROOT/shell/Commons/Media.qml"; then
+  pass "an idle media player is not shown in the bar"
+else
+  fail "an idle media player is not shown in the bar" \
+    "Media.qml offers every registered player, stopped ones included"
+fi
 finish

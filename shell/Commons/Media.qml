@@ -12,7 +12,21 @@ import Quickshell.Services.Mpris
 QtObject {
   id: root
 
-  readonly property var players: Mpris.players ? Mpris.players.values : []
+  // Only players with something to show. Brave registers a player the first time any tab
+  // plays media and keeps it, stopped and with no track, until the browser quits, so the
+  // bar sat on a dimmed "Brave" with nothing playing. A player counts while it plays, or
+  // while it is paused on a track; a stopped one, or a paused one with no track, is idle.
+  // Reading the state inside the loop is what brings a player back when it starts again.
+  readonly property var players: {
+    var all = Mpris.players ? Mpris.players.values : [];
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      var player = all[i];
+      if (player.isPlaying || (player.playbackState === MprisPlaybackState.Paused && player.trackTitle !== ""))
+        out.push(player);
+    }
+    return out;
+  }
 
   // Pinned by clicking a row in the panel. Empty means "whatever makes sense".
   property string preferred: ""
