@@ -1,8 +1,33 @@
 #!/bin/bash
 MSG=$(claude -p "$(cat ~/.claude/commands/gen-commit-msg.md)")
+
+# Claude Code signs whatever commit it writes, so the message came back with a
+# Co-Authored-By trailer (and sometimes a session link) that ended up on every commit.
+# The generator only ever sees the diff, so no trailer it adds can name a real co-author:
+# drop them all. Markdown fences go too, and blank lines collapse to one, with none left at
+# either end.
+MSG=$(printf '%s\n' "$MSG" |
+  tr -d '\r' |
+  sed -E 's/[[:space:]]+$//' |
+  grep -v -i -E '^(co-authored-by:|claude-session:|```)|generated with \[?claude' |
+  awk 'NF { if (seen && gap) print ""; print; seen = 1; gap = 0; next } { gap = 1 }')
+
 if [ -z "$MSG" ]; then
   echo "No commit message generated." >&2
   exit 1
 fi
+
+# When the staged changes are unrelated, Claude answers with a suggested split -- prose,
+# bold headings and one fenced message per commit -- and that whole answer used to become
+# the commit, so GitLab showed a sentence as the title and raw markdown below it. Commit
+# only what starts with a Conventional Commits subject; otherwise show the answer, which
+# is still worth reading, and leave the index alone.
+SUBJECT=$(printf '%s\n' "$MSG" | head -n 1)
+if ! printf '%s\n' "$SUBJECT" | grep -q -E '^[a-z]+(\([^)]+\))?!?: [^ ]'; then
+  printf '%s\n\n' "$MSG"
+  echo "Not committed: that is not a single commit message. Stage less and try again." >&2
+  exit 1
+fi
+
 echo "Generated: $MSG"
 git commit -m "$MSG"
