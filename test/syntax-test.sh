@@ -33,4 +33,13 @@ if require python3; then
     fail "every python script parses" "${bad[*]}"
   fi
 fi
+
+# Everything in bin/ lands on PATH, and the prefix is what keeps it from shadowing a real
+# command. Three lazygit-* helpers sat outside it for months.
+stray=$(find "$ROOT/bin" -maxdepth 1 -type f ! -name 'desktop-*' -printf '%f ')
+if [[ -z $stray ]]; then
+  pass "every command in bin/ is named desktop-*"
+else
+  fail "every command in bin/ is named desktop-*" "$stray"
+fi
 finish

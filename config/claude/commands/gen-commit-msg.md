@@ -2,7 +2,7 @@ Review the staged changes using `git diff --cached` and generate a commit messag
 
 Rules:
 - Format: `type(scope): concise description`
-- Types: feat, fix, refactor, chore, docs, ci, test, style, perf, build
+- Types: feat, fix, chore, refactor, ci, hotfix, docs
 - Scope: infer from the primary file/directory affected (e.g., argocd, gitlab, ansible, helm)
 - Subject line must be lowercase, imperative mood, no period, max 72 chars
 - If the change is non-trivial, add a body separated by a blank line explaining **why**, not what

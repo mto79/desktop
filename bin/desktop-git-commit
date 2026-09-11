@@ -1,5 +1,8 @@
 #!/bin/bash
-MSG=$(claude -p "$(cat ~/.claude/commands/gen-commit-msg.md)")
+# The prompt is read from the repo, not from ~/.claude/commands: a copy there was placed by
+# hand, so a clean install had no prompt at all, and it had already drifted from this one.
+PROMPT="${DESKTOP_PATH:-$HOME/.local/share/desktop}/config/claude/commands/gen-commit-msg.md"
+MSG=$(claude -p "$(cat "$PROMPT")")
 
 # Claude Code signs whatever commit it writes, so the message came back with a
 # Co-Authored-By trailer (and sometimes a session link) that ended up on every commit.

@@ -9,11 +9,6 @@ cp -R ~/.local/share/desktop/config/* ~/.config/
 # Use default bashrc
 cp ~/.local/share/desktop/default/bashrc ~/.bashrc
 
-# Install lazygit helper scripts
-mkdir -p ~/.local/bin
-cp ~/.local/share/desktop/bin/lazygit-* ~/.local/bin/
-chmod +x ~/.local/bin/lazygit-*
-
 # Enable the session ssh-agent. The unit and its environment.d drop-in are
 # copied in above; enabling it is what puts SSH_AUTH_SOCK in the systemd user
 # environment, where Hyprland -- and so KeePassXC's SSH agent integration --

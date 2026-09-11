@@ -5,12 +5,12 @@ customCommands:
   - key: 'C'
     context: 'files'
     description: 'AI commit message (Claude)'
-    command: 'lazygit-gen-commit'
+    command: 'desktop-git-commit'
     output: terminal
   - key: 'N'
     context: 'localBranches'
     description: 'AI branch name (Claude)'
-    command: 'lazygit-gen-branch "{{.Form.Desc}}" "{{.Form.Ticket}}"'
+    command: 'desktop-git-branch "{{.Form.Desc}}" "{{.Form.Ticket}}"'
     output: terminal
     prompts:
       - type: input
@@ -22,5 +22,5 @@ customCommands:
   - key: 'H'
     context: 'localBranches'
     description: 'Housekeeping — delete merged branches'
-    command: 'lazygit-housekeeping'
+    command: 'desktop-git-housekeeping'
     output: terminal
