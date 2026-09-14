@@ -29,6 +29,25 @@ else
   fail "no yazi rules use the retired 'name' key" "$bad"
 fi
 
+# tmux 3.7 draws a message as one format overlaying the status line instead of replacing
+# it, so a message-style without `fill=` paints only its own text and leaves the window
+# tabs showing through beside it -- the command prompt read
+# "Session name: workcode   3 notes-". tmux's own default carries fill=yellow. Every
+# theme here set a bg and no fill, so every theme was broken by the upgrade.
+missing=()
+while IFS= read -r -d '' f; do
+  while IFS= read -r line; do
+    bg=$(grep -oP 'bg=\K#[0-9a-fA-F]{6}' <<<"$line") || true
+    [[ -n $bg ]] || continue
+    grep -q "fill=$bg" <<<"$line" || missing+=("${f#$ROOT/}: $line")
+  done < <(grep -h 'message-style\|message-command-style' "$f" 2>/dev/null || true)
+done < <(find "$ROOT/themes" -name tmux.conf -print0 2>/dev/null)
+if ((${#missing[@]} == 0)); then
+  pass "every theme fills the status line behind a tmux message"
+else
+  fail "every theme fills the status line behind a tmux message" "${missing[*]}"
+fi
+
 # fish rewrites both of these itself. fish_variables holds the universal variables, and
 # 4.3 writes conf.d/fish_frozen_*.fish once, when it migrates the colours and key
 # bindings out of universal scope. Shipping either copies stale state over the live file
