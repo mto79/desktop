@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+
+# desktop-agent-swap: put a coding agent in a tmux pane, or change the one already there.
+#
+#   desktop-agent-swap                   # this window's agent pane, on to the next agent
+#   desktop-agent-swap %7                # the agent pane of that pane's window, likewise
+#   desktop-agent-swap %7 codex          # that window's agent pane, to codex by name
+#   desktop-agent-swap --here %7 claude  # start claude in exactly that pane
+#
+# Bound to prefix+a to cycle and prefix+A to pick from a menu. The pane is respawned in
+# place rather than a second one opened, so the layout never changes shape and only one
+# agent is ever asking for the machine.
+#
+# Everything but --here finds the agent pane of the window rather than taking the pane it
+# was handed, because the pane it is handed is whichever one has the focus, and after the
+# layout that is the editor. --here is how desktop-agent-layout fills a pane it has just
+# made, and the only form that will take over a pane holding something else.
+#
+# Which agent a pane holds is the pane's own @agent option, not a guess from what is
+# running: a moment after the agent exits the pane is a shell again, and still the pane
+# the next agent belongs in.
+
+set -euo pipefail
+
+die() {
+  echo "desktop-agent-swap: $1" >&2
+  exit 1
+}
+
+# The rotation, in the order prefix+a walks it. A fourth agent is one name here and one
+# line in the case below.
+AGENTS=(claude opencode codex)
+
+# Claude is given the flag the cx abbreviation in fish gives it, so that what prefix+a
+# leaves in the pane is what typing the abbreviation would have. Codex is deliberately
+# left on its own defaults: its equivalent flag
+# (--dangerously-bypass-approvals-and-sandbox) drops the sandbox as well as the prompts,
+# which is a bigger decision than matching claude, and belongs to whoever wants it.
+command_for() {
+  case "$1" in
+  claude) echo "desktop-agent claude --allow-dangerously-skip-permissions" ;;
+  opencode) echo "desktop-agent opencode" ;;
+  codex) echo "desktop-agent codex" ;;
+  esac
+}
+
+normalise() {
+  case "$1" in
+  cx | claude) echo claude ;;
+  c | opencode) echo opencode ;;
+  x | codex) echo codex ;;
+  *) die "unknown agent '$1'; expected one of ${AGENTS[*]}" ;;
+  esac
+}
+
+next_after() {
+  local i
+  for i in "${!AGENTS[@]}"; do
+    if [[ ${AGENTS[i]} == "$1" ]]; then
+      echo "${AGENTS[(i + 1) % ${#AGENTS[@]}]}"
+      return 0
+    fi
+  done
+  echo "${AGENTS[0]}"
+}
+
+# Claude keeps a transcript per project, under a directory named after the path with
+# everything that is not a letter or a digit turned into a dash. Without one --continue
+# is an error rather than a fresh session, so it is only passed when the file is there.
+#
+# Neither of the others gets the same treatment. opencode picks its session itself, and
+# `codex resume --last` is the most recent session anywhere rather than the most recent
+# one here -- which would drop you into another project's conversation.
+claude_has_history() {
+  local slug
+  slug=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')
+  compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$slug/"'*.jsonl' >/dev/null
+}
+
+option_of() { tmux display-message -p -t "$1" '#{@agent}' 2>/dev/null || true; }
+
+# By the option rather than by what is running, for the reason in the header.
+agent_pane_in() {
+  tmux list-panes -t "$1" -F '#{pane_id} #{@agent}' 2>/dev/null |
+    awk 'NF > 1 { print $1; exit }'
+}
+
+here=false
+if [[ ${1:-} == --here ]]; then
+  here=true
+  shift
+fi
+
+target="${1:-${TMUX_PANE:-}}"
+wanted="${2:-}"
+[[ -n $target ]] || die "no pane given, and not inside tmux"
+if $here && [[ -z $wanted ]]; then
+  die "--here needs the agent to start there"
+fi
+
+pane="$target"
+if ! $here && [[ -z $(option_of "$pane") ]]; then
+  pane=$(agent_pane_in "$(tmux display-message -p -t "$pane" '#{window_id}')")
+  [[ -n $pane ]] || die "no agent pane in this window; --here <pane> <agent> starts one"
+fi
+
+if [[ -n $wanted ]]; then
+  agent=$(normalise "$wanted")
+else
+  agent=$(next_after "$(option_of "$pane")")
+fi
+
+dir=$(tmux display-message -p -t "$pane" '#{pane_current_path}')
+cmd=$(command_for "$agent")
+if [[ $agent == claude ]] && claude_has_history "$dir"; then
+  cmd+=" --continue"
+fi
+
+# remain-on-exit so the pane, and everything the agent said before it stopped, outlives
+# it: the layout keeps its shape and prefix+a can fill it again. -k because the pane is
+# usually still running the agent before it.
+tmux set-option -p -t "$pane" remain-on-exit on
+tmux set-option -p -t "$pane" @agent "$agent"
+tmux respawn-pane -k -t "$pane" -c "$dir" "$cmd"
+# Leading space to sit on the same column as the rest of the status line.
+tmux display-message " $agent"

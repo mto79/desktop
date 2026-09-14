@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+# desktop-agent-layout: lay a tmux window out for working with a coding agent.
+#
+#   desktop-agent-layout llm-wiki:ide claude
+#   desktop-agent-layout %3 claude opencode
+#
+#   +--------------------+--------+
+#   |                    | agent  |
+#   |      $EDITOR       |        |
+#   |                    |        |
+#   +--------------------+--------+
+#   | shell                       |
+#   +-----------------------------+
+#
+# The target is named rather than taken from $TMUX, because this runs at login against a
+# session nobody has attached to yet as much as it runs from tdl inside a pane.
+#
+# The agent pane is given its command by tmux instead of having it typed in with
+# send-keys. That is what makes the login case reliable -- send-keys races the shell
+# starting up -- and it is what lets prefix+a respawn the pane later. The editor keeps
+# its shell, so quitting the editor leaves you somewhere rather than closing the pane.
+
+set -euo pipefail
+
+usage="usage: desktop-agent-layout <target> <agent> [second-agent]"
+TARGET="${1:?$usage}"
+AGENT="${2:?$usage}"
+SECOND="${3:-}"
+
+editor=$(tmux display-message -p -t "$TARGET" '#{pane_id}')
+dir=$(tmux display-message -p -t "$TARGET" '#{pane_current_path}')
+
+# The bottom strip is split off first so the agent column beside the editor stops above
+# it, rather than running the full height of the window.
+tmux split-window -v -l 15% -t "$editor" -c "$dir"
+agent_pane=$(tmux split-window -h -l 30% -t "$editor" -c "$dir" -P -F '#{pane_id}')
+desktop-agent-swap --here "$agent_pane" "$AGENT"
+
+if [[ -n $SECOND ]]; then
+  second_pane=$(tmux split-window -v -t "$agent_pane" -c "$dir" -P -F '#{pane_id}')
+  desktop-agent-swap --here "$second_pane" "$SECOND"
+fi
+
+tmux send-keys -t "$editor" "${EDITOR:-nvim} ." C-m
+tmux select-pane -t "$editor"

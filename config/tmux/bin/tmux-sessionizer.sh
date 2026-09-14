@@ -33,17 +33,21 @@ fi
 selected_name=$(basename "$selected" | tr . _)
 tmux_running=$(pgrep tmux)
 
+# Detached first even here, where there is no server yet and we are about to attach:
+# `new-session` without -d blocks until the session is detached, so everything below it
+# used to be laid out only after you had walked away from the window.
 if [[ -z $TMUX ]] && [[ -z $tmux_running ]]; then
-  tmux new-session -s "$selected_name" -n ide -c "$selected"
-  tmux send-keys -t $selected_name "tdl cx" c-M
+  tmux new-session -ds "$selected_name" -n ide -c "$selected"
+  desktop-agent-layout "$selected_name:ide" claude
   tmux new-window -t "$selected_name:" -n git -c "$selected" 'lazygit'
   tmux select-window -t "$selected_name:ide"
+  tmux attach-session -t "$selected_name"
   exit 0
 fi
 
 if ! has_session $selected_name; then
   tmux new-session -ds "$selected_name" -n ide -c "$selected"
-  tmux send-keys -t $selected_name "tdl cx" c-M
+  desktop-agent-layout "$selected_name:ide" claude
   tmux new-window -t "$selected_name:" -n git -c "$selected" 'lazygit'
   tmux select-window -t "$selected_name:ide"
 fi
