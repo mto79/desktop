@@ -91,7 +91,6 @@ FIXTURE
       set_voxtype hotkey key '"RIGHTALT"'
       set_voxtype hotkey mode '"push_to_talk"'
       set_voxtype hotkey enabled true
-      set_voxtype vad enabled true
       set_voxtype audio max_duration_secs 20
     done
   )
@@ -101,12 +100,13 @@ import tomllib, sys
 d = tomllib.load(open(sys.argv[1], "rb"))
 print(d["hotkey"]["key"], d["hotkey"]["mode"], d["hotkey"]["enabled"],
       d["output"]["mode"], d["audio"]["max_duration_secs"],
-      d["whisper"]["language"], d["vad"]["enabled"],
+      d["whisper"]["language"], "vad" in d,
       d.get("audio", {}).get("feedback", {}).get("enabled"))' "$vox_sandbox/config.toml" 2>/dev/null)
 
-  # The last field is audio.feedback.enabled: None means the beeps were left alone,
-  # which is what a section-blind sed got wrong.
-  if [[ $merged == "RIGHTALT push_to_talk True type 20 ['en', 'nl'] True None" ]]; then
+  # The second-to-last field is whether a [vad] section was created -- it must not be,
+  # see the note in voxtype.sh. The last is audio.feedback.enabled: None means the beeps
+  # were left alone, which is what a section-blind sed got wrong.
+  if [[ $merged == "RIGHTALT push_to_talk True type 20 ['en', 'nl'] False None" ]]; then
     pass "the voxtype settings merge into the right sections, twice over"
   else
     fail "the voxtype settings merge into the right sections, twice over" "$merged"

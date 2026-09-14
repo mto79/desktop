@@ -106,10 +106,13 @@ if [[ -f "$VOXTYPE_CONFIG" ]]; then
   set_voxtype hotkey mode '"push_to_talk"'
   set_voxtype hotkey enabled true
 
-  # Two guards against that same silence. VAD drops a recording that is silence only;
-  # the shorter cap bounds how much silence any one recording can contain.
-  voxtype setup vad
-  set_voxtype vad enabled true
+  # A short cap, so that a recording nobody stopped cannot collect a minute of silence
+  # for Whisper to invent words over.
+  #
+  # Voice activity detection is deliberately NOT enabled here. It works, and it does drop
+  # a silence-only recording -- but that is also what it does when the microphone is
+  # muted, and then dictation fails by producing nothing at all, with no hint as to why.
+  # A muted mic is worth noticing, not filtering out.
   set_voxtype audio max_duration_secs 20
 else
   echo "⚠ $VOXTYPE_CONFIG not found; voxtype settings not applied"
