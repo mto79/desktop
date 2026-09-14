@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+
+# desktop-workspace-start: open the day's windows at login, each on its own workspace.
+#
+#   1  Brave
+#   2  Mattermost, Teams
+#   3  tmux, attached to "home", with "llm-wiki" beside it under claude
+#   4  KeePassXC
+#   5  Obsidian
+#
+# Which screen each of those workspaces sits on is desktop-workspace-pin's decision, so
+# it runs first; this script only decides what opens where.
+#
+# Each window is moved once it has mapped, rather than placed by a `[workspace N]` exec
+# rule. Those rules follow the process Hyprland spawned, and here that is often not the
+# one that draws the window: the AppImages re-exec, and a Brave web app belongs to
+# whichever Brave process came up first. They were unreliable in practice -- one login
+# put tmux on workspace 2 and Brave on 3. A window is recognised as the launch's own by
+# being a new address of the expected class, so windows of one class open one at a time.
+
+set -euo pipefail
+
+TIMEOUT="${DESKTOP_WORKSPACE_START_TIMEOUT:-60}"
+LLM_WIKI="$HOME/Data/MTO/Documents/llm-wiki"
+
+addresses_of() {
+  hyprctl clients -j | jq -r --arg class "$1" '.[] | select(.class == $class) | .address' | sort
+}
+
+# open_on <workspace> <class> <command...>
+open_on() {
+  local workspace="$1" class="$2" before address deadline
+  shift 2
+
+  before="$(addresses_of "$class")"
+  setsid "$@" </dev/null >/dev/null 2>&1 &
+
+  deadline=$((SECONDS + TIMEOUT))
+  while ((SECONDS < deadline)); do
+    address="$(comm -13 <(echo "$before") <(addresses_of "$class") | grep . | head -1 || true)"
+    if [[ -n "$address" ]]; then
+      hyprctl dispatch movetoworkspacesilent "$workspace,address:$address" >/dev/null
+      return 0
+    fi
+    sleep 0.2
+  done
+
+  # Not fatal: one app that fails to start is no reason to leave the rest unopened.
+  echo "desktop-workspace-start: no $class window within ${TIMEOUT}s" >&2
+  notify-send -u critical "Workspaces" "$class did not open a window for workspace $workspace" || true
+}
+
+desktop-workspace-pin
+
+# Both sessions exist before the terminal attaches, so llm-wiki is one switch away --
+# and llm-wiki is the one that is always the same job, so it is laid out and has claude
+# up by the time it is switched to. home is left a plain shell; what it is for varies.
+tmux has-session -t "=home" 2>/dev/null || tmux new-session -d -s home -c "$HOME"
+if ! tmux has-session -t "=llm-wiki" 2>/dev/null; then
+  tmux new-session -d -s llm-wiki -n ide -c "$LLM_WIKI"
+  desktop-agent-layout llm-wiki:ide claude
+fi
+
+# Every launch here has a class of its own bar the Brave ones, which share a browser
+# process, so those go in turn and the rest start together.
+{
+  open_on 1 brave-browser uwsm app -- brave-browser
+  open_on 2 brave-chat.nationaalarchief.nl__-Default desktop-launch-webapp "https://chat.nationaalarchief.nl"
+  open_on 2 brave-teams.microsoft.com__-Default desktop-launch-webapp "https://teams.microsoft.com"
+} &
+open_on 3 com.mitchellh.ghostty uwsm app -- ghostty -e tmux attach-session -t home &
+open_on 4 org.keepassxc.KeePassXC "$HOME/.local/bin/KeePassXC.AppImage" &
+open_on 5 md.obsidian.Obsidian "$HOME/.local/bin/Obsidian.AppImage" &
+wait
+
+# Show the first workspace of every screen, and leave the focus on the terminal. Screens
+# that hold several of these show the last one named, which is why 3 comes last.
+hyprctl --batch "dispatch workspace 5 ; dispatch workspace 4 ; dispatch workspace 2 ; dispatch workspace 1 ; dispatch workspace 3" >/dev/null
