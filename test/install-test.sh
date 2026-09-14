@@ -40,6 +40,80 @@ else
   fail "every common command bin/ calls is in the package list" "${missing[*]}"
 fi
 
+# Dictation is English and Dutch. Whisper's .en models are English-only -- they cannot
+# transcribe another language and cannot detect one at all -- so a clean install that
+# fetches base.en silently loses half of what this desktop is used for. The model is
+# named in one place; this is that place being watched.
+vox="$ROOT/install/packaging/voxtype.sh"
+model=$(grep -oP 'setup --download --model \K\S+' "$vox" 2>/dev/null || true)
+if [[ -n $model && $model != *.en ]]; then
+  pass "a clean install gets a multilingual dictation model ($model)"
+else
+  fail "a clean install gets a multilingual dictation model" "voxtype.sh downloads '${model:-nothing}'"
+fi
+if grep -qF "set_voxtype whisper language '[\"en\", \"nl\"]'" "$vox"; then
+  pass "the dictation languages are set at install time"
+else
+  fail "the dictation languages are set at install time" "voxtype.sh does not set language"
+fi
+
+# The voxtype settings are merged into a config voxtype itself owns, and the keys they
+# set -- enabled, mode, key -- each appear in several sections of that file. A sed
+# rewrote whichever section came first: the hotkey mode landed on [output], and the
+# audio-feedback beeps were switched on by accident. The merger has to respect sections,
+# and has to be safe to run twice, because every desktop-update runs it again.
+if require python3; then
+  vox_sandbox=$(mktemp -d)
+  cat >"$vox_sandbox/config.toml" <<'FIXTURE'
+[hotkey]
+key = "SCROLLLOCK"
+# mode = "push_to_talk"
+# enabled = true
+
+[audio]
+max_duration_secs = 60
+
+[audio.feedback]
+# enabled = true
+
+[whisper]
+language = "en"
+
+[output]
+mode = "type"
+FIXTURE
+
+  (
+    VOXTYPE_CONFIG="$vox_sandbox/config.toml"
+    eval "$(sed -n '/^set_voxtype() {/,/^}$/p' "$ROOT/install/packaging/voxtype.sh")"
+    for _ in 1 2; do
+      set_voxtype whisper language '["en", "nl"]'
+      set_voxtype hotkey key '"RIGHTALT"'
+      set_voxtype hotkey mode '"push_to_talk"'
+      set_voxtype hotkey enabled true
+      set_voxtype vad enabled true
+      set_voxtype audio max_duration_secs 20
+    done
+  )
+
+  merged=$(python3 -c '
+import tomllib, sys
+d = tomllib.load(open(sys.argv[1], "rb"))
+print(d["hotkey"]["key"], d["hotkey"]["mode"], d["hotkey"]["enabled"],
+      d["output"]["mode"], d["audio"]["max_duration_secs"],
+      d["whisper"]["language"], d["vad"]["enabled"],
+      d.get("audio", {}).get("feedback", {}).get("enabled"))' "$vox_sandbox/config.toml" 2>/dev/null)
+
+  # The last field is audio.feedback.enabled: None means the beeps were left alone,
+  # which is what a section-blind sed got wrong.
+  if [[ $merged == "RIGHTALT push_to_talk True type 20 ['en', 'nl'] True None" ]]; then
+    pass "the voxtype settings merge into the right sections, twice over"
+  else
+    fail "the voxtype settings merge into the right sections, twice over" "$merged"
+  fi
+  rm -rf "$vox_sandbox"
+fi
+
 # A packaging script nothing sources never runs. These four are known-unwired; the point
 # of the list is that a fifth gets noticed.
 known_unwired=(openshiftlocal.sh openvpn.sh stack.sh zoom.sh)

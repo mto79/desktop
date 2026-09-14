@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+
+# desktop-dictate: dictate with voxtype, with the music out of the way.
+#
+#   desktop-dictate watch    # follow voxtype, duck while it records (autostarted)
+#   desktop-dictate restore  # give the volume back, by hand
+#
+# The hotkey itself is voxtype's own: it reads the key device directly, so Right Alt
+# going down and up is seen whatever the compositor is doing. A Hyprland `bindr` drove
+# this before and dropped roughly one release in three -- it only fires while the
+# modifiers still match, so letting go of Super or Alt a moment before V meant the stop
+# never came, the mic stayed open to its cap, and Whisper filled the silence with
+# YouTube caption boilerplate. Nothing here is bound to a key any more, which is why.
+#
+# Ducking rather than muting or pausing: a dictation is a couple of seconds, and pausing
+# a player for that long loses your place and comes back with a lurch. The music stays
+# on, quietly, and comes back to exactly the volume it had -- not to a fixed number.
+#
+# The duck follows voxtype's state rather than the key, so whatever ends a recording ends
+# the duck: the release, the max_duration_secs cap, or the daemon being restarted under
+# it. There is no path here that can leave the music down with nothing to bring it back.
+
+set -uo pipefail
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop"
+SAVED="$STATE_DIR/dictate-volume"
+
+# What to drop to, as a fraction of the volume you were already at. Relative, so it
+# ducks rather than jumps: 20% of a quiet 0.15 is quieter still, where a fixed 0.2 would
+# have turned the music up.
+DUCK="${DESKTOP_DICTATE_DUCK:-0.2}"
+
+volume_now() { wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{print $2}'; }
+
+duck() {
+  local current target
+  current=$(volume_now)
+  [[ -n $current ]] || return 0
+
+  mkdir -p "$STATE_DIR"
+  # Only the first press records the real volume. Without this a second press would
+  # save the already-ducked value and "restore" to that for good.
+  [[ -f $SAVED ]] || printf '%s\n' "$current" >"$SAVED"
+
+  target=$(awk -v v="$(cat "$SAVED")" -v d="$DUCK" 'BEGIN { printf "%.2f", v * d }')
+  wpctl set-volume @DEFAULT_AUDIO_SINK@ "$target"
+}
+
+restore() {
+  [[ -f $SAVED ]] || return 0
+  wpctl set-volume @DEFAULT_AUDIO_SINK@ "$(cat "$SAVED")"
+  rm -f "$SAVED"
+}
+
+# Follows voxtype's own status stream rather than polling the state file: it is pushed,
+# so the duck lands with the recording rather than up to a tenth of a second later.
+# --pdeathsig so a killed watcher does not leave the follower behind, the same reason
+# desktop-status-voxtype uses it.
+watch() {
+  local class
+  while :; do
+    setpriv --pdeathsig TERM voxtype status --follow --format json 2>/dev/null |
+      while IFS= read -r line; do
+        class=$(jq -r '.class // "idle"' <<<"$line" 2>/dev/null) || continue
+        if [[ $class == recording ]]; then duck; else restore; fi
+      done
+
+    # The follower ends when voxtype restarts or is not running yet. Give the volume
+    # back before waiting -- a duck that outlives the daemon is the one unrecoverable
+    # state this script could have.
+    restore
+    sleep 2
+  done
+}
+
+case "${1:-}" in
+watch)
+  watch
+  ;;
+restore)
+  # For a shell, when something has gone wrong and the music is still quiet.
+  restore
+  ;;
+*)
+  echo "usage: desktop-dictate <watch|restore>" >&2
+  exit 1
+  ;;
+esac
