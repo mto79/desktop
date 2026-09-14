@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 source "$DESKTOP_INSTALL/packaging/ansible.sh"
+source "$DESKTOP_INSTALL/packaging/awscli2.sh"
 source "$DESKTOP_INSTALL/packaging/base.sh"
 source "$DESKTOP_INSTALL/packaging/bitwarden.sh"
 source "$DESKTOP_INSTALL/packaging/brave-browser.sh"
