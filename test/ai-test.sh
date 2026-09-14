@@ -104,6 +104,32 @@ fi
 check "--report keeps the percentages as numbers" \
   test "$(jq -r '.limits[0].percent | type' <<<"$detail")" = "number"
 
+# The agent count, with pgrep stubbed so the answer does not depend on what the machine
+# happens to be running. The separator earned a check: `paste -sd', '` reads its
+# delimiter as a list to cycle through, so three agents came out "a,b c".
+cat >"$sandbox/bin/pgrep" <<'STUB'
+#!/usr/bin/env bash
+case "${*: -1}" in
+claude) echo 4 ;;
+opencode) echo 1 ;;
+codex) echo 2 ;;
+esac
+STUB
+chmod +x "$sandbox/bin/pgrep"
+counted=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
+check "every agent this desktop runs is counted" test "$(jq -r .text <<<"$counted")" = 7
+check "the agents are listed one per comma" \
+  test "$(jq -r .tooltip <<<"$counted")" = "4 claude, 1 opencode, 2 codex"
+
+cat >"$sandbox/bin/pgrep" <<'STUB'
+#!/usr/bin/env bash
+exit 1
+STUB
+chmod +x "$sandbox/bin/pgrep"
+quiet=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
+check "no agents running says so" test "$(jq -r .class <<<"$quiet")" = idle
+rm "$sandbox/bin/pgrep"
+
 # The composition. Both halves are stubbed, because the real ones answer differently
 # depending on what happens to be running while the suite runs.
 cat >"$sandbox/bin/desktop-status-agents" <<'STUB'

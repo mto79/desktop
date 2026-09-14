@@ -2,7 +2,7 @@
 
 # desktop-status-agents: report running AI coding sessions as bar-friendly JSON.
 #
-# Claude Code and OpenCode only, which is what this desktop actually runs. The count is
+# Claude Code, OpenCode and Codex, which is what this desktop actually runs. The count is
 # of processes, so two sessions in two tmux windows read as two -- which is the number
 # worth knowing when you are wondering what is still working in the background.
 
@@ -11,12 +11,16 @@ set -uo pipefail
 names=""
 total=0
 
-for tool in claude opencode; do
+for tool in claude opencode codex; do
   count=$(pgrep -x -c "$tool" 2>/dev/null || true)
   count=${count:-0}
   ((count > 0)) || continue
   total=$((total + count))
-  names+="$count $tool"$'\n'
+  # Joined here rather than with `paste -sd', '`, which reads its delimiter as a *list*
+  # to cycle through: two agents came out as "4 claude,1 opencode" and three as
+  # "4 claude,1 opencode 1 codex".
+  [[ -n $names ]] && names+=", "
+  names+="$count $tool"
 done
 
 if ((total == 0)); then
@@ -24,5 +28,4 @@ if ((total == 0)); then
   exit 0
 fi
 
-summary=$(printf '%s' "$names" | paste -sd', ' -)
-printf '{"text":"%s","class":"busy","tooltip":"%s"}\n' "$total" "$summary"
+printf '{"text":"%s","class":"busy","tooltip":"%s"}\n' "$total" "$names"

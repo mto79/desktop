@@ -73,7 +73,7 @@ jump_to() {
 rows=""
 declare -A TARGETS=()
 
-for pid in $(pgrep -x claude 2>/dev/null) $(pgrep -x opencode 2>/dev/null); do
+for pid in $(pgrep -x claude 2>/dev/null) $(pgrep -x opencode 2>/dev/null) $(pgrep -x codex 2>/dev/null); do
   cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || continue
   tool=$(ps -o comm= -p "$pid" 2>/dev/null) || continue
   target=$(pane_for_pid "$pid" || true)
