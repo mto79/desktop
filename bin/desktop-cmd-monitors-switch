@@ -120,7 +120,7 @@ apply_layout() {
 
   hyprctl reload >/dev/null
 
-  # The widest screen is a different one at every desk, so workspace 3 has to be
+  # The screens behind each workspace differ at every desk, so the workspaces have to be
   # re-pinned against the monitors the reload just brought up -- not the old ones.
   desktop-workspace-pin
 

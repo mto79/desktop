@@ -31,6 +31,10 @@ check() {
   if "$@"; then pass "$what"; else fail "$what"; fi
 }
 
+# For `check`, which runs its arguments and so cannot be handed a `!`. The obvious
+# `test ! -s <(grep ...)` cannot fail at all: a pipe always reports a size of zero.
+lacks() { ! grep -q "$@"; }
+
 # Call at the end of every test file.
 finish() {
   ((FAILURES == 0)) && exit 0

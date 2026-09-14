@@ -87,7 +87,7 @@ MONITORS_FIXTURE="$(desk "$LAPTOP" "$PORTRAIT")" HOME="$sandbox" PATH="$stubs:$P
 check "the applied layout is home" grep -qx "# layout: home" "$CONF"
 check "the portrait screen is placed, not disabled" \
   grep -qx "monitor=DP-9, 3840x2160@60, 0x0, 1, transform, 1" "$CONF"
-check "no screen on the desk is disabled" test ! -s <(grep 'disable' "$CONF")
+check "no screen on the desk is disabled" lacks 'disable' "$CONF"
 
 # Nothing changed, so the second run must leave the file alone. The header carries the
 # proof: the comparison reads only the monitor lines, so a sentinel there survives
