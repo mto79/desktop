@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+
+# desktop-meeting-capture: record both sides of a call, and transcribe it locally.
+#
+#   desktop-meeting-capture start [name]   # begin
+#   desktop-meeting-capture stop           # end, mix down, transcribe
+#   desktop-meeting-capture status         # what is running, and for how long
+#
+# Both sides, because one is not enough: a sink's monitor carries only what comes *out*
+# of the speakers -- the other participants -- while your own voice goes in through the
+# microphone and never passes the monitor at all. Recording the output alone gives half a
+# conversation, which is the mistake this script exists to avoid.
+#
+# The two are kept as separate channels, left the room and right you, and they are
+# transcribed separately rather than mixed down. Mixing was tried first and was worse:
+# the monitor side arrives at digital full scale while a mic sits sixty decibels below
+# it, and summing the two produced a transcript that dropped most of a sentence both
+# channels contained on their own. Transcribing each side also labels who said what,
+# which a mixed transcript cannot do at all.
+#
+# Everything stays on this machine. Transcription is the local model, not a service.
+#
+# Note that Teams announces its own recordings to everyone in the call and this does not.
+# Whether that is appropriate is a question about the meeting, not about the tooling.
+
+set -uo pipefail
+
+[[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
+OUTPUT_DIR="${DESKTOP_MEETING_DIR:-${XDG_VIDEOS_DIR:-$HOME/Videos}/Meetings}"
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop"
+PIDFILE="$STATE_DIR/meeting-capture.pid"
+PATHFILE="$STATE_DIR/meeting-capture.path"
+
+die() {
+  echo "desktop-meeting-capture: $1" >&2
+  notify-send -u critical "Meeting capture" "$1" 2>/dev/null
+  exit 1
+}
+
+running() { [[ -f $PIDFILE ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+
+start() {
+  running && die "already recording $(basename "$(cat "$PATHFILE")")"
+
+  local name="${1:-meeting}" stamp base monitor mic
+  stamp=$(date +'%Y-%m-%d_%H-%M-%S')
+  base="$OUTPUT_DIR/${name}-${stamp}"
+
+  # Resolved now rather than by name: switching output mid-call leaves this recording on
+  # the device it started with, which is at least predictable.
+  monitor="$(pactl get-default-sink)".monitor
+  mic="$(pactl get-default-source)"
+  [[ -n $monitor && -n $mic ]] || die "no default sink or source to record from"
+
+  # A muted microphone records silence and nothing says so until the transcript comes
+  # back empty -- which has happened here before.
+  if pactl list sources | grep -A12 "Name: $mic" | grep -q "Mute: yes"; then
+    notify-send -u critical "Meeting capture" "Your microphone is muted -- only the other side will be recorded"
+  fi
+
+  # A sink's monitor carries everything played to that sink, not just the call. Music or
+  # a video left running is recorded too, and Whisper will dutifully transcribe it into
+  # the middle of the meeting.
+  local others
+  others=$(pactl list sink-inputs | grep -oP 'application\.name = "\K[^"]+' | sort -u | paste -sd', ' -)
+  if [[ -n $others ]]; then
+    notify-send "Meeting capture" "Also playing, and so also recorded: $others" 2>/dev/null
+    echo "note: these are playing into the same output and will be recorded too: $others"
+  fi
+
+  mkdir -p "$OUTPUT_DIR" || die "cannot create $OUTPUT_DIR"
+  # Not guaranteed to exist: it is shared with the other desktop-* state, and whichever
+  # of them runs first makes it.
+  mkdir -p "$STATE_DIR" || die "cannot create $STATE_DIR"
+
+  # Each input is summed to mono first: amerge on two stereo inputs would give four
+  # channels, not the two this wants.
+  ffmpeg -nostdin -loglevel error -y \
+    -f pulse -i "$monitor" \
+    -f pulse -i "$mic" \
+    -filter_complex "[0:a]pan=mono|c0=0.5*c0+0.5*c1[them];[1:a]pan=mono|c0=0.5*c0+0.5*c1[me];[them][me]amerge=inputs=2[a]" \
+    -map "[a]" -c:a flac "$base.flac" &
+  echo $! >"$PIDFILE"
+  printf '%s\n' "$base" >"$PATHFILE"
+
+  sleep 1
+  running || { rm -f "$PIDFILE" "$PATHFILE"; die "ffmpeg did not start"; }
+  notify-send "Meeting capture" "Recording to $(basename "$base").flac" 2>/dev/null
+  echo "recording to $base.flac"
+}
+
+# Whether a channel holds anything worth transcribing, by level rather than by what comes
+# back as text. A side that was silent does not transcribe to nothing -- Whisper fills the
+# gap with caption boilerplate, and "Thank you." under a heading reads exactly like
+# something somebody said. Peak rather than average, because a long meeting is mostly
+# silence either way and only the loud moments distinguish speech from a noise floor.
+channel_has_speech() {
+  python3 - "$1" "${DESKTOP_MEETING_SILENCE_DBFS:--40}" <<'PYEOF'
+import math, struct, sys, wave
+
+with wave.open(sys.argv[1]) as w:
+    peak = 0
+    while (frames := w.readframes(1 << 16)):
+        samples = struct.unpack(f"<{len(frames) // 2}h", frames)
+        peak = max(peak, max(abs(s) for s in samples))
+
+dbfs = 20 * math.log10(max(peak / 32768, 1e-9))
+sys.exit(0 if dbfs >= float(sys.argv[2]) else 1)
+PYEOF
+}
+
+# One side of the call. Channel 0 is the monitor and channel 1 the microphone; each is
+# pulled out on its own so neither is levelled against the other.
+transcribe_channel() {
+  local channel="$1" label="$2" base="$3" wav text
+  wav="$base.ch$channel.wav"
+
+  ffmpeg -nostdin -loglevel error -y -i "$base.flac" \
+    -af "pan=mono|c0=c$channel" -ar 16000 -ac 1 "$wav" || return 1
+
+  # voxtype prints its progress and its log to stdout alongside the transcript, so the
+  # text has to be picked out rather than simply captured: strip the colour, drop the
+  # lines that are the tool talking about itself, and what is left is what was said.
+  if ! channel_has_speech "$wav"; then
+    rm -f "$wav"
+    printf '## %s\n\n(silent -- nothing was recorded on this side)\n\n' "$label" >>"$base.txt"
+    return 0
+  fi
+
+  text=$(voxtype transcribe "$wav" 2>/dev/null |
+    sed -e 's/\x1b\[[0-9;]*m//g' |
+    grep -vE '^(Loading audio file|Audio format|Processing |[0-9]{4}-[0-9]{2}-[0-9]{2}T)' |
+    sed '/^[[:space:]]*$/d') || { rm -f "$wav"; return 1; }
+  rm -f "$wav"
+
+  # Belt and braces: a channel loud enough to pass the level check can still come back
+  # with nothing but punctuation.
+  if [[ -z ${text//[[:space:].]/} ]]; then
+    printf '## %s\n\n(nothing recorded on this side)\n\n' "$label" >>"$base.txt"
+  else
+    printf '## %s\n\n%s\n\n' "$label" "$text" >>"$base.txt"
+  fi
+}
+
+stop() {
+  running || die "nothing is being recorded"
+  local base pid
+  base=$(cat "$PATHFILE")
+  pid=$(cat "$PIDFILE")
+
+  # -INT rather than -KILL: ffmpeg finalises the FLAC on interrupt, and a killed one
+  # leaves a file no decoder will open.
+  kill -INT "$pid" 2>/dev/null
+  for _ in $(seq 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+  rm -f "$PIDFILE" "$PATHFILE"
+
+  [[ -s "$base.flac" ]] || die "the recording is empty"
+  echo "saved $base.flac"
+
+  command -v voxtype >/dev/null || { echo "voxtype is not installed; transcribe $base.flac yourself"; exit 0; }
+
+  echo "transcribing ..."
+  : >"$base.txt"
+  local failed=0
+  transcribe_channel 0 "Them" "$base" || failed=1
+  transcribe_channel 1 "You" "$base" || failed=1
+
+  if ((failed)); then
+    notify-send -u critical "Meeting capture" "Transcription failed; the audio is kept" 2>/dev/null
+    die "transcription failed -- $base.flac is kept"
+  fi
+
+  notify-send "Meeting capture" "Transcript ready: $(basename "$base").txt" 2>/dev/null
+  echo "transcript $base.txt"
+}
+
+status() {
+  if running; then
+    local base started
+    base=$(cat "$PATHFILE")
+    started=$(ps -o etimes= -p "$(cat "$PIDFILE")" | tr -d ' ')
+    printf 'recording %s for %dm%02ds\n' "$(basename "$base").flac" $((started / 60)) $((started % 60))
+  else
+    echo "idle"
+  fi
+}
+
+case "${1:-}" in
+start) start "${2:-}" ;;
+stop) stop ;;
+status) status ;;
+*)
+  echo "usage: desktop-meeting-capture <start [name]|stop|status>" >&2
+  exit 1
+  ;;
+esac
