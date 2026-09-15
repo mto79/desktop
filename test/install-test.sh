@@ -19,6 +19,16 @@ for cmd in jq python3; do
   fi
 done
 
+# `qt6-qtsvg ` sat in the list with a trailing space. dnf happens to trim it, so it did
+# no harm -- but the list is also read by greps and by `grep -qxF`, which do not, and a
+# name that looks present while failing an exact match is a bad way to lose a package.
+padded=$(grep -nE '^[[:space:]]+|[[:space:]]+$' "$packages" | grep -v '^[0-9]*:#' || true)
+if [[ -z $padded ]]; then
+  pass "no package name is padded with whitespace"
+else
+  fail "no package name is padded with whitespace" "$padded"
+fi
+
 dupes=$(sort "$packages" | grep -v '^#' | grep -v '^$' | uniq -d || true)
 if [[ -z $dupes ]]; then pass "no duplicate packages"; else fail "no duplicate packages" "$dupes"; fi
 

@@ -33,7 +33,6 @@ ghostty
 glab
 gnome-calculator
 gnome-keyring
-gnome-themes-extra
 google-noto-fonts-common
 golang
 gum
@@ -73,8 +72,8 @@ NetworkManager-openvpn-gnome
 net-tools
 nextcloud-client
 nfs-utils
+network-manager-applet
 nmap
-nm-applet
 nm-connection-editor
 openvpn
 pciutils
@@ -90,6 +89,7 @@ ruby
 ruby-devel
 ripgrep
 rsync
+s3cmd
 satty
 sddm
 setroubleshoot
@@ -99,12 +99,13 @@ starship
 sushi
 swaybg
 tar
+tigervnc
 tldr
 tmux
 qt5-qtgraphicaleffects
 qt6-qtdeclarative
 qt6-qtimageformats
-qt6-qtsvg 
+qt6-qtsvg
 qt6-qtvirtualkeyboard
 qt6-qtmultimedia
 qt6-qtwayland
@@ -113,7 +114,6 @@ unzip
 usbutils
 util-linux-user
 uwsm
-vncviewer
 waybar
 wf-recorder
 wget
