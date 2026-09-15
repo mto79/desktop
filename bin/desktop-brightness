@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+
+# desktop-brightness: change the screen backlight, on the screen you are looking at.
+#
+#   desktop-brightness up
+#   desktop-brightness down
+#   desktop-brightness set 50%
+#   desktop-brightness device      # print the backlight it would act on
+#
+# The whole point is the device. `brightnessctl` with no -d takes the first backlight it
+# finds, and on this laptop that is nvidia_0 -- a backlight the discrete GPU exposes for
+# an eDP-2 that nothing is plugged into. The panel is driven by the Intel chip, so the
+# keys moved a number nobody could see while the screen stayed exactly as bright.
+#
+# Rather than hardcode intel_backlight, the backlight is chosen by whether its DRM
+# connector reports itself connected. That picks the panel on any machine and keeps
+# working if the hardware changes, which a name would not.
+
+set -uo pipefail
+
+STEP="${DESKTOP_BRIGHTNESS_STEP:-5%}"
+
+# The backlight whose connector is actually connected. nvidia_0's device link resolves to
+# a PCI device with no status at all, so it falls out here without being named.
+backlight_device() {
+  local dir connector
+  for dir in /sys/class/backlight/*/; do
+    connector=$(readlink -f "$dir/device" 2>/dev/null) || continue
+    [[ -r "$connector/status" ]] || continue
+    [[ $(<"$connector/status") == connected ]] || continue
+    basename "$dir"
+    return 0
+  done
+
+  # Nothing resolved to a live connector -- a desktop, or a kernel that describes things
+  # differently. brightnessctl's own choice is no worse than a guess here.
+  brightnessctl -m 2>/dev/null | cut -d, -f1
+}
+
+DEVICE=$(backlight_device)
+[[ -n $DEVICE ]] || {
+  echo "desktop-brightness: no backlight to control" >&2
+  exit 1
+}
+
+# The OSD if the shell is up, a notification if it is not. Brightness has no equivalent
+# of the volume bus for something else to notice the change on, so it has to say so.
+announce() {
+  desktop-shell shell osd brightness >/dev/null 2>&1 && return 0
+  notify-send -h string:x-canonical-private-synchronous:brightness -u low -t 2000 \
+    "Brightness" "$(brightnessctl -d "$DEVICE" -m | cut -d, -f4)"
+}
+
+case "${1:-}" in
+up) brightnessctl -d "$DEVICE" set "+$STEP" >/dev/null && announce ;;
+down) brightnessctl -d "$DEVICE" set "$STEP-" >/dev/null && announce ;;
+set)
+  [[ -n ${2:-} ]] || {
+    echo "usage: desktop-brightness set <value>" >&2
+    exit 1
+  }
+  brightnessctl -d "$DEVICE" set "$2" >/dev/null && announce
+  ;;
+device) echo "$DEVICE" ;;
+*)
+  echo "usage: desktop-brightness <up|down|set VALUE|device>" >&2
+  exit 1
+  ;;
+esac
