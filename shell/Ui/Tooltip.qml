@@ -13,6 +13,8 @@ PopupWindow {
 
   property Item anchorItem: null
   property string text: ""
+  // The key for the same action, on a line of its own under the text.
+  property string shortcut: ""
 
   anchor.item: root.anchorItem
   anchor.edges: Edges.Bottom
@@ -30,8 +32,8 @@ PopupWindow {
   Rectangle {
     id: frame
 
-    implicitWidth: label.implicitWidth + Style.tooltipPaddingH * 2
-    implicitHeight: label.implicitHeight + Style.tooltipPaddingV * 2
+    implicitWidth: lines.implicitWidth + Style.tooltipPaddingH * 2
+    implicitHeight: lines.implicitHeight + Style.tooltipPaddingV * 2
 
     anchors.fill: parent
     color: Color.tooltipBackground
@@ -39,18 +41,34 @@ PopupWindow {
     border.color: Color.tooltipBorder
     radius: Style.radius
 
-    Text {
-      id: label
+    Column {
+      id: lines
 
       anchors.centerIn: parent
-      width: Math.min(implicitWidth, Style.tooltipMaxWidth)
-      text: root.text
-      textFormat: Text.PlainText
-      color: Color.tooltipText
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize
-      wrapMode: Text.WordWrap
-      horizontalAlignment: Text.AlignLeft
+      spacing: 3
+
+      Text {
+        visible: root.text !== ""
+        width: Math.min(implicitWidth, Style.tooltipMaxWidth)
+        text: root.text
+        textFormat: Text.PlainText
+        color: Color.tooltipText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize
+        wrapMode: Text.WordWrap
+        horizontalAlignment: Text.AlignLeft
+      }
+
+      // Quieter than the text above it: a reminder, not the answer to the hover.
+      Text {
+        visible: root.shortcut !== ""
+        text: "\u{f030c}  " + root.shortcut
+        textFormat: Text.PlainText
+        color: Color.tooltipText
+        opacity: 0.6
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize - 2
+      }
     }
   }
 }

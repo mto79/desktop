@@ -32,6 +32,19 @@ BarWidget {
 
   readonly property bool hovered: mouseArea.containsMouse
 
+  // The keys that do what a click does: the panel if there is one, the command if not, and
+  // whatever the right click runs -- which is where the audio widgets keep mute, the one thing
+  // on them a media key already does. A widget whose click opens a panel some other way than
+  // through panelId sets leftShortcut itself.
+  property string leftShortcut: panelId !== "" ? Shortcuts.forPanel(panelId) : Shortcuts.forExec(command)
+  readonly property string rightShortcut: Shortcuts.forExec(rightCommand)
+  shortcut: {
+    var right = rightShortcut !== "" ? rightShortcut + " (right-click)" : "";
+    if (leftShortcut !== "" && right !== "")
+      return leftShortcut + "  ·  " + right;
+    return leftShortcut !== "" ? leftShortcut : right;
+  }
+
   // Bar.qml injects `popups` after this component is constructed, so registering in
   // Component.onCompleted would run against a null host and silently do nothing --
   // which is exactly what made the first IPC open answer "unknown".
@@ -48,14 +61,16 @@ BarWidget {
     if (!tooltips)
       return;
     if (hovered)
-      tooltips.request(root, root.tooltip);
+      tooltips.request(root, root.tooltip, root.shortcut);
     else
       tooltips.release(root);
   }
 
   // Keep the text current while the pointer sits still on a widget whose reading moves.
   onTooltipChanged: if (tooltips && hovered)
-    tooltips.request(root, root.tooltip)
+    tooltips.request(root, root.tooltip, root.shortcut)
+  onShortcutChanged: if (tooltips && hovered)
+    tooltips.request(root, root.tooltip, root.shortcut)
 
   implicitWidth: contentItem.implicitWidth + Style.itemPaddingH * 2
 

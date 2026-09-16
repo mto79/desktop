@@ -30,6 +30,9 @@ BarItem {
   // carries the input slider and source list -- and right click toggles mute.
   onClicked: if (popups)
     popups.toggle("audio", this)
+  // Opened without panelId -- that belongs to the speaker widget, which anchors the panel --
+  // so the key for it is named here rather than worked out.
+  leftShortcut: Shortcuts.forPanel("audio")
   rightCommand: ["wpctl", "set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]
 
   function step(delta) {

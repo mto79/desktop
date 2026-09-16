@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+
+"""The keyboard shortcut behind each thing the bar can do, as Hyprland has it bound right now.
+
+    desktop-shortcuts            # a readable list
+    desktop-shortcuts --json     # what the shell's tooltips read
+
+    {"exec": {"desktop-meeting-capture toggle": "Super+Ctrl+M", ...},
+     "panel": {"memory": "Super+D, then M", ...},
+     "dictation": "Right Alt, hold"}
+
+Read from `hyprctl binds -j` rather than written into the tooltips, so a hint cannot say one
+thing while the binding does another: rebind a key, reload Hyprland, and the tooltip follows.
+Bar widgets look themselves up by what they do -- the panel they open, the command they run --
+so a widget whose action has no binding simply shows no hint.
+
+Panels open through a submap, SUPER+D and then a letter, so a key bound inside a submap is
+given the chord that enters the submap as well. Dictation is the one shortcut Hyprland does not
+own: voxtype reads its key off the device itself, so that one comes from voxtype's config.
+"""
+
+import json
+import re
+import shutil
+import subprocess
+import sys
+
+PANEL = re.compile(r"^desktop-shell shell togglePanel (\S+)$")
+
+# Hyprland's modifier bits, in the order a chord is written.
+MODIFIERS = ((64, "Super"), (4, "Ctrl"), (8, "Alt"), (1, "Shift"))
+
+KEYS = {
+    "space": "Space", "print": "Print", "escape": "Esc", "backspace": "Backspace",
+    "return": "Enter", "tab": "Tab", "comma": ",", "period": ".", "slash": "/",
+    "xf86audiomute": "Mute key", "xf86audiomicmute": "Mic mute key",
+    "xf86audioraisevolume": "Volume up key", "xf86audiolowervolume": "Volume down key",
+    "xf86audioplay": "Play key", "xf86audiopause": "Pause key",
+    "xf86audionext": "Next key", "xf86audioprev": "Previous key",
+    "xf86monbrightnessup": "Brightness up key", "xf86monbrightnessdown": "Brightness down key",
+    "xf86poweroff": "Power key",
+}
+
+VOXTYPE_KEYS = {"RIGHTALT": "Right Alt", "LEFTALT": "Left Alt", "RIGHTCTRL": "Right Ctrl",
+                "LEFTCTRL": "Left Ctrl", "SCROLLLOCK": "Scroll Lock", "PAUSE": "Pause"}
+
+
+def chord(modmask, key):
+    parts = [name for bit, name in MODIFIERS if modmask & bit]
+    if key.lower() in KEYS:
+        name = KEYS[key.lower()]
+    elif len(key) == 1:
+        name = key.upper()
+    elif key.isalpha() and key.isupper():
+        # DELETE, HOME, INSERT: Hyprland's spelling, not how a key is written down.
+        name = key.title()
+    else:
+        name = key
+    parts.append(name)
+    return "+".join(parts)
+
+
+def command_of(arg):
+    """The command a binding runs, without the fallback some carry: `desktop-shell shell
+    toggleLauncher >/dev/null 2>&1 || desktop-menu apps` is the launcher, not the menu."""
+    return re.split(r"\s+(?:>|2>|\|\||&&)", arg.strip(), maxsplit=1)[0].strip()
+
+
+def binds():
+    if not shutil.which("hyprctl"):
+        return []
+    try:
+        result = subprocess.run(["hyprctl", "binds", "-j"], capture_output=True, text=True, timeout=5)
+        return json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+
+
+def dictation():
+    if not shutil.which("voxtype"):
+        return None
+    try:
+        text = subprocess.run(["voxtype", "config"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    section = text.split("[hotkey]", 1)[-1].split("\n[", 1)[0] if "[hotkey]" in text else ""
+    key = re.search(r'key\s*=\s*"([^"]+)"', section)
+    if not key:
+        return None
+    name = VOXTYPE_KEYS.get(key.group(1), key.group(1).title())
+    listed = re.search(r"modifiers\s*=\s*\[([^\]]*)\]", section)
+    modifiers = re.findall(r'"([^"]+)"', listed.group(1)) if listed else []
+    held = [VOXTYPE_KEYS.get(m, m.title()) for m in modifiers]
+    hold = ", hold" if re.search(r"mode\s*=\s*\"?PushToTalk", section, re.I) else ""
+    return "+".join(held + [name]) + hold
+
+
+def build():
+    table = {"exec": {}, "panel": {}}
+    all_binds = binds()
+
+    # How each submap is entered, so a key inside one can be written in full.
+    entries = {}
+    for b in all_binds:
+        if b.get("dispatcher") == "submap" and not b.get("submap") and b.get("arg") not in ("", "reset"):
+            entries.setdefault(b["arg"], chord(b.get("modmask", 0), b.get("key", "")))
+
+    for b in all_binds:
+        if b.get("dispatcher") != "exec" or not b.get("key"):
+            continue
+        written = chord(b.get("modmask", 0), b["key"])
+        submap = b.get("submap") or ""
+        if submap:
+            if submap not in entries:
+                continue
+            written = f"{entries[submap]}, then {written}"
+        command = command_of(b.get("arg", ""))
+        # The first binding for a command wins, and a global one over one inside a submap.
+        if command not in table["exec"] or (not submap and ", then" in table["exec"][command]):
+            table["exec"][command] = written
+        panel = PANEL.match(command)
+        if panel:
+            table["panel"].setdefault(panel.group(1), written)
+
+    held = dictation()
+    if held:
+        table["dictation"] = held
+    return table
+
+
+def main():
+    table = build()
+    if "--json" in sys.argv[1:]:
+        print(json.dumps(table))
+        return 0
+    for name, written in sorted(table["panel"].items()):
+        print(f"{written:<28} {name} panel")
+    for command, written in sorted(table["exec"].items()):
+        if not PANEL.match(command):
+            print(f"{written:<28} {command}")
+    if "dictation" in table:
+        print(f"{table['dictation']:<28} dictation")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

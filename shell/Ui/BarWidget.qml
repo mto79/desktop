@@ -26,6 +26,9 @@ Item {
   // Shown on hover after a short delay. Empty means no tooltip, which is the default:
   // a tooltip that repeats what the label already says is noise.
   property string tooltip: ""
+  // The key that does what clicking this does, shown under the tooltip. BarItem works it out
+  // from the panel or command; a widget with some other way to trigger it sets it itself.
+  property string shortcut: ""
 
   implicitHeight: parent ? parent.height : Style.barSize
 }

@@ -70,6 +70,8 @@ BarWidget {
     property bool active: false
     property color tone: Color.barUrgent
     property string tip: ""
+    // The key that does what this button does, shown under the tip.
+    property string shortcut: ""
     // Draws attention while something is genuinely happening, and only then.
     property bool pulsing: false
 
@@ -85,7 +87,7 @@ BarWidget {
       if (!root.tooltips)
         return;
       if (hovered)
-        root.tooltips.request(toggle, tip);
+        root.tooltips.request(toggle, tip, shortcut);
       else
         root.tooltips.release(toggle);
     }
@@ -277,6 +279,7 @@ BarWidget {
       pulsing: root.recording
       tone: Color.barUrgent
       tip: root.recording ? root.recordingTip : "Record a region  ·  right-click for a whole screen"
+      shortcut: Shortcuts.forExec("desktop-cmd-screenrecord region")
 
       onTriggered: root.launch(["desktop-cmd-screenrecord"])
       onAlternate: root.launch(["desktop-cmd-screenrecord", "output"])
@@ -292,6 +295,7 @@ BarWidget {
       tone: root.voice === "transcribing" ? Color.barAccent : Color.barUrgent
       pulsing: root.voice === "recording"
       tip: root.voiceTip !== "" ? root.voiceTip : "Dictate  ·  click to start talking"
+      shortcut: Shortcuts.dictation
 
       onTriggered: root.launch(["voxtype", "record", "toggle"])
     }
@@ -308,7 +312,8 @@ BarWidget {
       pulsing: root.meeting || root.meetingTranscribing
       tone: root.meeting ? Color.barUrgent : Color.barAccent
       tip: (root.meeting || root.meetingTranscribing) ? root.meetingTip
-        : "Capture both sides of a call, transcribed locally  ·  click or Super+Ctrl+M"
+        : "Capture both sides of a call, transcribed locally  ·  click to start"
+      shortcut: Shortcuts.forExec("desktop-meeting-capture toggle")
 
       onTriggered: root.launch(["desktop-meeting-capture", "toggle"])
     }

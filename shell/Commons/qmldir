@@ -4,3 +4,4 @@ singleton Color 1.0 Color.qml
 singleton Dates 1.0 Dates.qml
 singleton Media 1.0 Media.qml
 singleton Style 1.0 Style.qml
+singleton Shortcuts 1.0 Shortcuts.qml

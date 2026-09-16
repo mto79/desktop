@@ -15,20 +15,25 @@ Item {
   property Item current: null
   property Item pending: null
   property string pendingText: ""
+  property string pendingShortcut: ""
 
   // Called from BarItem on hover. Re-requesting for the widget already showing just
-  // updates the text, so a tooltip over a ticking clock does not flicker.
-  function request(item, text) {
-    if (!item || text === "")
+  // updates the text, so a tooltip over a ticking clock does not flicker. A widget with no
+  // text but a shortcut still gets a tooltip: the key is worth knowing on its own.
+  function request(item, text, shortcut) {
+    shortcut = shortcut || "";
+    if (!item || (text === "" && shortcut === ""))
       return;
 
     if (current === item) {
       tooltip.text = text;
+      tooltip.shortcut = shortcut;
       return;
     }
 
     pending = item;
     pendingText = text;
+    pendingShortcut = shortcut;
     // Once one tooltip is up, moving along the bar should not re-serve the delay.
     delayTimer.interval = current ? 0 : Style.tooltipDelay;
     delayTimer.restart();
@@ -59,6 +64,7 @@ Item {
       var item = root.pending;
       root.pending = null;
       tooltip.text = root.pendingText;
+      tooltip.shortcut = root.pendingShortcut;
 
       // Re-anchoring a mapped popup and showing it in the same turn confuses the
       // compositor's bookkeeping, the same way it does for panels.
