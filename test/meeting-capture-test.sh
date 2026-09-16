@@ -117,4 +117,36 @@ check "no intermediate wavs are left behind" \
   test -z "$(find "$sandbox/out" -name '*.ch[01].wav')"
 check "stopping when idle is refused" lacks . <<<"$(run stop 2>/dev/null || true)"
 
+# --- the key and the bar button: one toggle, and the state the bar draws from
+bar() {
+  XDG_RUNTIME_DIR="$sandbox/run" PATH="$stubs:$PATH" bash "$ROOT/bin/desktop-status-meeting-capture"
+}
+rm -rf "$sandbox/out"/*
+check "the bar reads idle when nothing is running" \
+  test "$(bar | jq -r '"\(.active) \(.transcribing)"')" = "false false"
+
+run toggle >/dev/null
+check "a first press starts a capture" test "$(run status)" != idle
+check "and the bar shows it recording" test "$(bar | jq -r .active)" = true
+
+# A long meeting takes minutes to transcribe, and during that time nothing is recording.
+# A press then must not read "nothing running" and start a new capture in the middle of it.
+run toggle >/dev/null
+check "a second press stops it and transcribes" test -n "$(find "$sandbox/out" -name '*.txt')"
+check "and clears the transcribing mark once it is done" test ! -e "$sandbox/run/desktop/meeting-capture.transcribing"
+
+sleep 300 &
+busy=$!
+printf '%s\n' "$busy" >"$sandbox/run/desktop/meeting-capture.transcribing"
+check "while a capture is still being transcribed, the bar says so" \
+  test "$(bar | jq -r '"\(.active) \(.transcribing)"')" = "false true"
+check "and status says so too" test "$(run status)" = transcribing
+run toggle >/dev/null
+check "a press during transcription does not start a new capture" test ! -e "$sandbox/run/desktop/meeting-capture.pid"
+kill "$busy" 2>/dev/null
+wait "$busy" 2>/dev/null
+check "a transcribing mark left by a process that died is not believed" \
+  test "$(bar | jq -r .transcribing)" = false
+rm -f "$sandbox/run/desktop/meeting-capture.transcribing"
+
 finish

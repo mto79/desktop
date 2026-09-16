@@ -4,6 +4,7 @@
 #
 #   desktop-meeting-capture start [name]   # begin
 #   desktop-meeting-capture stop           # end, mix down, transcribe
+#   desktop-meeting-capture toggle         # start, then stop on the next press
 #   desktop-meeting-capture status         # what is running, and for how long
 #
 # Both sides, because one is not enough: a sink's monitor carries only what comes *out*
@@ -31,6 +32,8 @@ OUTPUT_DIR="${DESKTOP_MEETING_DIR:-${XDG_VIDEOS_DIR:-$HOME/Videos}/Meetings}"
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop"
 PIDFILE="$STATE_DIR/meeting-capture.pid"
 PATHFILE="$STATE_DIR/meeting-capture.path"
+# Present, holding the pid of the stop doing it, while a finished capture is transcribed.
+TRANSCRIBING="$STATE_DIR/meeting-capture.transcribing"
 
 die() {
   echo "desktop-meeting-capture: $1" >&2
@@ -39,6 +42,7 @@ die() {
 }
 
 running() { [[ -f $PIDFILE ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; }
+transcribing() { [[ -f $TRANSCRIBING ]] && kill -0 "$(cat "$TRANSCRIBING")" 2>/dev/null; }
 
 start() {
   running && die "already recording $(basename "$(cat "$PATHFILE")")"
@@ -161,6 +165,11 @@ stop() {
 
   command -v voxtype >/dev/null || { echo "voxtype is not installed; transcribe $base.flac yourself"; exit 0; }
 
+  # The recording has stopped but the work has not, and on a long meeting transcription
+  # takes minutes. Say so, so that the bar shows it and a second press of the key does not
+  # read "nothing running" and start a new capture in the middle of it.
+  echo $$ >"$TRANSCRIBING"
+  trap 'rm -f "$TRANSCRIBING"' EXIT
   echo "transcribing ..."
   : >"$base.txt"
   local failed=0
@@ -176,12 +185,28 @@ stop() {
   echo "transcript $base.txt"
 }
 
+# One key, like the other bar toggles: it starts a capture and the next press stops and
+# transcribes it. The name is left to the date stamp rather than to a second tap. A press
+# while the last capture is still being transcribed does nothing but say so.
+toggle() {
+  if transcribing; then
+    notify-send "Meeting capture" "Still transcribing the last one" 2>/dev/null
+    echo "still transcribing the last capture"
+  elif running; then
+    stop
+  else
+    start
+  fi
+}
+
 status() {
   if running; then
     local base started
     base=$(cat "$PATHFILE")
     started=$(ps -o etimes= -p "$(cat "$PIDFILE")" | tr -d ' ')
     printf 'recording %s for %dm%02ds\n' "$(basename "$base").flac" $((started / 60)) $((started % 60))
+  elif transcribing; then
+    echo "transcribing"
   else
     echo "idle"
   fi
@@ -190,9 +215,10 @@ status() {
 case "${1:-}" in
 start) start "${2:-}" ;;
 stop) stop ;;
+toggle) toggle ;;
 status) status ;;
 *)
-  echo "usage: desktop-meeting-capture <start [name]|stop|status>" >&2
+  echo "usage: desktop-meeting-capture <start [name]|stop|toggle|status>" >&2
   exit 1
   ;;
 esac

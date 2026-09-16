@@ -33,6 +33,14 @@ BarWidget {
 
   readonly property bool voiceAvailable: voice !== "missing"
 
+  // A meeting capture: recording, or stopped and still being transcribed.
+  property bool meeting: false
+  property bool meetingTranscribing: false
+  property string meetingTip: ""
+  property int meetingPolledElapsed: 0
+  property real meetingPolledAt: 0
+  property int meetingElapsed: 0
+
   function pad(value) {
     return value < 10 ? "0" + value : String(value);
   }
@@ -214,6 +222,44 @@ BarWidget {
       voiceFollower.running = true
   }
 
+  Process {
+    id: meetingProbe
+
+    command: ["desktop-status-meeting-capture"]
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var data = JSON.parse(text);
+          root.meeting = !!data.active;
+          root.meetingTranscribing = !!data.transcribing;
+          root.meetingTip = data.tooltip || "";
+          root.meetingPolledElapsed = data.elapsed || 0;
+          root.meetingPolledAt = Date.now();
+          root.meetingElapsed = root.meetingPolledElapsed;
+        } catch (e) {
+          root.meeting = false;
+        }
+      }
+    }
+  }
+
+  Timer {
+    interval: 5000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: if (!meetingProbe.running)
+      meetingProbe.running = true
+  }
+
+  Timer {
+    interval: 1000
+    running: root.meeting
+    repeat: true
+    onTriggered: root.meetingElapsed = root.meetingPolledElapsed + Math.floor((Date.now() - root.meetingPolledAt) / 1000)
+  }
+
   implicitWidth: row.implicitWidth
 
   Row {
@@ -248,6 +294,23 @@ BarWidget {
       tip: root.voiceTip !== "" ? root.voiceTip : "Dictate  ·  click to start talking"
 
       onTriggered: root.launch(["voxtype", "record", "toggle"])
+    }
+
+    Toggle {
+      // A headset: a call, where the dictation button beside it is a microphone and the
+      // recording button a camera -- three things a glance has to tell apart. Same grammar as
+      // the other two, and the count-up the recording button already has. While the capture
+      // is being transcribed it stays lit, in the accent rather than the urgent colour, since
+      // nothing is listening any more but the key would still start something new.
+      icon: "\u{f02ce}"
+      label: root.meeting ? root.clock(root.meetingElapsed) : root.meetingTranscribing ? "…" : ""
+      active: root.meeting || root.meetingTranscribing
+      pulsing: root.meeting || root.meetingTranscribing
+      tone: root.meeting ? Color.barUrgent : Color.barAccent
+      tip: (root.meeting || root.meetingTranscribing) ? root.meetingTip
+        : "Capture both sides of a call, transcribed locally  ·  click or Super+Ctrl+M"
+
+      onTriggered: root.launch(["desktop-meeting-capture", "toggle"])
     }
   }
 }

@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# desktop-status-meeting-capture: whether a meeting capture is running, and for how long.
+#
+# The state lives in a pid and path file under XDG_RUNTIME_DIR rather than in a process
+# name to find, because the recording process is ffmpeg and so is nobody's: a second
+# ffmpeg from another tool would light this up, and a capture started from a terminal
+# has to be visible to the bar too. desktop-meeting-capture's status already reads the
+# same files; this only puts the same answer in the shape the bar wants.
+
+set -uo pipefail
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop"
+PIDFILE="$STATE_DIR/meeting-capture.pid"
+TRANSCRIBING="$STATE_DIR/meeting-capture.transcribing"
+
+if [[ -f $PIDFILE ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+  pid=$(cat "$PIDFILE")
+  elapsed=$(ps -o etimes= -p "$pid" 2>/dev/null | tr -d ' ')
+  elapsed=${elapsed:-0}
+  jq -cn --argjson elapsed "$elapsed" \
+    '{active: true, transcribing: false, elapsed: $elapsed, tooltip: "Recording the call -- click to stop and transcribe"}'
+elif [[ -f $TRANSCRIBING ]] && kill -0 "$(cat "$TRANSCRIBING")" 2>/dev/null; then
+  # Stopped but not finished: on a long meeting this lasts minutes, and a button that went
+  # quiet the moment it was pressed would invite pressing it again.
+  jq -cn '{active: false, transcribing: true, elapsed: 0, tooltip: "Transcribing the call -- the transcript lands beside the recording"}'
+else
+  jq -cn '{active: false, transcribing: false, elapsed: 0, tooltip: "Capture the call and transcribe it  ·  click to start"}'
+fi
