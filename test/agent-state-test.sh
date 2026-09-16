@@ -25,6 +25,32 @@ trap cleanup EXIT
 export XDG_RUNTIME_DIR="$sandbox/run"
 records="$XDG_RUNTIME_DIR/desktop/agents"
 
+# Nothing here may reach the real tmux server or put a real notification on the screen.
+# The suite is usually run from inside tmux, so TMUX is cleared rather than inherited, and
+# the commands a notification needs are stubbed to leave a record instead.
+unset TMUX TMUX_PANE
+stubs="$sandbox/stubs"
+mkdir -p "$stubs"
+cat >"$stubs/notify-send" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$NOTIFY_LOG"
+# Clicked, as far as desktop-agent-state can tell.
+[[ $* == *--wait* ]] && echo default
+exit 0
+STUB
+cat >"$stubs/hyprctl" <<'STUB'
+#!/usr/bin/env bash
+printf '{"pid":%s}\n' "${ACTIVE_WINDOW_PID:-1}"
+STUB
+cat >"$stubs/jump" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$JUMP_LOG"
+STUB
+chmod +x "$stubs"/*
+export PATH="$stubs:$PATH" NOTIFY_LOG="$sandbox/notify.log" JUMP_LOG="$sandbox/jump.log"
+export DESKTOP_AGENT_JUMP="$stubs/jump"
+: >"$NOTIFY_LOG"; : >"$JUMP_LOG"
+
 # A real process called claude, for the reader's liveness check to find.
 mkdir -p "$sandbox/bin"
 cp "$(command -v sleep)" "$sandbox/bin/claude"
@@ -122,14 +148,141 @@ event SessionEnd
 check "a session that ends cleanly removes its record" test ! -f "$records/s1.json"
 
 # --- the bar
-mkdir -p "$sandbox/stubs"
-printf '#!/usr/bin/env bash\n[[ "${*: -1}" == claude ]] && echo 2 || echo 0\n' >"$sandbox/stubs/pgrep"
-chmod +x "$sandbox/stubs/pgrep"
-bar=$(PATH="$sandbox/stubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
+mkdir -p "$sandbox/barstubs"
+printf '#!/usr/bin/env bash\n[[ "${*: -1}" == claude ]] && echo 2 || echo 0\n' >"$sandbox/barstubs/pgrep"
+chmod +x "$sandbox/barstubs/pgrep"
+bar=$(PATH="$sandbox/barstubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
 check "the bar turns to waiting while a session waits on you" test "$(jq -r .class <<<"$bar")" = waiting
 rm -f "$records"/s3.json
-bar=$(PATH="$sandbox/stubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
+bar=$(PATH="$sandbox/barstubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
 check "and back to busy once nothing is" test "$(jq -r .class <<<"$bar")" = busy
+
+# --- the tab, the notification, and whether you are already looking
+if require tmux; then
+  server="agentstate-tab-$$"
+  tmux -L "$server" -f /dev/null new-session -d -s work -n editor -x 120 -y 30
+  tmux -L "$server" new-window -t work: -n agent
+  socket=$(tmux -L "$server" display-message -p '#{socket_path}')
+  agent_pane=$(tmux -L "$server" display-message -p -t work:agent '#{pane_id}')
+  tab() { tmux -L "$server" show-options -wv -t work:agent @agent_state 2>/dev/null; }
+  on_tab() { # <payload>: a hook run from inside the agent's pane
+    printf '%s' "$1" | TMUX="$socket,1,0" TMUX_PANE="$agent_pane" DESKTOP_AGENT_PID="$claude_pid" bash "$STATE"
+  }
+  tab_event() { # <event> [extra json]
+    on_tab "{\"hook_event_name\":\"$1\",\"session_id\":\"tab\",\"cwd\":\"/home/someone/archive\"${2:+,$2}}"
+  }
+  notified() { # waits for a detached notification to land
+    local i
+    for ((i = 0; i < 30; i++)); do grep -q "$1" "$NOTIFY_LOG" 2>/dev/null && return 0; sleep 0.1; done
+    return 1
+  }
+
+  tab_event UserPromptSubmit
+  check "the agent's tab says working" test "$(tab)" = working
+
+  # Not looking: no client attached, so a permission prompt is worth a notification.
+  : >"$NOTIFY_LOG"
+  tab_event Notification '"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"'
+  check "the tab says waiting" test "$(tab)" = waiting
+  check "waiting sends a notification naming the project and what it wants" \
+    notified "archive needs you Claude needs your permission to use Bash"
+  for ((i = 0; i < 30; i++)); do [[ -s $JUMP_LOG ]] && break; sleep 0.1; done
+  check "clicking it jumps to the agent's pane, on its own server" \
+    grep -qx -- "--jump work:1.0 $socket" "$JUMP_LOG"
+
+  # A short turn ends: done on the tab, but not worth a notification.
+  tab_event PostToolUse
+  : >"$NOTIFY_LOG"
+  tab_event Stop
+  check "a finished turn marks the tab done" test "$(tab)" = done
+  sleep 0.5
+  check "a short turn is not worth a notification" test ! -s "$NOTIFY_LOG"
+
+  # A long one is. The turn began before a permission prompt in the middle of it, and the
+  # length reported is the whole turn, not the part after the prompt.
+  tab_event UserPromptSubmit
+  jq -c '.turn -= 600 | .since -= 600' "$records/tab.json" >"$records/tab.tmp" && mv "$records/tab.tmp" "$records/tab.json"
+  tab_event Notification '"notification_type":"permission_prompt"'
+  tab_event PostToolUse
+  : >"$NOTIFY_LOG"
+  tab_event Stop
+  check "a long turn sends a done notification with the whole turn's length" \
+    notified "archive is done Finished after 10m"
+
+  # Claude's idle reminder a minute later is not a second notification.
+  tab_event UserPromptSubmit
+  jq -c '.turn -= 600' "$records/tab.json" >"$records/tab.tmp" && mv "$records/tab.tmp" "$records/tab.json"
+  : >"$NOTIFY_LOG"
+  tab_event Notification '"notification_type":"idle_prompt"'
+  sleep 0.5
+  check "the idle reminder sends nothing" test ! -s "$NOTIFY_LOG"
+
+  # Arriving at the window clears done, once the tmux.conf hook is in place.
+  tmux -L "$server" set-hook -g session-window-changed \
+    "$(sed -n "s/^set-hook -g session-window-changed '\(.*\)'$/\1/p" "$ROOT/config/tmux/tmux.conf")"
+  # From another window: selecting the window already showing changes nothing, and fires
+  # nothing either.
+  tmux -L "$server" select-window -t work:editor
+  tmux -L "$server" select-window -t work:agent
+  sleep 0.3
+  check "visiting the window clears done" test -z "$(tab)"
+  tmux -L "$server" select-window -t work:editor
+
+  # Now looking: a terminal attached to this session, showing the agent's window, focused.
+  tmux -L "$server" select-window -t work:agent
+  # A real attached client needs a terminal. util-linux's `script` would give it one, but is
+  # not installed everywhere and a skipped block reads exactly like a passing one, so a pty
+  # from python instead -- already required above. The client is this process's child, which
+  # is the shape desktop-agent-state walks up from: client, then the terminal drawing it.
+  python3 -c '
+import os, sys, time
+pid, fd = os.forkpty()
+if pid == 0:
+    os.environ["TERM"] = "xterm-256color"
+    os.execvp("tmux", ["tmux", "-L", sys.argv[1], "attach", "-t", "work"])
+while True:
+    try:
+        os.read(fd, 65536)
+    except OSError:
+        time.sleep(0.2)
+' "$server" >/dev/null 2>&1 &
+  viewer=$!
+  for ((i = 0; i < 30; i++)); do
+    [[ -n $(tmux -L "$server" list-clients -F '#{client_pid}') ]] && break
+    sleep 0.1
+  done
+  export ACTIVE_WINDOW_PID=$viewer
+
+  tab_event UserPromptSubmit
+  jq -c '.turn -= 600' "$records/tab.json" >"$records/tab.tmp" && mv "$records/tab.tmp" "$records/tab.json"
+  : >"$NOTIFY_LOG"
+  tab_event Stop
+  sleep 0.5
+  check "a turn that ends while you watch sends nothing, however long it ran" test ! -s "$NOTIFY_LOG"
+  check "and leaves no done mark, because you have seen it" test -z "$(tab)"
+
+  tab_event UserPromptSubmit
+  : >"$NOTIFY_LOG"
+  tab_event Notification '"notification_type":"permission_prompt"'
+  sleep 0.5
+  check "a prompt in front of you sends nothing either" test ! -s "$NOTIFY_LOG"
+  check "but still marks the tab, since it waits until answered" test "$(tab)" = waiting
+
+  # Focus elsewhere -- another window is focused, though the client is still attached.
+  export ACTIVE_WINDOW_PID=1
+  tab_event PostToolUse
+  : >"$NOTIFY_LOG"
+  tab_event Notification '"notification_type":"permission_prompt"'
+  check "with the terminal not focused, you are not looking" notified "archive needs you"
+  unset ACTIVE_WINDOW_PID
+
+  tab_event SessionEnd
+  check "a session that ends takes its mark off the tab" test -z "$(tab)"
+
+  kill "$viewer" 2>/dev/null
+  tmux -L "$server" kill-server 2>/dev/null
+  rm -f "$socket"
+fi
 
 # --- the installer
 config="$sandbox/claude"
@@ -153,7 +306,7 @@ check "every event is wired" \
   = "Notification PostToolUse SessionEnd SessionStart Stop UserPromptSubmit"
 check "running it twice wires nothing twice" \
   test "$(jq '[.hooks[][].hooks[] | select(.command | contains("desktop-agent-state"))] | length' <<<"$settings")" = 6
-check "the notification hook already there is kept" grep -q desktop-agent-notify <<<"$settings"
+check "the retired notification hook is taken out" lacks desktop-agent-notify <<<"$settings"
 check "an unrelated hook is kept, matcher and all" \
   test "$(jq -r '.hooks.PreToolUse[0].matcher' <<<"$settings")" = Bash
 check "everything that is not a hook is left exactly as it was" \

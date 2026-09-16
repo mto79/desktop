@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 
-# desktop-agent-state: record what a Claude Code session is doing, from its hooks.
+# desktop-agent-state: record what a Claude Code session is doing, from its hooks, and say
+# so wherever you happen to be looking.
 #
 # Wired to every hook event that changes the answer to "which of my agents needs me":
 #
 #   SessionStart         ready       open, nothing asked of it yet
-#   UserPromptSubmit     working
+#   UserPromptSubmit     working     and a turn begins
 #   PostToolUse          working     what clears "waiting" once a permission is given
 #   Notification         waiting     a permission prompt, or a question it cannot pass
 #                        done        the idle reminder: the turn ended a while ago
@@ -13,23 +14,56 @@
 #   SessionEnd           (removed)
 #
 # One small JSON file per session under $XDG_RUNTIME_DIR/desktop/agents, holding the state,
-# when it began, the project, the tmux pane and the claude pid. The pane is what lets the
-# panel jump straight to a session -- with its server's socket, because pane ids are only
-# unique within one server, and %0 exists in every one of them; the pid is what lets a reader tell a crashed session
-# from a quiet one, because a crash fires no SessionEnd.
+# when it began, when the turn began, the project, the tmux pane and the claude pid. The
+# pane is what lets the panel jump straight to a session -- with its server's socket,
+# because pane ids are only unique within one server, and %0 exists in every one of them;
+# the pid is what lets a reader tell a crashed session from a quiet one, because a crash
+# fires no SessionEnd.
 #
-# Two things checked against a real Claude Code rather than taken from the docs: a hook's
-# parent process is claude itself, and TMUX_PANE is in its environment.
+# The same change is shown in two more places, so that it can be seen without going to look:
 #
-# Interrupting a turn with Esc fires no Stop, so a session can sit at "working" after it
-# has in fact stopped. The idle reminder a minute later corrects it, and so does the next
-# prompt. Nothing better is available from the hook side.
+#   The tmux tab of the agent's window carries a mark -- waiting, working, or done. Done
+#   means done and not yet seen: it is not set at all if you are looking at the pane when
+#   the turn ends, and tmux.conf clears it when you arrive at the window.
 #
-# A hook must never get in the agent's way: every path here exits 0, quietly.
+#   A desktop notification, only when something needs you and you are not already looking:
+#   on waiting, and when a turn that ran for a while is done. Clicking it jumps to the pane.
+#   Claude's idle reminder, a minute after every turn, is deliberately not one -- that was
+#   a notification per turn, including for the session in front of you.
+#
+# Checked against a real Claude Code rather than taken from the docs: a hook's parent
+# process is claude itself, TMUX_PANE is in its environment, and sessions already open pick
+# new hooks up without a restart.
+#
+# Interrupting a turn with Esc fires no Stop, so a session can sit at "working" after it has
+# in fact stopped. The idle reminder a minute later corrects it, and so does the next prompt.
+#
+# A hook must never get in the agent's way: every path exits 0, quietly, and the
+# notification waits for its click in a detached process of its own.
 
 set -uo pipefail
 
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/agents"
+# A finished turn is only worth a notification if it ran long enough for you to have gone
+# and done something else meanwhile.
+NOTIFY_AFTER="${DESKTOP_AGENT_NOTIFY_AFTER:-60}"
+# What a click on the notification runs to get to the pane.
+JUMP="${DESKTOP_AGENT_JUMP:-$(dirname "$(readlink -f "$0")")/desktop-menu-agents}"
+
+# --notify <urgency> <title> <body> <pane> <socket>: show a notification and wait for it to
+# be clicked. Only ever run detached, from below.
+if [[ ${1:-} == --notify ]]; then
+  choice=$(timeout 3600 notify-send --app-name="Claude Code" --urgency="$2" \
+    --icon=dialog-information --action=default=Open --wait "$3" "$4" 2>/dev/null)
+  if [[ $choice == default && -n ${5:-} ]]; then
+    # Resolved at click time, not when the notification was sent: windows may have been
+    # renumbered in between.
+    target=$(tmux ${6:+-S "$6"} display-message -p -t "$5" \
+      '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null) &&
+      "$JUMP" --jump "$target" "${6:-}"
+  fi
+  exit 0
+fi
 
 # One jq for the whole payload. PostToolUse fires on every tool call, so this runs dozens
 # of times in a busy turn, and each extra process is paid for in the agent's latency.
@@ -37,14 +71,22 @@ STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/agents"
 # Split on the unit separator, not a tab. Tab is whitespace to `read`, so an empty field --
 # notification_type is absent from every event but one -- collapses into its neighbour and
 # the cwd lands in $type.
-IFS=$'\x1f' read -r event session type cwd < <(
-  jq -r '[.hook_event_name, .session_id, .notification_type, .cwd] | map(. // "") | join("\u001f")' 2>/dev/null
+IFS=$'\x1f' read -r event session type cwd message < <(
+  jq -r '[.hook_event_name, .session_id, .notification_type, .cwd, .message]
+    | map(. // "" | tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null
 ) || exit 0
 [[ -n $event && -n $session ]] || exit 0
 # Used as a file name.
 [[ $session =~ ^[A-Za-z0-9_-]+$ ]] || exit 0
 
 file="$STATE_DIR/$session.json"
+socket="${TMUX:+${TMUX%%,*}}"
+pane="${TMUX_PANE:-}"
+
+tmx() {
+  [[ -n $socket && -n $pane ]] || return 1
+  tmux -S "$socket" "$@" 2>/dev/null
+}
 
 case "$event" in
 SessionStart) state=ready ;;
@@ -62,13 +104,33 @@ Notification)
   ;;
 SessionEnd)
   rm -f "$file"
+  tmx set-option -wu -t "$pane" @agent_state
   exit 0
   ;;
 *) exit 0 ;;
 esac
 
-# The claude process this hook belongs to. Its parent directly when the command is run
-# as a path, a shell in between when the command needs expanding -- "$HOME/..." does.
+mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
+
+# Nothing to do when the state is what it already was -- the common case by far, since a
+# busy turn is mostly PostToolUse after PostToolUse. That also keeps "since" where it was,
+# so "working for 12s" does not keep resetting to 0s.
+current=""
+[[ -f $file ]] && current=$(<"$file")
+[[ $current == *"\"state\":\"$state\""* ]] && exit 0
+
+now=$(date +%s)
+previous_state=""
+[[ $current =~ \"state\":\"([a-z]+)\" ]] && previous_state=${BASH_REMATCH[1]}
+# When the turn began, carried across the waiting in the middle of it: a turn that stopped
+# for a permission is still one turn, and its length is what "finished after 12m" means.
+turn=$now
+if [[ $event != UserPromptSubmit && $current =~ \"turn\":([0-9]+) ]]; then
+  turn=${BASH_REMATCH[1]}
+fi
+
+# The claude process this hook belongs to. Its parent directly when the command is run as a
+# path, a shell in between when the command needs expanding -- "$HOME/..." does.
 agent_pid() {
   [[ -n ${DESKTOP_AGENT_PID:-} ]] && { echo "$DESKTOP_AGENT_PID"; return; }
   local pid=$PPID i
@@ -82,27 +144,78 @@ agent_pid() {
   done
 }
 
-mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
-
-# Nothing to do when the state is what it already was -- the common case by far, since a
-# busy turn is mostly PostToolUse after PostToolUse. That also keeps "since" where it was,
-# so "working for 12s" does not keep resetting to 0s.
-current=""
-[[ -f $file ]] && current=$(<"$file")
-[[ $current == *"\"state\":\"$state\""* ]] && exit 0
-
 tmp="$file.$$"
 jq -cn \
   --arg agent claude \
   --arg session "$session" \
   --arg state "$state" \
-  --argjson since "$(date +%s)" \
+  --argjson since "$now" \
+  --argjson turn "$turn" \
   --arg cwd "$cwd" \
-  --arg pane "${TMUX_PANE:-}" \
-  --arg socket "${TMUX%%,*}" \
+  --arg pane "$pane" \
+  --arg socket "$socket" \
   --arg pid "$(agent_pid)" \
-  '{agent: $agent, session: $session, state: $state, since: $since, cwd: $cwd, pane: $pane, socket: $socket,
-    pid: ($pid | tonumber? // null)}' >"$tmp" 2>/dev/null &&
+  '{agent: $agent, session: $session, state: $state, since: $since, turn: $turn, cwd: $cwd,
+    pane: $pane, socket: $socket, pid: ($pid | tonumber? // null)}' >"$tmp" 2>/dev/null &&
   mv -f "$tmp" "$file" 2>/dev/null
 rm -f "$tmp" 2>/dev/null
+
+# Whether you are looking at this pane right now: it is the active pane of its window, that
+# window is the one showing, and a terminal attached to its session is the focused window.
+# Anything that cannot be established counts as not looking, so the worst case is a
+# notification you did not need rather than one you did and never got.
+looking() {
+  [[ $(tmx display-message -p -t "$pane" '#{&&:#{pane_active},#{window_active}}') == 1 ]] || return 1
+  local session_name active client pid i
+  session_name=$(tmx display-message -p -t "$pane" '#{session_name}') || return 1
+  active=$(hyprctl activewindow -j 2>/dev/null | jq -r '.pid // empty' 2>/dev/null)
+  [[ -n $active ]] || return 1
+  # From each attached tmux client up to the terminal drawing it.
+  for client in $(tmx list-clients -t "$session_name" -F '#{client_pid}'); do
+    pid=$client
+    for ((i = 0; i < 8; i++)); do
+      [[ -n $pid && $pid != 1 ]] || break
+      [[ $pid == "$active" ]] && return 0
+      pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+    done
+  done
+  return 1
+}
+
+seen=false
+if [[ $state == waiting || $state == done ]] && looking; then
+  seen=true
+fi
+
+# The tab.
+if [[ $state == done ]] && $seen; then
+  tmx set-option -wu -t "$pane" @agent_state
+else
+  tmx set-option -w -t "$pane" @agent_state "$state"
+fi
+
+notify() { # <urgency> <title> <body>
+  setsid -f "$0" --notify "$1" "$2" "$3" "$pane" "$socket" </dev/null >/dev/null 2>&1
+}
+
+duration() {
+  local seconds=$1
+  if ((seconds < 3600)); then
+    echo "$((seconds / 60))m"
+  else
+    printf '%dh%02dm\n' $((seconds / 3600)) $((seconds % 3600 / 60))
+  fi
+}
+
+project=${cwd%/}
+project=${project##*/}
+
+if ! $seen; then
+  if [[ $state == waiting ]]; then
+    notify normal "${project:-Claude Code} needs you" "${message:-Waiting for your answer}"
+  elif [[ $event == Stop && $previous_state == working ]] && ((now - turn >= NOTIFY_AFTER)); then
+    notify low "${project:-Claude Code} is done" "Finished after $(duration $((now - turn)))"
+  fi
+fi
+
 exit 0

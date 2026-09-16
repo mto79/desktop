@@ -48,6 +48,21 @@ else
   fail "every theme fills the status line behind a tmux message" "${missing[*]}"
 fi
 
+# The agent marks on tmux tabs take their colours from the theme. A theme without them draws
+# the waiting mark in the tab's ordinary colour, which is to say not noticeably at all -- and
+# nothing reports that, so it is checked here.
+unmarked=()
+while IFS= read -r -d '' f; do
+  for option in @agent-waiting-colour @agent-done-colour; do
+    grep -qE "^set -g $option \"#[0-9a-fA-F]{6}\"" "$f" || unmarked+=("${f#$ROOT/}: $option")
+  done
+done < <(find "$ROOT/themes" -name tmux.conf -print0 2>/dev/null)
+if ((${#unmarked[@]} == 0)); then
+  pass "every theme colours the agent marks on tmux tabs"
+else
+  fail "every theme colours the agent marks on tmux tabs" "${unmarked[*]}"
+fi
+
 # fish rewrites both of these itself. fish_variables holds the universal variables, and
 # 4.3 writes conf.d/fish_frozen_*.fish once, when it migrates the colours and key
 # bindings out of universal scope. Shipping either copies stale state over the live file

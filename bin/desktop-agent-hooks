@@ -9,7 +9,8 @@
 # machine state in it too, and overwriting that would lose it. So the hooks are merged in,
 # one event at a time, and only where no hook already runs desktop-agent-state -- which is
 # what makes this safe to run on every install and every update, and leaves hooks added
-# for other reasons exactly where they were.
+# for other reasons exactly where they were. The one hook it removes is its own
+# predecessor, desktop-agent-notify.
 #
 # Claude Code notices the change: sessions already open start reporting from their next
 # hook event, without a restart. (Observed, not documented -- the first session to report
@@ -26,8 +27,16 @@ EVENTS='["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Sto
 # inherit the desktop session's PATH.
 COMMAND='$HOME/.local/share/desktop/bin/desktop-agent-state'
 
+# desktop-agent-notify used to be wired to Notification on its own, and desktop-agent-state
+# now does its job -- without the toast Claude's idle reminder sent after every turn. It is
+# taken out, along with any group or event left empty behind it.
 MERGE='
-  reduce ($events[]) as $event (.;
+  (if .hooks then
+     .hooks |= (with_entries(.value |= (map(.hooks |= map(select(.command // "" | contains("desktop-agent-notify") | not)))
+                                        | map(select(.hooks | length > 0))))
+                | with_entries(select(.value | length > 0)))
+   else . end)
+  | reduce ($events[]) as $event (.;
     if [.hooks[$event][]?.hooks[]?.command // empty] | any(contains("desktop-agent-state"))
     then .
     else .hooks[$event] = ((.hooks[$event] // []) + [{hooks: [{type: "command", command: $command, timeout: 5}]}])

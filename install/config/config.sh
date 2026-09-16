@@ -16,24 +16,14 @@ cp ~/.local/share/desktop/default/bashrc ~/.bashrc
 systemctl --user daemon-reload
 systemctl --user enable --now ssh-agent.service
 
-# Claude Code's Notification hook, which fires when an agent is waiting on an answer
-# (bin/desktop-agent-notify turns that into a desktop notification).
+# Claude Code's hooks, which report each session's state -- working, waiting on you,
+# finished -- to the tmux tab, the AI panel, the bar and a notification when you are needed.
 #
 # settings.json cannot simply be copied from config/ like everything else: it carries
 # machine state -- auth, the auto-mode environment -- alongside its configuration, and
-# overwriting that on every install would lose it. So merge in only this one hook, and
-# only when it is absent, which also makes re-running the installer safe.
+# overwriting that on every install would lose it. desktop-agent-hooks merges the hooks in
+# instead, and is safe to run again.
 CLAUDE_SETTINGS="$HOME/.config/claude/settings.json"
 mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
 [ -f "$CLAUDE_SETTINGS" ] || echo '{}' >"$CLAUDE_SETTINGS"
-if ! jq -e '.hooks.Notification' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
-  CLAUDE_TMP=$(mktemp)
-  # $HOME stays literal in the JSON on purpose: the hook runs through a shell, and a
-  # hook does not inherit the desktop session's PATH.
-  jq '.hooks.Notification = [{hooks: [{type: "command", command: "$HOME/.local/share/desktop/bin/desktop-agent-notify", timeout: 5}]}]' \
-    "$CLAUDE_SETTINGS" >"$CLAUDE_TMP" && mv "$CLAUDE_TMP" "$CLAUDE_SETTINGS"
-fi
-
-# And the hooks that report each session's state -- working, waiting on you, finished -- to
-# the AI panel and the bar. Merged the same careful way; see bin/desktop-agent-hooks.
 CLAUDE_CONFIG_DIR="$(dirname "$CLAUDE_SETTINGS")" ~/.local/share/desktop/bin/desktop-agent-hooks
