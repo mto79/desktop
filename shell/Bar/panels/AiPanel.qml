@@ -27,6 +27,41 @@ Popup {
 
   property var agents: []
 
+  // One entry per Claude Code session that reports its state through the hooks, needing
+  // you first. See desktop-agent-sessions.
+  property var sessions: []
+  property int waitingCount: 0
+
+  // Claude processes with no state recorded: open, but idle since the hooks were wired --
+  // a session picks the hooks up, but only reports on its next event. Named rather than
+  // silently left out, or they would look like nothing running.
+  readonly property int unreportedClaude: {
+    for (var i = 0; i < agents.length; i++) {
+      var match = /^(\d+) claude$/.exec(agents[i]);
+      if (match)
+        return Math.max(0, Number(match[1]) - sessions.length);
+    }
+    return 0;
+  }
+  readonly property var otherAgents: agents.filter(function (entry) {
+    return !/ claude$/.test(entry);
+  })
+
+  function sessionIcon(state) {
+    return state === "waiting" ? "\u{f0026}" : state === "done" ? "\u{f012c}" : "\u{f06a9}";
+  }
+
+  function sessionText(session) {
+    var what = {
+      "waiting": "waiting for you",
+      "working": "working",
+      "done": "finished",
+      "ready": "open, nothing asked yet"
+    }[session.state] || session.state;
+    var when = session.state === "done" ? session["for"] + " ago" : "for " + session["for"];
+    return what + (session.state === "ready" ? "" : " " + when) + "  ·  " + session.place;
+  }
+
   // Per-day burn, from desktop-agent-tokens: the dates, and every agent with anything in them.
   property var tokenDates: []
   property var tokenAgents: []
@@ -114,12 +149,51 @@ Popup {
       onStreamFinished: {
         try {
           var data = JSON.parse(text);
-          root.agents = (data.text === "") ? [] : String(data.tooltip || "").split(", ");
+          // "1 waiting for you -- 2 claude, 1 codex" when something is waiting.
+          var summary = String(data.tooltip || "");
+          var cut = summary.indexOf(" -- ");
+          if (cut >= 0)
+            summary = summary.slice(cut + 4);
+          root.agents = (data.text === "") ? [] : summary.split(", ");
         } catch (e) {
           root.agents = [];
         }
       }
     }
+  }
+
+  Process {
+    id: sessionProbe
+
+    command: ["desktop-agent-sessions", "--json"]
+
+    function reload() {
+      if (!running)
+        running = true;
+    }
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var data = JSON.parse(text);
+          root.sessions = data.sessions || [];
+          root.waitingCount = data.waiting || 0;
+        } catch (e) {
+          root.sessions = [];
+          root.waitingCount = 0;
+        }
+      }
+    }
+  }
+
+  // States change by the second while an agent works, and reading them is a handful of
+  // small files, so this one polls faster than the usage report -- only while open.
+  Timer {
+    interval: 3000
+    repeat: true
+    running: root.visible
+    triggeredOnStart: true
+    onTriggered: sessionProbe.reload()
   }
 
   Process {
@@ -367,18 +441,48 @@ Popup {
 
     PanelSection {
       title: "Agents"
-      value: root.agents.length > 0 ? "running" : "idle"
+      value: root.waitingCount > 0 ? root.waitingCount + " waiting"
+        : (root.sessions.length > 0 || root.agents.length > 0) ? "running" : "idle"
       rule: true
     }
 
     Repeater {
-      model: root.agents
+      model: root.sessions
+
+      delegate: PanelRow {
+        required property var modelData
+
+        icon: root.sessionIcon(modelData.state)
+        label: modelData.project
+        sublabel: root.sessionText(modelData)
+        // Waiting is the state worth drawing the eye to; the rest are information.
+        active: modelData.state === "waiting"
+        // Clickable only while its pane still exists to jump to.
+        enabled: !!modelData.target
+        onClicked: {
+          root.close();
+          Quickshell.execDetached(root.launch(["desktop-menu-agents", "--jump", modelData.target, modelData.socket]));
+        }
+      }
+    }
+
+    PanelRow {
+      icon: "\u{f06a9}"
+      label: root.unreportedClaude + " claude " + (root.unreportedClaude === 1 ? "session" : "sessions")
+      sublabel: "idle, no state reported yet"
+      enabled: false
+      visible: root.unreportedClaude > 0
+    }
+
+    Repeater {
+      model: root.otherAgents
 
       delegate: PanelRow {
         required property var modelData
 
         icon: "\u{f06a9}"
         label: modelData
+        sublabel: "running  ·  reports no state"
         enabled: false
       }
     }
@@ -387,7 +491,7 @@ Popup {
       icon: "\u{f06a9}"
       label: "Nothing running"
       enabled: false
-      visible: root.agents.length === 0
+      visible: root.sessions.length === 0 && root.agents.length === 0
     }
 
     PanelSection {

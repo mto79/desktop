@@ -33,3 +33,7 @@ if ! jq -e '.hooks.Notification' "$CLAUDE_SETTINGS" >/dev/null 2>&1; then
   jq '.hooks.Notification = [{hooks: [{type: "command", command: "$HOME/.local/share/desktop/bin/desktop-agent-notify", timeout: 5}]}]' \
     "$CLAUDE_SETTINGS" >"$CLAUDE_TMP" && mv "$CLAUDE_TMP" "$CLAUDE_SETTINGS"
 fi
+
+# And the hooks that report each session's state -- working, waiting on you, finished -- to
+# the AI panel and the bar. Merged the same careful way; see bin/desktop-agent-hooks.
+CLAUDE_CONFIG_DIR="$(dirname "$CLAUDE_SETTINGS")" ~/.local/share/desktop/bin/desktop-agent-hooks

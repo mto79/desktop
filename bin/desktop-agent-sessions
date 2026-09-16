@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+
+"""The Claude Code sessions on this machine and what each is doing, newest need first.
+
+    desktop-agent-sessions          # a line per session
+    desktop-agent-sessions --json   # what the bar and the AI panel read
+
+Read from the records desktop-agent-state writes from Claude Code's hooks, one per session.
+Those are only ever removed by a SessionEnd hook, and a session that crashes, is killed, or
+dies with its terminal fires none. So a record whose claude process is gone is deleted here
+rather than shown: an agent listed as "working" that no longer exists is worse than no list.
+The pid is checked against the process name as well as for existence, because pids are
+reused and a stale record must not come back to life when an unrelated process takes its pid.
+
+Sessions that sent no pid -- a hook run somewhere the claude process could not be found --
+cannot be checked, and are kept for a day before being treated as gone.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# Needing you first, then busy, then finished, then untouched.
+ORDER = {"waiting": 0, "working": 1, "done": 2, "ready": 3}
+UNVERIFIABLE_SECONDS = 24 * 3600
+
+
+def state_dir():
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desktop" / "agents"
+
+
+def alive(pid):
+    try:
+        return Path(f"/proc/{int(pid)}/comm").read_text().strip() == "claude"
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def pane_target(pane, socket):
+    """session:window.pane for a pane id, or None once the pane has closed.
+
+    Asked of the pane's own server. Pane ids are per server, so asking the default one
+    about a pane from another would find that server's own %0 and jump somewhere else.
+    """
+    if not pane:
+        return None
+    server = ["-S", socket] if socket else []
+    try:
+        result = subprocess.run(
+            ["tmux", *server, "display-message", "-p", "-t", pane,
+             "#{session_name}:#{window_index}.#{pane_index}"],
+            capture_output=True, text=True, timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    target = result.stdout.strip()
+    return target if result.returncode == 0 and target else None
+
+
+def duration(seconds):
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
+
+
+def sessions(now=None):
+    now = time.time() if now is None else now
+    home = str(Path.home())
+    found = []
+
+    for path in sorted(state_dir().glob("*.json")):
+        try:
+            record = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(record, dict) or record.get("state") not in ORDER:
+            continue
+
+        pid = record.get("pid")
+        since = record.get("since") if isinstance(record.get("since"), (int, float)) else now
+        gone = not alive(pid) if pid is not None else now - since > UNVERIFIABLE_SECONDS
+        if gone:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+            continue
+
+        cwd = record.get("cwd") or ""
+        found.append({
+            "agent": record.get("agent") or "claude",
+            "session": record.get("session") or path.stem,
+            "state": record["state"],
+            "since": since,
+            "for": duration(now - since),
+            "cwd": cwd,
+            "place": ("~" + cwd[len(home):]) if cwd.startswith(home) else cwd,
+            "project": os.path.basename(cwd.rstrip("/")) or cwd or "?",
+            "pane": record.get("pane") or "",
+            "socket": record.get("socket") or "",
+            "target": pane_target(record.get("pane"), record.get("socket")),
+        })
+
+    found.sort(key=lambda s: (ORDER[s["state"]], -s["since"]))
+    return found
+
+
+def main():
+    listed = sessions()
+    if "--json" in sys.argv[1:]:
+        counts = {state: sum(1 for s in listed if s["state"] == state) for state in ORDER}
+        print(json.dumps({"sessions": listed, **counts}))
+        return 0
+
+    if not listed:
+        print("no Claude Code sessions with hooks running")
+        return 0
+    for s in listed:
+        where = f"  [{s['target']}]" if s["target"] else ""
+        print(f"{s['state']:<8} {s['for']:>6}  {s['project']:<24} {s['place']}{where}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

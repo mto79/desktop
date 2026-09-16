@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# desktop-agent-hooks: wire Claude Code's hooks to desktop-agent-state.
+#
+#   desktop-agent-hooks            # add whatever is missing, change nothing else
+#   desktop-agent-hooks --check    # exit 1 if anything is missing
+#
+# settings.json cannot be copied into place like the rest of config/: Claude Code keeps
+# machine state in it too, and overwriting that would lose it. So the hooks are merged in,
+# one event at a time, and only where no hook already runs desktop-agent-state -- which is
+# what makes this safe to run on every install and every update, and leaves hooks added
+# for other reasons exactly where they were.
+#
+# Claude Code notices the change: sessions already open start reporting from their next
+# hook event, without a restart. (Observed, not documented -- the first session to report
+# here was one that had been running for forty minutes before the hooks existed.)
+
+set -uo pipefail
+
+SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+
+# The events desktop-agent-state understands; see there for what each one means.
+EVENTS='["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "SessionEnd"]'
+
+# $HOME is left literal: Claude Code runs the hook through a shell, and a hook does not
+# inherit the desktop session's PATH.
+COMMAND='$HOME/.local/share/desktop/bin/desktop-agent-state'
+
+MERGE='
+  reduce ($events[]) as $event (.;
+    if [.hooks[$event][]?.hooks[]?.command // empty] | any(contains("desktop-agent-state"))
+    then .
+    else .hooks[$event] = ((.hooks[$event] // []) + [{hooks: [{type: "command", command: $command, timeout: 5}]}])
+    end)'
+
+mkdir -p "$(dirname "$SETTINGS")"
+[[ -f $SETTINGS ]] || echo '{}' >"$SETTINGS"
+
+# A settings file that does not parse is left alone rather than replaced by one that does:
+# it holds more than hooks, and a broken file is the user's to see, not this script's to
+# quietly throw away.
+if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
+  echo "desktop-agent-hooks: $SETTINGS is not valid JSON; not touching it" >&2
+  exit 1
+fi
+
+merged=$(jq --argjson events "$EVENTS" --arg command "$COMMAND" "$MERGE" "$SETTINGS") || exit 1
+
+if [[ ${1:-} == --check ]]; then
+  [[ $merged == "$(jq . "$SETTINGS")" ]]
+  exit
+fi
+
+if [[ $merged == "$(jq . "$SETTINGS")" ]]; then
+  echo "Claude Code hooks already wired"
+  exit 0
+fi
+
+tmp="$SETTINGS.$$"
+printf '%s\n' "$merged" >"$tmp" && mv -f "$tmp" "$SETTINGS"
+echo "Claude Code hooks wired to desktop-agent-state; sessions report from their next event"

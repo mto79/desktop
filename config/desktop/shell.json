@@ -120,6 +120,7 @@
             "critical": "urgent",
             "warning": "accent",
             "busy": "accent",
+            "waiting": "urgent",
             "active": "muted"
           },
           "panel": "ai",

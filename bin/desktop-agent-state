@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+
+# desktop-agent-state: record what a Claude Code session is doing, from its hooks.
+#
+# Wired to every hook event that changes the answer to "which of my agents needs me":
+#
+#   SessionStart         ready       open, nothing asked of it yet
+#   UserPromptSubmit     working
+#   PostToolUse          working     what clears "waiting" once a permission is given
+#   Notification         waiting     a permission prompt, or a question it cannot pass
+#                        done        the idle reminder: the turn ended a while ago
+#   Stop                 done        the turn is finished and the result is yours to read
+#   SessionEnd           (removed)
+#
+# One small JSON file per session under $XDG_RUNTIME_DIR/desktop/agents, holding the state,
+# when it began, the project, the tmux pane and the claude pid. The pane is what lets the
+# panel jump straight to a session -- with its server's socket, because pane ids are only
+# unique within one server, and %0 exists in every one of them; the pid is what lets a reader tell a crashed session
+# from a quiet one, because a crash fires no SessionEnd.
+#
+# Two things checked against a real Claude Code rather than taken from the docs: a hook's
+# parent process is claude itself, and TMUX_PANE is in its environment.
+#
+# Interrupting a turn with Esc fires no Stop, so a session can sit at "working" after it
+# has in fact stopped. The idle reminder a minute later corrects it, and so does the next
+# prompt. Nothing better is available from the hook side.
+#
+# A hook must never get in the agent's way: every path here exits 0, quietly.
+
+set -uo pipefail
+
+STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/agents"
+
+# One jq for the whole payload. PostToolUse fires on every tool call, so this runs dozens
+# of times in a busy turn, and each extra process is paid for in the agent's latency.
+#
+# Split on the unit separator, not a tab. Tab is whitespace to `read`, so an empty field --
+# notification_type is absent from every event but one -- collapses into its neighbour and
+# the cwd lands in $type.
+IFS=$'\x1f' read -r event session type cwd < <(
+  jq -r '[.hook_event_name, .session_id, .notification_type, .cwd] | map(. // "") | join("\u001f")' 2>/dev/null
+) || exit 0
+[[ -n $event && -n $session ]] || exit 0
+# Used as a file name.
+[[ $session =~ ^[A-Za-z0-9_-]+$ ]] || exit 0
+
+file="$STATE_DIR/$session.json"
+
+case "$event" in
+SessionStart) state=ready ;;
+UserPromptSubmit | PostToolUse) state=working ;;
+Stop) state=done ;;
+Notification)
+  case "$type" in
+  idle_prompt) state=done ;;
+  # Older Claude Code sends no type at all; before types existed, every notification
+  # was one of these.
+  permission_prompt | elicitation_dialog | elicitation_url_dialog | agent_needs_input | "") state=waiting ;;
+  # auth_success, quota notices and the like say nothing about whether it needs you.
+  *) exit 0 ;;
+  esac
+  ;;
+SessionEnd)
+  rm -f "$file"
+  exit 0
+  ;;
+*) exit 0 ;;
+esac
+
+# The claude process this hook belongs to. Its parent directly when the command is run
+# as a path, a shell in between when the command needs expanding -- "$HOME/..." does.
+agent_pid() {
+  [[ -n ${DESKTOP_AGENT_PID:-} ]] && { echo "$DESKTOP_AGENT_PID"; return; }
+  local pid=$PPID i
+  for ((i = 0; i < 4; i++)); do
+    [[ -n $pid && $pid != 1 ]] || return
+    if [[ $(cat "/proc/$pid/comm" 2>/dev/null) == claude ]]; then
+      echo "$pid"
+      return
+    fi
+    pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+  done
+}
+
+mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
+
+# Nothing to do when the state is what it already was -- the common case by far, since a
+# busy turn is mostly PostToolUse after PostToolUse. That also keeps "since" where it was,
+# so "working for 12s" does not keep resetting to 0s.
+current=""
+[[ -f $file ]] && current=$(<"$file")
+[[ $current == *"\"state\":\"$state\""* ]] && exit 0
+
+tmp="$file.$$"
+jq -cn \
+  --arg agent claude \
+  --arg session "$session" \
+  --arg state "$state" \
+  --argjson since "$(date +%s)" \
+  --arg cwd "$cwd" \
+  --arg pane "${TMUX_PANE:-}" \
+  --arg socket "${TMUX%%,*}" \
+  --arg pid "$(agent_pid)" \
+  '{agent: $agent, session: $session, state: $state, since: $since, cwd: $cwd, pane: $pane, socket: $socket,
+    pid: ($pid | tonumber? // null)}' >"$tmp" 2>/dev/null &&
+  mv -f "$tmp" "$file" 2>/dev/null
+rm -f "$tmp" 2>/dev/null
+exit 0

@@ -28,4 +28,13 @@ if ((total == 0)); then
   exit 0
 fi
 
+# A session waiting on you is the one thing worth changing the bar's colour for: it will
+# sit there indefinitely, in a tmux window nobody is looking at. Counted from the hook
+# records, which only Claude Code writes; the other agents can only ever read as busy.
+waiting=$(desktop-agent-sessions --json 2>/dev/null | jq -r '.waiting // 0' 2>/dev/null)
+if [[ ${waiting:-0} =~ ^[0-9]+$ ]] && ((waiting > 0)); then
+  printf '{"text":"%s","class":"waiting","tooltip":"%s waiting for you -- %s"}\n' "$total" "$waiting" "$names"
+  exit 0
+fi
+
 printf '{"text":"%s","class":"busy","tooltip":"%s"}\n' "$total" "$names"

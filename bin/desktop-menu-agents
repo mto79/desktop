@@ -70,6 +70,19 @@ jump_to() {
   fi
 }
 
+# --jump <session:window.pane> [socket] skips the menu and goes straight there. It is what
+# the AI panel runs when a session is clicked: the panel already knows which pane it means,
+# and on which tmux server -- targets only mean something on the server they came from.
+if [[ ${1:-} == --jump ]]; then
+  [[ -n ${2:-} ]] || exit 1
+  if [[ -n ${3:-} ]]; then
+    socket="$3"
+    tmux() { command tmux -S "$socket" "$@"; }
+  fi
+  jump_to "$2"
+  exit 0
+fi
+
 rows=""
 declare -A TARGETS=()
 
