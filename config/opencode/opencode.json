@@ -1,5 +1,34 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "theme": "system",
-  "autoupdate": true
+  "autoupdate": true,
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama (local)",
+      "options": {
+        "baseURL": "http://127.0.0.1:11434/v1"
+      },
+      "models": {
+        "qwen3:8b": {
+          "name": "Qwen3 8B"
+        }
+      }
+    },
+    "anthropic-compat": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Het NA",
+      "options": {
+        "baseURL": "https://llm-service-edepot-test-ai.apps.ocp302.nationaalarchief.net",
+        "apiKey": "{file:~/.config/opencode/na-llm.key}"
+      },
+      "models": {
+        "Qwen/Qwen3.8-27B": {
+          "name": "Qwen/Qwen3.8-27B",
+          "reasoning": true,
+          "tool_call": true
+        }
+      }
+    }
+  }
 }
