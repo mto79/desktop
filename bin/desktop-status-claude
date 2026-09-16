@@ -13,13 +13,14 @@ written down, and the response is cached in the runtime directory -- the endpoin
 undocumented and rate-limits hard below five minutes, while the bar polls every fifteen
 seconds, so the cache is what keeps this from earning a 429.
 
-The transcripts under ~/.claude/projects are still read. They carry the token counts the
-endpoint does not report at all, and they are what is left to show when the endpoint
-cannot be reached -- on a train, or once the token has expired.
+Token counts come from desktop-agent-tokens, which reads the transcripts under
+~/.claude/projects. The endpoint does not report tokens at all, and those counts are what
+is left to show when it cannot be reached -- on a train, or once the token has expired.
 """
 
 import json
 import os
+import subprocess
 import sys
 import time
 import urllib.error
@@ -131,57 +132,30 @@ def usage():
 
 
 def local_tokens():
-    """Token counts for the last five hours, read from the transcripts."""
-    root = config_dir() / "projects"
-    cutoff = time.time() - WINDOW_SECONDS
+    """Token counts for the last five hours, from desktop-agent-tokens.
 
-    tokens_in = tokens_out = cached = 0
-    sessions = set()
-
-    if not root.is_dir():
-        return tokens_in, tokens_out, cached, sessions
-
-    for path in root.glob("*/*.jsonl"):
-        # A transcript untouched inside the window cannot hold a message inside it.
-        try:
-            if path.stat().st_mtime < cutoff:
-                continue
-        except OSError:
-            continue
-
-        try:
-            with path.open(errors="replace") as handle:
-                for line in handle:
-                    try:
-                        record = json.loads(line)
-                    except ValueError:
-                        continue
-
-                    stamp = record.get("timestamp")
-                    if isinstance(stamp, str):
-                        try:
-                            seconds = time.mktime(time.strptime(stamp[:19], "%Y-%m-%dT%H:%M:%S"))
-                        except ValueError:
-                            continue
-                        # Transcript timestamps are UTC; compare in the same frame.
-                        if seconds - time.timezone < cutoff:
-                            continue
-
-                    message = record.get("message")
-                    usage_record = message.get("usage") if isinstance(message, dict) else None
-                    if not isinstance(usage_record, dict):
-                        continue
-
-                    tokens_in += usage_record.get("input_tokens", 0) + usage_record.get(
-                        "cache_creation_input_tokens", 0
-                    )
-                    cached += usage_record.get("cache_read_input_tokens", 0)
-                    tokens_out += usage_record.get("output_tokens", 0)
-                    sessions.add(path.stem)
-        except OSError:
-            continue
-
-    return tokens_in, tokens_out, cached, sessions
+    Counted there rather than here so there is one implementation of the fiddly part. This
+    function used to read the transcripts itself and got it wrong twice: every content block
+    carries a copy of its response's usage, so summing lines counted each response 2.25
+    times, and a UTC conversion that ignored summer time put the window an hour out.
+    """
+    collector = Path(__file__).resolve().parent / "desktop-agent-tokens"
+    hours = WINDOW_SECONDS / 3600
+    try:
+        result = subprocess.run(
+            [sys.executable, str(collector), "--json", "--agent", "claude",
+             "--days", "1", "--window", str(hours)],
+            capture_output=True, text=True, timeout=20,
+        )
+        window = json.loads(result.stdout)["agents"][0]["window"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, IndexError):
+        return 0, 0, 0, 0
+    return (
+        window["input"] + window["cache_write"],
+        window["output"],
+        window["cache_read"],
+        window["sessions"],
+    )
 
 
 def until(stamp):
@@ -287,7 +261,7 @@ def build():
             "out": compact(tokens_out),
             "cached": compact(cached),
             "total": compact(total),
-            "sessions": len(sessions),
+            "sessions": sessions,
             "any": total > 0,
         },
         # False when the endpoint has never answered on this machine, which is what

@@ -1,0 +1,463 @@
+#!/usr/bin/env python3
+
+"""Tokens burned per local day, per coding agent, counted from what each one leaves on disk.
+
+    desktop-agent-tokens                 # a table of the last seven days
+    desktop-agent-tokens --days 14
+    desktop-agent-tokens --json          # what the bar and the panel read
+    desktop-agent-tokens --json --agent claude --days 1 --window 5
+
+"Burned" is fresh input, cache writes and output: the tokens actually processed at full
+price, which are the ones that move a bill or a limit. Cache reads are reported beside it
+and never folded in. They are routinely ninety-odd percent of the raw count at a tenth of
+the price, so a total that includes them says almost nothing about what a day cost.
+
+Only this machine is counted. Claude on claude.ai or on another laptop writes nothing
+here, which is why these are labelled local and kept apart from the account-wide limits
+desktop-status-claude fetches.
+
+Three traps, each of which the previous counting fell into or would have:
+
+  Claude Code writes one transcript line per content block -- thinking, text, each tool
+  call -- and copies the same usage onto every one. Summing lines counted each response
+  2.25 times over on this machine. Responses are keyed by message id and counted once,
+  across all files, because a resumed session carries some of the same responses too.
+
+  Subagent transcripts sit a level deeper, under <session>/subagents/, where a
+  projects/*/*.jsonl glob never looks.
+
+  Transcript timestamps are UTC. A day is a local day, so the conversion goes through the
+  timezone database rather than a fixed offset -- `mktime(...) - time.timezone` ignores
+  summer time and put every window an hour out for half the year.
+
+The bar calls this every fifteen seconds and a busy transcript is over ten megabytes, so
+work is cached per source file and append-only files are only read from where the last
+run stopped.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import sqlite3
+import sys
+import time
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
+
+# Bump when what is extracted from a file changes, so old cache entries are not reused.
+CACHE_VERSION = 1
+
+# How long a parsed file is remembered after it was last written to.
+CACHE_HORIZON_DAYS = 60
+
+AGENTS = (
+    ("claude", "Claude Code"),
+    ("opencode", "OpenCode"),
+    ("codex", "Codex"),
+)
+
+
+def number(value):
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+def epoch(stamp):
+    """Seconds since the epoch for an ISO timestamp, or None. Naive stamps are taken as UTC,
+    which is what every agent here writes."""
+    if not isinstance(stamp, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.timestamp()
+
+
+def env_path(variable, default):
+    return Path(os.environ.get(variable) or default).expanduser()
+
+
+# ------------------------------------------------------------------------------ sources
+#
+# A source is one thing on disk that can be parsed on its own. Each parser returns records
+# of [key, epoch, input, cache_write, cache_read, output, session] and, for append-only
+# files, the byte offset it got to and any state the next run needs to carry on from there.
+
+
+def claude_sources():
+    root = env_path("CLAUDE_CONFIG_DIR", "~/.claude") / "projects"
+    if not root.is_dir():
+        return
+    # Recursive, for the subagent transcripts one directory down.
+    for path in root.rglob("*.jsonl"):
+        yield "claude", path, parse_claude, True
+
+
+def parse_claude(path, offset, state):
+    records = []
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        for raw in handle:
+            # A line still being written. Leave it for the next run rather than lose it.
+            if not raw.endswith(b"\n"):
+                break
+            offset += len(raw)
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            message = entry.get("message")
+            if not isinstance(message, dict):
+                continue
+            usage = message.get("usage")
+            key = message.get("id") or entry.get("uuid")
+            stamp = epoch(entry.get("timestamp"))
+            if not isinstance(usage, dict) or not key or stamp is None:
+                continue
+            records.append([
+                f"claude:{key}", stamp,
+                number(usage.get("input_tokens")),
+                number(usage.get("cache_creation_input_tokens")),
+                number(usage.get("cache_read_input_tokens")),
+                number(usage.get("output_tokens")),
+                entry.get("sessionId") or path.stem,
+            ])
+    return records, offset, state
+
+
+def codex_sources():
+    home = env_path("CODEX_HOME", "~/.codex")
+    for sub in ("sessions", "archived_sessions"):
+        root = home / sub
+        if root.is_dir():
+            for path in root.rglob("*.jsonl"):
+                yield "codex", path, parse_codex, True
+
+
+def parse_codex(path, offset, state):
+    """Codex logs a token_count event after each turn. Its total_token_usage is cumulative
+    for the session, so summing those grows quadratically; last_token_usage is the turn.
+    The same event is sometimes logged twice, recognisable because the cumulative total has
+    not moved, and that repeat is skipped. input_tokens includes the cached ones."""
+    records = []
+    last_total = state.get("total")
+    with path.open("rb") as handle:
+        handle.seek(offset)
+        for raw in handle:
+            if not raw.endswith(b"\n"):
+                break
+            line_offset = offset
+            offset += len(raw)
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            payload = entry.get("payload") if isinstance(entry.get("payload"), dict) else entry
+            if isinstance(payload.get("payload"), dict):
+                payload = payload["payload"]
+            if payload.get("type") != "token_count":
+                continue
+            info = payload.get("info") or {}
+            total = info.get("total_token_usage")
+            if total is not None and total == last_total:
+                continue
+            last_total = total
+            usage = info.get("last_token_usage") or {}
+            stamp = epoch(entry.get("timestamp"))
+            if stamp is None:
+                continue
+            cached = number(usage.get("cached_input_tokens"))
+            records.append([
+                f"codex:{path}:{line_offset}", stamp,
+                max(0, number(usage.get("input_tokens")) - cached),
+                0,
+                cached,
+                number(usage.get("output_tokens")),
+                path.stem,
+            ])
+    return records, offset, {"total": last_total}
+
+
+def opencode_sources():
+    data = env_path("XDG_DATA_HOME", "~/.local/share") / "opencode"
+    # Newer opencode keeps everything in one database, older in a JSON file per message.
+    # Either can be present after an upgrade, and both are read: keys are message ids, so a
+    # message that exists in both is still counted once.
+    database = data / "opencode.db"
+    if database.is_file():
+        yield "opencode", database, parse_opencode_database, False
+    messages = data / "storage" / "message"
+    if messages.is_dir():
+        for path in messages.rglob("*.json"):
+            yield "opencode", path, parse_opencode_message, False
+
+
+def opencode_record(message, fallback_key, session):
+    if not isinstance(message, dict) or message.get("role") != "assistant":
+        return None
+    tokens = message.get("tokens") or {}
+    cache = tokens.get("cache") or {}
+    created = (message.get("time") or {}).get("created")
+    if not isinstance(created, (int, float)) or created <= 0:
+        return None
+    record = [
+        f"opencode:{message.get('id') or fallback_key}", created / 1000,
+        number(tokens.get("input")),
+        number(cache.get("write")),
+        number(cache.get("read")),
+        # opencode keeps thinking out of output; both are generated tokens.
+        number(tokens.get("output")) + number(tokens.get("reasoning")),
+        message.get("sessionID") or session,
+    ]
+    return record if any(record[2:6]) else None
+
+
+def parse_opencode_message(path, offset, state):
+    try:
+        message = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return [], 0, state
+    record = opencode_record(message, path.stem, path.parent.name)
+    return ([record] if record else []), 0, state
+
+
+def parse_opencode_database(path, offset, state):
+    records = []
+    try:
+        # Read-only: opencode may be writing to it right now.
+        connection = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, timeout=2)
+    except sqlite3.Error:
+        return records, 0, state
+    try:
+        for session, raw in connection.execute("SELECT session_id, data FROM message"):
+            try:
+                message = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            record = opencode_record(message, None, session)
+            if record and message.get("id"):
+                records.append(record)
+    except sqlite3.Error:
+        pass
+    finally:
+        connection.close()
+    return records, 0, state
+
+
+# -------------------------------------------------------------------------------- cache
+
+
+def cache_file():
+    return env_path("XDG_CACHE_HOME", "~/.cache") / "desktop" / "agent-tokens.json"
+
+
+def load_cache():
+    try:
+        cache = json.loads(cache_file().read_text())
+    except (OSError, ValueError):
+        return {}
+    return cache.get("files", {}) if cache.get("version") == CACHE_VERSION else {}
+
+
+def store_cache(files):
+    path = cache_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps({"version": CACHE_VERSION, "files": files}))
+        # Atomic, because the bar and the panel can both be running this at once.
+        temporary.replace(path)
+    except OSError:
+        pass
+
+
+def signature(path):
+    """What makes a cached reading still valid. The database has a write-ahead log beside
+    it, and a commit may touch only that."""
+    parts = []
+    for candidate in (path, path.with_name(path.name + "-wal")):
+        try:
+            info = candidate.stat()
+        except OSError:
+            continue
+        parts.append([info.st_ino, info.st_size, info.st_mtime_ns])
+    return parts
+
+
+def read_sources(agents, oldest):
+    """The parsed contents of every source this run is asking about.
+
+    The cache is a memo of parsing and nothing more: only what is found on disk under the
+    directories configured right now is returned and counted. Entries for other files stay
+    in it untouched, because the bar asks for one agent over one day while the table asks
+    for all of them over a week, and each would otherwise throw away what the other needs.
+    """
+    cached = load_cache()
+    fresh = {}
+    changed = False
+
+    for source in (claude_sources, opencode_sources, codex_sources):
+        for agent, path, parse, append_only in source():
+            if agent not in agents:
+                continue
+            sig = signature(path)
+            # A file untouched since before the oldest day asked for holds nothing in it.
+            if not sig or sig[0][2] / 1e9 < oldest:
+                continue
+
+            name = str(path)
+            entry = cached.get(name)
+            if entry and entry.get("signature") == sig:
+                fresh[name] = entry
+                continue
+
+            offset, state, kept = 0, {}, []
+            # Appended to, not rewritten: same inode and no shorter than what was read.
+            if (
+                append_only and entry
+                and entry["signature"][0][0] == sig[0][0]
+                and sig[0][1] >= entry.get("offset", 0)
+            ):
+                offset, state, kept = entry.get("offset", 0), entry.get("state", {}), entry["records"]
+
+            try:
+                records, offset, state = parse(path, offset, state)
+            except OSError:
+                continue
+            fresh[name] = {
+                "agent": agent, "signature": sig, "offset": offset,
+                "state": state, "records": kept + records,
+            }
+            changed = True
+
+    keep = dict(cached)
+    keep.update(fresh)
+    # Forget files that are gone, and anything too old for a report to ever ask about.
+    horizon = time.time() - CACHE_HORIZON_DAYS * 86400
+    for name in [n for n, e in keep.items()
+                 if not Path(n).exists() or e["signature"][0][2] / 1e9 < horizon]:
+        del keep[name]
+        changed = True
+
+    if changed:
+        store_cache(keep)
+    return fresh
+
+
+# ---------------------------------------------------------------------------- reporting
+
+
+def empty():
+    return {"input": 0, "cache_write": 0, "cache_read": 0, "output": 0}
+
+
+def add(bucket, record):
+    bucket["input"] += record[2]
+    bucket["cache_write"] += record[3]
+    bucket["cache_read"] += record[4]
+    bucket["output"] += record[5]
+
+
+def finish(bucket):
+    bucket["burned"] = bucket["input"] + bucket["cache_write"] + bucket["output"]
+    return bucket
+
+
+def report(agents, days, window_hours, now=None):
+    now = time.time() if now is None else now
+    today = datetime.fromtimestamp(now).date()
+    dates = [today - timedelta(days=offset) for offset in range(days - 1, -1, -1)]
+    oldest = datetime.combine(dates[0], datetime.min.time()).timestamp()
+    window_start = now - window_hours * 3600
+
+    files = read_sources(agents, min(oldest, window_start))
+
+    per_agent = {agent: {"days": {d: empty() for d in dates}, "window": empty(),
+                         "sessions": set(), "present": False} for agent in agents}
+    seen = set()
+    for entry in files.values():
+        tally = per_agent[entry["agent"]]
+        tally["present"] = True
+        for record in entry["records"]:
+            in_window = record[1] >= window_start
+            # Before the duplicate check, deliberately. Which copy of a repeated response is
+            # met first depends on the order files are listed in, and a session was active
+            # whichever copy that turned out to be.
+            if in_window:
+                tally["sessions"].add(record[6])
+            if record[0] in seen:
+                continue
+            seen.add(record[0])
+            day = datetime.fromtimestamp(record[1]).date()
+            if day in tally["days"]:
+                add(tally["days"][day], record)
+            if in_window:
+                add(tally["window"], record)
+
+    out = {
+        "generated": datetime.fromtimestamp(now).astimezone().isoformat(timespec="seconds"),
+        "days": [d.isoformat() for d in dates],
+        "window_hours": window_hours,
+        "agents": [],
+    }
+    for agent, name in AGENTS:
+        if agent not in agents:
+            continue
+        tally = per_agent[agent]
+        day_list = [dict(finish(tally["days"][d]), date=d.isoformat()) for d in dates]
+        window = finish(tally["window"])
+        window["sessions"] = len(tally["sessions"])
+        out["agents"].append({
+            "id": agent, "name": name, "present": tally["present"],
+            "days": day_list, "today": day_list[-1], "window": window,
+        })
+    return out
+
+
+def compact(value):
+    for limit, suffix in ((1_000_000_000, "G"), (1_000_000, "M"), (1_000, "k")):
+        if value >= limit:
+            return f"{value / limit:.1f}{suffix}"
+    return str(value)
+
+
+def table(data):
+    dates = [date.fromisoformat(d) for d in data["days"]]
+    header = "".join(f"{('today' if i == len(dates) - 1 else d.strftime('%a %d')):>9}"
+                     for i, d in enumerate(dates))
+    lines = [f"{'':24}{header}"]
+    for agent in data["agents"]:
+        if not agent["present"]:
+            continue
+        burned = "".join(f"{compact(d['burned']) if d['burned'] else '-':>9}" for d in agent["days"])
+        reads = "".join(f"{compact(d['cache_read']) if d['cache_read'] else '-':>9}" for d in agent["days"])
+        lines.append(f"{agent['name']:<13}{'burned':>11}{burned}")
+        lines.append(f"{'':13}{'cache read':>11}{reads}")
+    if len(lines) == 1:
+        lines.append("no agent usage found on this machine")
+    lines.append("")
+    lines.append("burned = fresh input + cache writes + output. Counted on this machine only.")
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Tokens burned per day, per coding agent.")
+    parser.add_argument("--days", type=int, default=7)
+    parser.add_argument("--window", type=float, default=5, metavar="HOURS",
+                        help="also total the last HOURS (default 5, Claude's session window)")
+    parser.add_argument("--agent", action="append", choices=[a for a, _ in AGENTS],
+                        help="only this agent; repeatable")
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    agents = set(args.agent or [a for a, _ in AGENTS])
+    data = report(agents, max(1, args.days), max(0, args.window))
+    print(json.dumps(data) if args.json else table(data))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

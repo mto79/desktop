@@ -31,7 +31,7 @@ cat >"$sandbox/run/desktop/claude-usage.json" <<'JSON'
 }
 JSON
 
-reported=$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" \
+reported=$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" \
   python3 "$ROOT/bin/desktop-status-claude")
 
 if jq -e . >/dev/null 2>&1 <<<"$reported"; then
@@ -64,20 +64,20 @@ soon = datetime.now(timezone.utc) + timedelta(hours=2, minutes=15, seconds=30)
 report["limits"][0]["resets_at"] = soon.isoformat()
 json.dump(report, open(path, "w"))
 FIXTURE
-soon=$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" \
+soon=$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" \
   python3 "$ROOT/bin/desktop-status-claude" | jq -r .tooltip)
 check "a reset inside the day counts down" grep -q "Session 26% -- resets in 2h15m" <<<"$soon"
 
 # Nothing cached, no credentials, no transcripts: a fresh machine, or one that has been
 # offline since the cache expired.
-bare=$(XDG_RUNTIME_DIR="$sandbox/empty" CLAUDE_CONFIG_DIR="$sandbox/config" \
+bare=$(XDG_RUNTIME_DIR="$sandbox/empty" CLAUDE_CONFIG_DIR="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" \
   python3 "$ROOT/bin/desktop-status-claude")
 check "nothing to report renders nothing" test "$(jq -r '.text + .class' <<<"$bare")" = "idle"
 
 # The panel binds straight to these fields, and a binding to a field that stopped being
 # emitted renders as an empty row rather than as an error -- so the shape is the
 # contract, not just the values.
-detail=$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" \
+detail=$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" \
   python3 "$ROOT/bin/desktop-status-claude" --report)
 
 missing=$(jq -r '
