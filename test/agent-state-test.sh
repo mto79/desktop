@@ -153,9 +153,11 @@ printf '#!/usr/bin/env bash\n[[ "${*: -1}" == claude ]] && echo 2 || echo 0\n' >
 chmod +x "$sandbox/barstubs/pgrep"
 bar=$(PATH="$sandbox/barstubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
 check "the bar turns to waiting while a session waits on you" test "$(jq -r .class <<<"$bar")" = waiting
+check "and says how many, in a badge of its own" test "$(jq -r .badge <<<"$bar")" = "1 waiting"
 rm -f "$records"/s3.json
 bar=$(PATH="$sandbox/barstubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
 check "and back to busy once nothing is" test "$(jq -r .class <<<"$bar")" = busy
+check "with the badge gone" test "$(jq -r '.badge // ""' <<<"$bar")" = ""
 
 # --- the tab, the notification, and whether you are already looking
 if require tmux; then

@@ -39,6 +39,8 @@ jq -c -n --argjson a "$agents" --argjson c "$claude" '
         else ($c.class // "idle")
         end
       ),
+      # The waiting count stays visible whichever half wins the colour; see CommandWidget.
+      badge: ($a.badge // ""),
       tooltip: (
         [($a.tooltip // ""), ($c.tooltip // "")]
         | map(select(. != ""))

@@ -147,6 +147,20 @@ check "both halves reach the bar" test "$(jq -r .text <<<"$composed")" = "2 · 9
 check "a critical limit outranks a running agent" \
   test "$(jq -r .class <<<"$composed")" = "critical"
 
+# The reason the waiting count is a badge and not a class: with the limit critical the class
+# is taken, and the badge has to come through anyway.
+cat >"$sandbox/bin/desktop-status-agents" <<'STUB'
+#!/usr/bin/env bash
+echo '{"text":"2","badge":"1 waiting","class":"waiting","tooltip":"1 waiting for you -- 2 claude"}'
+STUB
+composed=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-ai")
+check "a waiting session is still announced while the limit has the colour" \
+  test "$(jq -r '"\(.class) \(.badge)"' <<<"$composed")" = "critical 1 waiting"
+cat >"$sandbox/bin/desktop-status-agents" <<'STUB'
+#!/usr/bin/env bash
+echo '{"text":"2","class":"busy","tooltip":"2 claude"}'
+STUB
+
 cat >"$sandbox/bin/desktop-status-claude" <<'STUB'
 #!/usr/bin/env bash
 echo '{"text":"12%","class":"active","tooltip":"Weekly 12%"}'

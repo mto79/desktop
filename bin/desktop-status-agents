@@ -33,7 +33,13 @@ fi
 # records, which only Claude Code writes; the other agents can only ever read as busy.
 waiting=$(desktop-agent-sessions --json 2>/dev/null | jq -r '.waiting // 0' 2>/dev/null)
 if [[ ${waiting:-0} =~ ^[0-9]+$ ]] && ((waiting > 0)); then
-  printf '{"text":"%s","class":"waiting","tooltip":"%s waiting for you -- %s"}\n' "$total" "$waiting" "$names"
+  # The count goes in a badge as well as the class: when a usage limit is critical the bar
+  # module is already in the urgent colour, and a class alone could no longer say that a
+  # session is waiting. Words, not the tab's ● mark: drawn on a filled pill the dot ran into
+  # the digit and read as "01", and a bare number next to "2 · 67%" says nothing about what
+  # it counts. It is only on the bar while something waits, so the width is not a cost.
+  printf '{"text":"%s","badge":"%s waiting","class":"waiting","tooltip":"%s waiting for you -- %s"}\n' \
+    "$total" "$waiting" "$waiting" "$names"
   exit 0
 fi
 

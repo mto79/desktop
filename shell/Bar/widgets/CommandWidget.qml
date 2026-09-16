@@ -12,6 +12,11 @@ import qs.Ui
 // The script may print plain text, or the waybar-style JSON every status script in
 // bin/ already emits -- {"text": ..., "tooltip": ..., "class": ...} -- so a module
 // written for waybar keeps working here without being rewritten.
+//
+// One field waybar does not have: "badge", a short piece drawn after the text as a pill in the
+// urgent colour, whatever the class says. The class colours the whole module, and one module can
+// have two things to say at once -- the AI module's usage limit going critical and a
+// session waiting on you -- where colouring for one would hide the other.
 BarItem {
   id: root
 
@@ -33,6 +38,7 @@ BarItem {
   readonly property bool hideWhenEmpty: !(widgetConfig && widgetConfig.hideWhenEmpty === false)
 
   property string label: ""
+  property string badge: ""
   property string state: ""
 
   function shell(value) {
@@ -58,7 +64,7 @@ BarItem {
 
   // The icon is decoration for the label, so it does not on its own keep an otherwise
   // empty module on the bar.
-  visible: !hideWhenEmpty || label !== ""
+  visible: !hideWhenEmpty || label !== "" || badge !== ""
   implicitWidth: visible ? content.implicitWidth + Style.itemPaddingH * 2 : 0
 
   readonly property color textColor: {
@@ -76,6 +82,7 @@ BarItem {
     var trimmed = output.trim();
     if (trimmed === "") {
       label = "";
+      badge = "";
       state = "";
       tooltip = "";
       return;
@@ -87,6 +94,7 @@ BarItem {
       try {
         var parsed = JSON.parse(trimmed);
         label = parsed.text !== undefined ? String(parsed.text) : "";
+        badge = parsed.badge !== undefined ? String(parsed.badge) : "";
         tooltip = parsed.tooltip !== undefined ? String(parsed.tooltip) : "";
         state = parsed.class !== undefined ? String(parsed.class) : "";
         return;
@@ -96,6 +104,7 @@ BarItem {
     }
 
     label = trimmed.split("\n")[0];
+    badge = "";
     state = "";
   }
 
@@ -144,11 +153,38 @@ BarItem {
       follower.running = true
   }
 
-  IconLabel {
+  Row {
     id: content
 
-    icon: root.icon
-    text: root.label
-    color: root.textColor
+    spacing: 6
+
+    IconLabel {
+      anchors.verticalCenter: parent.verticalCenter
+      icon: root.icon
+      text: root.label
+      color: root.textColor
+    }
+
+    // A filled pill rather than coloured text. Coloured text is exactly what disappears when
+    // the module is already in the urgent colour -- which is the case the badge is for.
+    Rectangle {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: root.badge !== ""
+      width: badgeText.implicitWidth + 12
+      height: badgeText.implicitHeight + 2
+      radius: height / 2
+      color: Color.barUrgent
+
+      Text {
+        id: badgeText
+
+        anchors.centerIn: parent
+        text: root.badge
+        color: Color.barBackground
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize - 1
+        font.bold: true
+      }
+    }
   }
 }
