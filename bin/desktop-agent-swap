@@ -68,13 +68,20 @@ next_after() {
 # everything that is not a letter or a digit turned into a dash. Without one --continue
 # is an error rather than a fresh session, so it is only passed when the file is there.
 #
+#
+# Only an interactive session counts. `claude -p` (lazygit's commit messages and branch
+# names) leaves transcripts too, marked "entrypoint":"sdk-cli", and --continue skips
+# those -- so a project with nothing else would die with "no conversation found".
+#
 # Neither of the others gets the same treatment. opencode picks its session itself, and
 # `codex resume --last` is the most recent session anywhere rather than the most recent
 # one here -- which would drop you into another project's conversation.
 claude_has_history() {
-  local slug
+  local slug dir
   slug=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')
-  compgen -G "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$slug/"'*.jsonl' >/dev/null
+  dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$slug"
+  compgen -G "$dir/"'*.jsonl' >/dev/null &&
+    grep -lqs '"entrypoint":"cli"' -- "$dir"/*.jsonl
 }
 
 option_of() { tmux display-message -p -t "$1" '#{@agent}' 2>/dev/null || true; }
@@ -110,7 +117,9 @@ else
   agent=$(next_after "$(option_of "$pane")")
 fi
 
-dir=$(tmux display-message -p -t "$pane" '#{pane_current_path}')
+# A dead pane has no current path, so fall back to the one it was last started in;
+# otherwise -c "" would put the agent in whatever directory this script runs from.
+dir=$(tmux display-message -p -t "$pane" '#{?pane_current_path,#{pane_current_path},#{pane_start_path}}')
 cmd=$(command_for "$agent")
 if [[ $agent == claude ]] && claude_has_history "$dir"; then
   cmd+=" --continue"

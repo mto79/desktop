@@ -70,10 +70,20 @@ check "swapping does not open a pane" test "$(tm list-panes -t work:ide | wc -l)
 check "the cycled pane runs the next agent" \
   grep -q 'desktop-agent opencode' <<<"$(tm display-message -p -t "$agent" '#{pane_start_command}')"
 
-# Coming back to claude, now that the directory has a transcript to resume.
+# Coming back to claude. First with only `claude -p` transcripts in the directory --
+# lazygit's commit messages leave those, marked sdk-cli, and --continue skips them, so
+# passing it there kills claude with "no conversation found". Two real repos on the
+# machine this was written on had nothing else.
 slug=$(printf '%s' "$sandbox/work" | sed 's/[^A-Za-z0-9]/-/g')
 mkdir -p "$HOME/.claude/projects/$slug"
-: >"$HOME/.claude/projects/$slug/a.jsonl"
+printf '{"type":"user","entrypoint":"sdk-cli"}\n' >"$HOME/.claude/projects/$slug/lazygit.jsonl"
+desktop-agent-swap "$editor" claude
+check "a directory with only claude -p transcripts is not continued" \
+  lacks -- '--continue' <<<"$(tm display-message -p -t "$agent" '#{pane_start_command}')"
+desktop-agent-swap "$editor" opencode
+
+# Then with an interactive conversation there to resume.
+printf '{"type":"user","entrypoint":"cli"}\n' >"$HOME/.claude/projects/$slug/a.jsonl"
 desktop-agent-swap "$editor" claude
 check "naming claude returns to it" \
   test "$(tm display-message -p -t "$agent" '#{@agent}')" = claude
@@ -81,6 +91,16 @@ check "a conversation in that directory is continued rather than lost" \
   grep -q -- '--continue' <<<"$(tm display-message -p -t "$agent" '#{pane_start_command}')"
 check "codex is not given a resume flag, which is not scoped to this directory" \
   lacks resume <<<"$(desktop-agent-swap "$editor" codex >/dev/null && tm display-message -p -t "$agent" '#{pane_start_command}')"
+desktop-agent-swap "$editor" claude
+
+# A dead pane has no current path. Swapping it must start the next agent where the pane
+# was, not in whatever directory desktop-agent-swap happened to be run from -- the tmux
+# binding runs it from the server's own cwd.
+tm respawn-pane -k -t "$agent" -c "$sandbox/work" "true"
+for _ in $(seq 20); do [[ $(tm display-message -p -t "$agent" '#{pane_dead}') == 1 ]] && break; sleep 0.1; done
+(cd / && desktop-agent-swap "$editor" opencode)
+check "a dead pane's agent starts in the pane's directory, not the caller's" \
+  test "$(tm display-message -p -t "$agent" '#{pane_start_path}')" = "$sandbox/work"
 desktop-agent-swap "$editor" claude
 
 # All the way round the rotation, from a known start: three presses of prefix+a come
