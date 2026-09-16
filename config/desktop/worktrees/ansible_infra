@@ -1,0 +1,13 @@
+# Untracked files a task worktree of ansible_infra needs. See bin/desktop-worktree.
+
+# Both vault passwords: without them every encrypted playbook fails, and symlinked rather
+# than copied so the secrets exist in one place only.
+symlink .vault_leg_mgt
+symlink .vault_ocp_devl
+
+# The agent's permissions for this repository, so a task does not start asking again.
+symlink .claude/settings.local.json
+
+# Installed collections. Shared with the repository: a task that changes requirements.yml
+# and reinstalls changes them for the repository too.
+symlink collections/ansible_collections

@@ -1,0 +1,5 @@
+# Untracked files a task worktree of project_mto79 needs. See bin/desktop-worktree.
+
+# Installed collections. Shared with the repository: a task that changes requirements.yml
+# and reinstalls changes them for the repository too.
+symlink ansible/collections/ansible_collections

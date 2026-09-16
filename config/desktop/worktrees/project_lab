@@ -1,0 +1,4 @@
+# Untracked files a task worktree of project_lab needs. See bin/desktop-worktree.
+
+# The agent's permissions for this repository, so a task does not start asking again.
+symlink .claude/settings.local.json

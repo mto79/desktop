@@ -1,0 +1,433 @@
+#!/usr/bin/env bash
+
+# desktop-worktree: a task in its own worktree, branch and tmux window, with an agent in it.
+#
+#   desktop-worktree new <branch>          from inside a repository
+#   desktop-worktree open <path|branch>    back to a task's window, making it if it has gone
+#   desktop-worktree list
+#   desktop-worktree done [--dry-run]      from inside a task: push, open the review, close it
+#   desktop-worktree prune                 forget tasks whose review has been merged
+#
+# One repository is one checkout, so it can hold one branch at a time -- and two agents on
+# two changes in the same repository trample each other's files. A git worktree gives each
+# task a directory and branch of its own while sharing the repository's objects, so tasks
+# run side by side and cost next to nothing on disk.
+#
+# The worktree goes next to the repository, not inside it -- gitops.worktrees/fix-runner/ --
+# because inside it every tool that walks the tree would find it: rg, ansible-lint,
+# terraform. Its window is added to the repository's own tmux session (see
+# desktop-repo-session) and laid out like any other agent window, so the tab marks and the
+# notifications from desktop-agent-state already say which *task* needs you.
+#
+# "done" is a review, not a merge: the branch is pushed and a merge request (GitLab, via
+# glab) or pull request (GitHub, via gh) is opened, then the window and worktree go. The
+# branch stays until the review is merged, which "prune" asks the forge about -- a branch
+# whose remote copy is gone may have been merged, or may have been closed and thrown away,
+# and only the forge knows which.
+#
+# Files git does not track -- a vault password, local Claude permissions, installed
+# collections -- are not in a fresh worktree, and without them it is broken in ways that
+# only show up later. They are listed per repository, one per line:
+#
+#   symlink .vault_leg_mgt
+#   copy    .env
+#   run     ansible-galaxy install -r requirements.yml
+#
+# in ~/.config/desktop/worktrees/<repository name>, or in a .worktree file in the repository.
+# Symlink by default: a copied secret is one more copy of the secret. A .worktree inside a
+# repository may only symlink or copy, never run -- it arrives with a clone, and "new" in a
+# repository you just cloned must not execute what it says. No entry may name a path outside
+# the repository either.
+
+set -uo pipefail
+
+AGENT="${DESKTOP_WORKTREE_AGENT:-claude}"
+SELF=$(readlink -f "$0")
+
+die() {
+  echo "desktop-worktree: $*" >&2
+  exit 1
+}
+
+# ------------------------------------------------------------------------ the repository
+
+# The main worktree of the repository a directory belongs to: the same answer from the
+# repository itself and from any of its worktrees.
+main_of() {
+  local common
+  common=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || return 1
+  dirname "$common"
+}
+
+default_branch() {
+  local ref branch
+  if ref=$(git -C "$1" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null); then
+    echo "${ref#origin/}"
+    return
+  fi
+  for branch in main master; do
+    if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/$branch" ||
+      git -C "$1" show-ref --verify --quiet "refs/heads/$branch"; then
+      echo "$branch"
+      return
+    fi
+  done
+  git -C "$1" symbolic-ref --short HEAD
+}
+
+# What the default branch is compared against: the remote's copy when there is one.
+base_ref() {
+  local base
+  base=$(default_branch "$1")
+  if git -C "$1" show-ref --verify --quiet "refs/remotes/origin/$base"; then
+    echo "origin/$base"
+  else
+    echo "$base"
+  fi
+}
+
+# Every worktree of a repository as "path<TAB>branch", the main one first.
+worktrees() {
+  git -C "$1" worktree list --porcelain | awk '
+    /^worktree / { path = substr($0, 10) }
+    /^branch /   { branch = substr($0, 8); sub(/^refs\/heads\//, "", branch) }
+    /^detached/  { branch = "" }
+    /^$/         { if (path != "") print path "\t" branch; path = ""; branch = "" }
+    END          { if (path != "") print path "\t" branch }'
+}
+
+worktree_of_branch() {
+  worktrees "$1" | awk -F '\t' -v b="$2" '$2 == b { print $1; exit }'
+}
+
+# The forge a repository's reviews live on, from origin's URL as configured -- not as
+# rewritten by insteadOf, which says where git fetches from rather than who hosts it.
+forge_of() {
+  local url
+  url=$(git -C "$1" config --get remote.origin.url 2>/dev/null)
+  case "$url" in
+  *github.com[:/]*) echo gh ;;
+  "") echo none ;;
+  *) echo glab ;;
+  esac
+}
+
+# ------------------------------------------------------------------------------- tmux
+
+session_of() {
+  basename "$1" | tr '.:' '__'
+}
+
+window_for() { # <session> <worktree path>
+  tmux list-windows -t "=$1" -F '#{window_id}	#{@worktree}' 2>/dev/null |
+    awk -F '\t' -v p="$2" '$2 == p { print $1; exit }'
+}
+
+# The task's window in its repository's session, made and laid out if it is not there.
+ensure_window() { # <worktree path> -> "session window"
+  local path="$1" main session window
+  main=$(main_of "$path") || return 1
+  session=$(desktop-repo-session "$main") || return 1
+  window=$(window_for "$session" "$path")
+  if [[ -z $window ]]; then
+    window=$(tmux new-window -d -t "=$session:" -n "$(basename "$path")" -c "$path" -P -F '#{window_id}') ||
+      return 1
+    tmux set-option -w -t "$window" @worktree "$path"
+    desktop-agent-layout "$window" "$AGENT" >/dev/null 2>&1
+  fi
+  echo "$session $window"
+}
+
+go_to() { # <session> <window>
+  [[ -n ${DESKTOP_WORKTREE_NO_SWITCH:-} ]] && return 0
+  if [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "=$1" \; select-window -t "$2" 2>/dev/null
+  else
+    tmux select-window -t "$2" && exec tmux attach-session -t "=$1"
+  fi
+}
+
+# ------------------------------------------------------------------ untracked files
+
+files_config() { # <main> -> "path trusted" or nothing
+  local central="${XDG_CONFIG_HOME:-$HOME/.config}/desktop/worktrees/$(basename "$1")"
+  if [[ -f $1/.worktree ]]; then
+    echo "$1/.worktree untrusted"
+  elif [[ -f $central ]]; then
+    echo "$central trusted"
+  fi
+}
+
+# A path the repository ignores must stay ignored in the task. It does not always: a
+# directory ignored as `collections/ansible_collections/` stops matching once it is a
+# symlink, because git does not count a link as a directory -- and then the task looks
+# uncommitted to "done" for ever. Found on ansible_infra, not in a test. Such a path goes
+# into the repository's local exclude file, which is never committed and is shared by its
+# worktrees, and only when the repository already ignores it, so nothing that was visible
+# there becomes hidden.
+keep_ignored() { # <main> <worktree> <relative path>
+  local exclude
+  git -C "$1" check-ignore -q -- "$3" 2>/dev/null || return 0
+  git -C "$2" check-ignore -q -- "$3" 2>/dev/null && return 0
+  exclude="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/info/exclude"
+  mkdir -p "$(dirname "$exclude")"
+  grep -qxF "/$3" "$exclude" 2>/dev/null || printf '/%s\n' "$3" >>"$exclude"
+  echo "  ignored $3 locally: its ignore rule does not match a link"
+}
+
+apply_files() { # <main> <worktree>
+  local main="$1" path="$2" config trust line action rest
+  read -r config trust < <(files_config "$main")
+  [[ -n ${config:-} ]] || return 0
+
+  while IFS= read -r line || [[ -n $line ]]; do
+    [[ $line =~ ^[[:space:]]*(#|$) ]] && continue
+    read -r action rest <<<"$line"
+    case "$action" in
+    symlink | copy)
+      if [[ $rest == /* || /$rest/ == */../* ]]; then
+        echo "  refused $rest: outside the repository"
+        continue
+      fi
+      if [[ ! -e $main/$rest && ! -L $main/$rest ]]; then
+        echo "  skipped $rest: not in $(basename "$main")"
+        continue
+      fi
+      if [[ -e $path/$rest || -L $path/$rest ]]; then
+        echo "  skipped $rest: already in the worktree"
+        continue
+      fi
+      mkdir -p "$(dirname "$path/$rest")"
+      if [[ $action == symlink ]]; then
+        ln -s "$main/$rest" "$path/$rest"
+      else
+        cp -a "$main/$rest" "$path/$rest"
+      fi
+      echo "  $action $rest"
+      keep_ignored "$main" "$path" "$rest"
+      ;;
+    run)
+      if [[ $trust != trusted ]]; then
+        echo "  refused to run \"$rest\": a .worktree in the repository may not run commands"
+        continue
+      fi
+      echo "  run $rest"
+      (cd "$path" && bash -c "$rest") || echo "  that command failed"
+      ;;
+    *)
+      echo "  ignored unknown line in $config: $line"
+      ;;
+    esac
+  done <"$config"
+}
+
+# ---------------------------------------------------------------------------- commands
+
+cmd_new() {
+  local branch="${1:-}" main existing slug path start session window
+  [[ -n $branch ]] || die "usage: desktop-worktree new <branch>"
+  git check-ref-format --branch "$branch" >/dev/null 2>&1 || die "not a valid branch name: $branch"
+  main=$(main_of "$PWD") || die "not inside a git repository"
+
+  # Git allows a branch to be checked out in one place only. Asking for one that already
+  # has a task is asking to go back to it.
+  existing=$(worktree_of_branch "$main" "$branch")
+  if [[ -n $existing ]]; then
+    [[ $existing == "$main" ]] && die "$branch is checked out in the repository itself, not in a task"
+    read -r session window < <(ensure_window "$existing") || die "could not open a window for $existing"
+    echo "$branch already has a task: $existing"
+    go_to "$session" "$window"
+    return
+  fi
+
+  slug=$(printf '%s' "$branch" | tr '/' '-' | tr -c 'A-Za-z0-9._-' '-')
+  path="$(dirname "$main")/$(basename "$main").worktrees/$slug"
+  [[ -e $path ]] && die "$path already exists"
+
+  git -C "$main" fetch --quiet origin 2>/dev/null ||
+    echo "note: could not fetch origin; branching from what is already here"
+
+  if git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
+    git -C "$main" worktree add --quiet "$path" "$branch"
+  elif git -C "$main" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
+    git -C "$main" worktree add --quiet --track -b "$branch" "$path" "origin/$branch"
+  else
+    # --no-track: the new branch should not follow main; "done" gives it its own upstream.
+    start=$(base_ref "$main")
+    git -C "$main" worktree add --quiet --no-track -b "$branch" "$path" "$start"
+  fi || die "git could not create the worktree"
+
+  echo "$branch: $path"
+  apply_files "$main" "$path"
+
+  read -r session window < <(ensure_window "$path") || die "worktree made, but no window for it"
+  go_to "$session" "$window"
+}
+
+cmd_open() {
+  local target="${1:-}" path main session window
+  [[ -n $target ]] || die "usage: desktop-worktree open <path|branch>"
+  if [[ -d $target ]]; then
+    path=$(cd "$target" && git rev-parse --show-toplevel 2>/dev/null) || die "not a worktree: $target"
+  else
+    main=$(main_of "$PWD") || die "not inside a git repository"
+    path=$(worktree_of_branch "$main" "$target")
+    [[ -n $path ]] || die "no task for branch $target"
+  fi
+  read -r session window < <(ensure_window "$path") || die "could not open a window for $path"
+  go_to "$session" "$window"
+}
+
+cmd_list() {
+  local main base session path branch state dirty ahead window any=false
+  main=$(main_of "$PWD") || die "not inside a git repository"
+  base=$(base_ref "$main")
+  session=$(session_of "$main")
+
+  while IFS=$'\t' read -r path branch; do
+    [[ $path == "$main" ]] && continue
+    any=true
+    window=$(window_for "$session" "$path")
+    state=$([[ -n $window ]] && tmux show-options -wqv -t "$window" @agent_state)
+    dirty=$(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null | wc -l)
+    ahead=$(git -C "$path" rev-list --count "$base..HEAD" 2>/dev/null || echo "?")
+    printf '%-28s %-9s %3s ahead  %-12s %s\n' "${branch:-(detached)}" "${state:-${window:+open}}" "$ahead" \
+      "$( ((dirty > 0)) && echo "$dirty changed" || echo clean)" "$path"
+  done < <(worktrees "$main")
+
+  $any || echo "no tasks in $(basename "$main")"
+}
+
+# The review for a branch, if one exists: its URL, or nothing.
+review_url() { # <forge> <dir> <branch>
+  case "$1" in
+  gh) (cd "$2" && gh pr view "$3" --json url --jq .url 2>/dev/null) ;;
+  glab) (cd "$2" && glab mr view "$3" -F json 2>/dev/null | jq -r '.web_url // empty' 2>/dev/null) ;;
+  esac
+}
+
+cmd_done() {
+  local dry=false path main branch base ahead forge url session window
+  [[ ${1:-} == --dry-run ]] && dry=true
+
+  path=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
+  main=$(main_of "$path")
+  [[ $path == "$main" ]] && die "this is the repository itself; run done from inside a task"
+  branch=$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null) || die "HEAD is detached; nothing to push"
+
+  [[ -z $(git -C "$path" status --porcelain --untracked-files=all) ]] ||
+    die "uncommitted changes in $branch -- commit or stash them first"
+
+  base=$(default_branch "$main")
+  ahead=$(git -C "$path" rev-list --count "$(base_ref "$main")..HEAD")
+  ((ahead > 0)) || die "$branch has no commits beyond $base; there is nothing to review"
+
+  forge=$(forge_of "$main")
+  [[ $forge == none ]] && die "the repository has no origin to push to"
+
+  if $dry; then
+    echo "would push $branch ($ahead commit(s)) to origin"
+    echo "would open a $([[ $forge == gh ]] && echo "pull request" || echo "merge request") into $base with $forge"
+    echo "would close the window and remove $path, keeping the branch until the review is merged"
+    return
+  fi
+
+  # Stop at the first thing that fails and leave the task exactly as it was: a worktree
+  # whose work never reached the remote must not be removed.
+  git -C "$path" push --quiet -u origin "$branch" || die "push failed; the task is left as it was"
+
+  url=$(review_url "$forge" "$path" "$branch")
+  if [[ -n $url ]]; then
+    echo "review already open: $url"
+  else
+    case "$forge" in
+    gh) url=$(cd "$path" && gh pr create --head "$branch" --base "$base" --fill 2>&1 | grep -oE 'https://[^ ]+' | tail -1) ;;
+    glab) url=$(cd "$path" && glab mr create --source-branch "$branch" --target-branch "$base" --fill --yes 2>&1 | grep -oE 'https://[^ ]+' | tail -1) ;;
+    esac
+    [[ -n $url ]] || die "pushed, but the review could not be opened; the task is left in place"
+    echo "review opened: $url"
+  fi
+
+  session=$(session_of "$main")
+  window=$(window_for "$session" "$path")
+  if [[ -n ${TMUX:-} && -n $window ]]; then
+    # Handed to the tmux server: this is very likely running inside the window about to
+    # be closed, and would be killed halfway through removing its own worktree.
+    tmux run-shell -b "'$SELF' _close '$window'"
+    echo "closing the task"
+  else
+    close_task "$path" "$window"
+  fi
+}
+
+close_task() { # <worktree path> [window]
+  local path="$1" window="${2:-}" main parent
+  main=$(main_of "$path") || return 1
+  [[ -n $window ]] && tmux kill-window -t "$window" 2>/dev/null
+  # No --force: ignored files such as symlinked secrets do not block removal, and anything
+  # that does is work that should not be thrown away.
+  git -C "$main" worktree remove "$path" || return 1
+  parent=$(dirname "$path")
+  rmdir "$parent" 2>/dev/null
+  echo "removed $path"
+}
+
+cmd_close() { # internal: <window id>, run by the tmux server
+  local window="$1" path
+  path=$(tmux show-options -wqv -t "$window" @worktree)
+  [[ -n $path ]] || exit 0
+  close_task "$path" "$window"
+}
+
+review_merged() { # <forge> <dir> <branch>
+  case "$1" in
+  gh) [[ $(cd "$2" && gh pr view "$3" --json state --jq .state 2>/dev/null) == MERGED ]] ;;
+  glab) [[ $(cd "$2" && glab mr view "$3" -F json 2>/dev/null | jq -r '.state // empty' 2>/dev/null) == merged ]] ;;
+  *) return 1 ;;
+  esac
+}
+
+cmd_prune() {
+  local main forge branch path pruned=false
+  main=$(main_of "$PWD") || die "not inside a git repository"
+  forge=$(forge_of "$main")
+  git -C "$main" fetch --prune --quiet origin 2>/dev/null ||
+    echo "note: could not reach origin; checking against what is already known"
+
+  while read -r branch; do
+    [[ -n $branch ]] || continue
+    # Gone from origin is not the same as merged: a review closed without merging loses
+    # its branch too. Only the forge can tell them apart, so only its answer deletes work.
+    if ! review_merged "$forge" "$main" "$branch"; then
+      echo "kept $branch: its remote branch is gone, but no merged review was found"
+      continue
+    fi
+    path=$(worktree_of_branch "$main" "$branch")
+    if [[ -n $path ]]; then
+      if [[ -n $(git -C "$path" status --porcelain --untracked-files=all) ]]; then
+        echo "kept $branch: merged, but $path has uncommitted changes"
+        continue
+      fi
+      close_task "$path" "$(window_for "$(session_of "$main")" "$path")" >/dev/null || continue
+    fi
+    # -D because a squash merge leaves the branch looking unmerged to git, and the forge
+    # has just said it is merged.
+    git -C "$main" branch --quiet -D "$branch" && echo "pruned $branch (merged)" && pruned=true
+  done < <(git -C "$main" for-each-ref --format='%(refname:short) %(upstream:track)' refs/heads |
+    awk '$2 == "[gone]" { print $1 }')
+
+  $pruned || echo "nothing to prune"
+}
+
+case "${1:-}" in
+new) shift; cmd_new "$@" ;;
+open) shift; cmd_open "$@" ;;
+list) cmd_list ;;
+done) shift; cmd_done "$@" ;;
+prune) cmd_prune ;;
+_close) shift; cmd_close "$@" ;;
+*)
+  echo "usage: desktop-worktree <new BRANCH | open PATH|BRANCH | list | done [--dry-run] | prune>" >&2
+  exit 1
+  ;;
+esac

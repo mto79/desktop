@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+# desktop-repo-session: make sure a repository has its tmux session, and print its name.
+#
+#   desktop-repo-session ~/Data/MTO/Repositories/Projects/gitops     # -> gitops
+#
+# A repository gets one session, named after its directory: an "ide" window laid out for a
+# coding agent and a "git" window running lazygit. The sessionizer opens repositories
+# this way, and desktop-worktree adds each task's window to the same session, so the two
+# have to agree on the name and the shape -- which is why neither builds it itself.
+#
+# Detached, always. Whoever called this decides whether to switch to it or attach.
+
+set -uo pipefail
+
+dir="${1:?usage: desktop-repo-session <directory>}"
+dir=$(cd "$dir" 2>/dev/null && pwd) || {
+  echo "desktop-repo-session: no such directory: $1" >&2
+  exit 1
+}
+
+# tmux does not allow "." or ":" in a session name.
+name=$(basename "$dir" | tr '.:' '__')
+
+if ! tmux has-session -t "=$name" 2>/dev/null; then
+  tmux new-session -ds "$name" -n ide -c "$dir" || exit 1
+  desktop-agent-layout "$name:ide" claude >/dev/null 2>&1
+  tmux new-window -d -t "$name:" -n git -c "$dir" lazygit
+  tmux select-window -t "$name:ide"
+fi
+
+echo "$name"
