@@ -103,6 +103,14 @@ check "a dead pane's agent starts in the pane's directory, not the caller's" \
   test "$(tm display-message -p -t "$agent" '#{pane_start_path}')" = "$sandbox/work"
 desktop-agent-swap "$editor" claude
 
+# A swap takes the replaced agent's mark off the tab. Killing an agent reports nothing, so
+# otherwise the tab would keep saying "working" about a claude that is gone.
+tm set-option -w -t "$agent" @agent_state working
+desktop-agent-swap "$editor" opencode
+check "swapping clears the replaced agent's mark from the tab" \
+  test -z "$(tm show-options -wqv -t "$agent" @agent_state)"
+desktop-agent-swap "$editor" claude
+
 # All the way round the rotation, from a known start: three presses of prefix+a come
 # back to where they began.
 desktop-agent-swap "$editor" claude

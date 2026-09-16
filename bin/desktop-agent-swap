@@ -130,6 +130,11 @@ fi
 # usually still running the agent before it.
 tmux set-option -p -t "$pane" remain-on-exit on
 tmux set-option -p -t "$pane" @agent "$agent"
+# The tab's agent mark belongs to the agent being replaced, and killing it is not an exit it
+# reports: no SessionEnd arrives to clear it, so a tab would go on saying "working" or "done"
+# about a claude that no longer exists while opencode runs. Cleared here; a new claude marks
+# the tab again from its own hooks, and opencode and codex report nothing to mark it with.
+tmux set-option -wu -t "$pane" @agent_state 2>/dev/null || true
 tmux respawn-pane -k -t "$pane" -c "$dir" "$cmd"
 # Leading space to sit on the same column as the rest of the status line.
 tmux display-message " $agent"
