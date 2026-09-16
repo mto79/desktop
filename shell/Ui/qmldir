@@ -10,3 +10,4 @@ PanelMeter 1.0 PanelMeter.qml
 PanelRow 1.0 PanelRow.qml
 PanelSection 1.0 PanelSection.qml
 PanelSlider 1.0 PanelSlider.qml
+PanelDayBars 1.0 PanelDayBars.qml
