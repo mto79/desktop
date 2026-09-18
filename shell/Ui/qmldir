@@ -11,3 +11,4 @@ PanelRow 1.0 PanelRow.qml
 PanelSection 1.0 PanelSection.qml
 PanelSlider 1.0 PanelSlider.qml
 PanelDayBars 1.0 PanelDayBars.qml
+PanelLevel 1.0 PanelLevel.qml
