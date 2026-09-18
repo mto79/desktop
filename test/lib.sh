@@ -14,13 +14,18 @@ ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 export ROOT
 
 FAILURES=0
+CHECKS=0
 
-pass() { printf 'ok - %s\n' "$1"; }
+pass() {
+  CHECKS=$((CHECKS + 1))
+  printf 'ok - %s\n' "$1"
+}
 
 # Does not exit: a test file reports everything it found rather than stopping at the
 # first problem, which is what makes a run worth reading.
 fail() {
   local what="$1" detail="${2:-}"
+  CHECKS=$((CHECKS + 1))
   printf 'not ok - %s\n' "$what" >&2
   [[ -n $detail ]] && printf '      %s\n' "$detail" >&2
   FAILURES=$((FAILURES + 1))
@@ -37,6 +42,13 @@ lacks() { ! grep -q "$@"; }
 
 # Call at the end of every test file.
 finish() {
+  # A file that ran no checks at all has not passed: something before the checks broke
+  # them -- once, a function of the script under test shadowing `pass`, so every check
+  # died on its own arguments and the file still reported success.
+  if ((CHECKS == 0)); then
+    printf '\nno checks ran in %s\n' "$(basename "$0")" >&2
+    exit 1
+  fi
   ((FAILURES == 0)) && exit 0
   printf '\n%d check(s) failed in %s\n' "$FAILURES" "$(basename "$0")" >&2
   exit 1
