@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# desktop-vpn-details: Each VPN that is up, and what it is doing, as JSON.
+#
+#   [{"name":"nationaalarchief","type":"vpn","server":"vpn-tb.nationaalarchief.nl",
+#     "address":"10.8.32.94","iface":"tun0","full":false,"routes":19,
+#     "since":1789714745,"rx":273173827,"tx":9637206,"dns":[]}]
+#
+# NetworkManager's profiles first -- vpn and wireguard -- then any openvpn started by
+# hand outside it, which has a name and nothing else NetworkManager could say about it.
+#
+# "full" is whether the tunnel carries all traffic or only its own networks: a split
+# tunnel leaves the default route alone and adds routes for the networks behind it, and
+# which of the two is up is the difference between "work is reachable" and "everything
+# I do goes through work". The count leaves out the two host routes every tunnel adds
+# for its own endpoints.
+#
+# From vpn.data only the remote is read. The rest of it is certificate paths and
+# options, and none of that belongs in a panel.
+
+set -uo pipefail
+
+active=$(nmcli -t -f NAME,TYPE connection show --active 2>/dev/null |
+  awk -F: '$2 == "vpn" || $2 == "wireguard"')
+
+describe() {
+  local name=$1 type=$2 info address iface server
+  info=$(nmcli -t connection show "$name" 2>/dev/null)
+  field() { sed -n "s/^$1://p" <<<"$info" | head -1; }
+
+  address=$(field 'IP4.ADDRESS\[1\]')
+  address=${address%/*}
+  # The tunnel device is whichever one holds the tunnel's address.
+  iface=$(ip -j addr 2>/dev/null | jq -r --arg a "$address" '.[] | select(any(.addr_info[]; .local == $a)) | .ifname' | head -1)
+  [[ $type == wireguard ]] && iface=${iface:-$name}
+
+  # "vpn-tb.example.nl:50032:udp" -- the first of possibly several remotes, host only.
+  # A WireGuard peer's endpoint is only visible to root, through wg, so it goes unnamed.
+  server=""
+  [[ $type == vpn ]] &&
+    server=$(field vpn.data | grep -oE '(^|, )remote = [^,]+' | sed -E 's/^(, )?remote = //; s/[ :].*$//' | head -1)
+
+  local rx=0 tx=0
+  if [[ -n $iface && -r /sys/class/net/$iface/statistics/rx_bytes ]]; then
+    rx=$(</sys/class/net/"$iface"/statistics/rx_bytes)
+    tx=$(</sys/class/net/"$iface"/statistics/tx_bytes)
+  fi
+
+  routes=$(grep -c '^IP4\.ROUTE' <<<"$info")
+  jq -nc --arg name "$name" --arg type "$type" --arg server "${server:-}" --arg address "$address" \
+    --arg iface "${iface:-}" --arg never "$(field ipv4.never-default)" --argjson routes "$routes" \
+    --arg since "$(field connection.timestamp)" --argjson rx "$rx" --argjson tx "$tx" \
+    --arg dns "$(grep -E '^IP4\.DNS' <<<"$info" | cut -d: -f2 | paste -sd, -)" \
+    '{name: $name, type: $type, server: (if $server == "" then null else $server end),
+      address: (if $address == "" then null else $address end), iface: (if $iface == "" then null else $iface end),
+      full: ($never != "yes"), routes: ([$routes - 2, 0] | max),
+      since: ($since | tonumber? // null), rx: $rx, tx: $tx,
+      dns: ($dns | split(",") | map(select(. != "")))}'
+}
+
+{
+  while IFS=: read -r name type; do
+    [[ -n $name ]] && describe "$name" "$type"
+  done <<<"$active"
+
+  # openvpn started by hand: named by its config file, as desktop-status-openvpn does.
+  pgrep -x openvpn 2>/dev/null | while read -r pid; do
+    config=$(ps -o args= -p "$pid" 2>/dev/null | sed -n 's/.*--config \([^ ]*\.ovpn\).*/\1/p')
+    [[ -n $config ]] || continue
+    since=$(($(date +%s) - $(ps -o etimes= -p "$pid" | tr -d ' ')))
+    jq -nc --arg name "$(basename "$config" .ovpn)" --argjson since "$since" \
+      '{name: $name, type: "openvpn", server: null, address: null, iface: null, full: null, routes: null, since: $since, rx: 0, tx: 0, dns: []}'
+  done
+} | jq -sc .

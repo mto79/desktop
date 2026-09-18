@@ -12,6 +12,10 @@ import qs.Ui
 // the tunnels under a Wi-Fi list that could scroll to forty rows. Now each icon opens
 // what it shows.
 //
+// Laid out like the battery panel: the tunnel that is up, big, with how long it has been
+// up, whether it carries everything or only its own networks, and its figures in a grid
+// -- from desktop-vpn-details. Then the profiles, one click to bring each up or down.
+//
 // Profiles go through nmcli: Quickshell's Networking service models devices and Wi-Fi,
 // and has no concept of a VPN profile.
 Popup {
@@ -22,6 +26,51 @@ Popup {
   property var vpns: []
   property string vpnError: ""
   property string vpnBusy: ""
+
+  // The tunnels that are up, with their figures; empty when none is.
+  property var tunnels: []
+  readonly property var tunnel: tunnels.length > 0 ? tunnels[0] : null
+
+  function duration(since) {
+    if (!since)
+      return "";
+    var minutes = Math.max(0, Math.floor((Date.now() / 1000 - since) / 60));
+    if (minutes < 60)
+      return minutes + "m";
+    var hours = Math.floor(minutes / 60);
+    return hours < 48 ? hours + "h " + (minutes % 60) + "m" : Math.floor(hours / 24) + "d";
+  }
+
+  function bytes(value) {
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+      value /= 1000;
+      unit++;
+    }
+    return (unit === 0 || value >= 100 ? Math.round(value) : value.toFixed(1)) + " " + units[unit];
+  }
+
+  Process {
+    id: detailsProbe
+
+    command: ["desktop-vpn-details"]
+
+    function reload() {
+      if (!running)
+        running = true;
+    }
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          root.tunnels = JSON.parse(text);
+        } catch (e) {
+          root.tunnels = [];
+        }
+      }
+    }
+  }
 
   readonly property int activeCount: {
     var count = 0;
@@ -104,6 +153,7 @@ Popup {
       if (exitCode === 0)
         root.vpnError = "";
       vpnProbe.reload();
+      detailsProbe.reload();
     }
   }
 
@@ -128,7 +178,10 @@ Popup {
     repeat: true
     running: root.visible
     triggeredOnStart: true
-    onTriggered: vpnProbe.reload()
+    onTriggered: {
+      vpnProbe.reload();
+      detailsProbe.reload();
+    }
   }
 
   contentWidth: Style.popupWidth
@@ -140,9 +193,65 @@ Popup {
     width: parent.width
     spacing: 2
 
+    PanelHero {
+      icon: root.tunnel ? "\u{f099d}" : "\u{f099c}"
+      iconColor: root.tunnel ? Color.popupAccent : Color.popupMuted
+      title: root.tunnel ? root.tunnel.name : "VPN"
+      status: {
+        if (!root.tunnel)
+          return "off";
+        var parts = [];
+        if (root.tunnel.full === true)
+          parts.push("all traffic");
+        else if (root.tunnel.full === false)
+          parts.push("split  ·  " + root.tunnel.routes + " networks");
+        if (root.tunnels.length > 1)
+          parts.push("+" + (root.tunnels.length - 1) + " more");
+        return parts.join("  ·  ");
+      }
+      statusColor: root.tunnel ? Color.popupAccent : Color.popupMuted
+      value: root.tunnel ? root.duration(root.tunnel.since) : "off"
+      valueColor: root.tunnel ? Color.popupText : Color.popupMuted
+    }
+
+    Grid {
+      width: parent.width
+      columns: 2
+      topPadding: 2
+      bottomPadding: 4
+      visible: !!root.tunnel && root.tunnel.type !== "openvpn"
+
+      PanelStat {
+        label: "Address"
+        value: root.tunnel && root.tunnel.address ? root.tunnel.address : "—"
+      }
+      PanelStat {
+        label: "Device"
+        value: root.tunnel && root.tunnel.iface ? root.tunnel.iface : "—"
+      }
+      PanelStat {
+        label: "Received"
+        value: root.tunnel ? root.bytes(root.tunnel.rx) : "—"
+      }
+      PanelStat {
+        label: "Sent"
+        value: root.tunnel ? root.bytes(root.tunnel.tx) : "—"
+      }
+    }
+
+    // The server and DNS get whole lines: host names do not fit half a panel.
+    PanelRow {
+      visible: !!(root.tunnel && root.tunnel.server)
+      icon: "\u{f048d}"
+      label: root.tunnel && root.tunnel.server ? root.tunnel.server : ""
+      sublabel: root.tunnel && root.tunnel.dns.length > 0 ? "DNS through the tunnel: " + root.tunnel.dns.join(", ") : "DNS as before the tunnel"
+      enabled: false
+    }
+
     PanelSection {
-      title: "VPN"
-      value: root.activeCount > 0 ? root.activeCount + " active" : "off"
+      title: "Profiles"
+      value: root.activeCount > 0 ? root.activeCount + " active" : "click to connect"
+      rule: true
     }
 
     Repeater {
