@@ -1,12 +1,18 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
+import "../../Commons/holidays.js" as Holidays
 
 // Calendar panel: a month grid with ISO week numbers, hanging under the clock.
 //
 // Weeks start on the locale's first day and the week-number column is always shown --
 // the bar's own alt format used to spell out `W ww`, and that habit is worth keeping
 // for anyone whose meetings are booked by week number rather than by date.
+//
+// Laid out like the battery panel: today big at the top with the time, then the month,
+// with Dutch public holidays marked -- computed in holidays.js, since there is no
+// calendar on this machine to read them from -- and the next few listed with how far
+// off they are. UTC sits in the grid for reading server logs against.
 Popup {
   id: root
 
@@ -98,12 +104,44 @@ Popup {
   onVisibleChanged: if (visible)
     reset()
 
+  // Every second while open: the time at the top is the one thing here that moves.
   Timer {
-    interval: 60000
+    interval: 1000
     repeat: true
     running: root.visible
     onTriggered: root.today = new Date()
   }
+
+  // Holiday names by day for the years anything on screen can show: the month in view
+  // spills into its neighbours, and today may be in neither. Keys carry the year, so one
+  // map holds them all. Computed as a binding rather than filled in on demand -- writing a
+  // property from inside the bindings that read it is a binding loop.
+  readonly property var holidayMap: {
+    var years = [viewYear - 1, viewYear, viewYear + 1, today.getFullYear(), selected.getFullYear()];
+    var map = {};
+    for (var i = 0; i < years.length; i++)
+      Object.assign(map, Holidays.lookup(years[i]));
+    return map;
+  }
+
+  function holiday(date) {
+    return holidayMap[Holidays.key(date)] || "";
+  }
+
+  // Midnight to midnight: `selected` carries the time it was picked at, and 13:47 today
+  // rounded against midnight is "in 1 day".
+  function daysUntil(date) {
+    var start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    var end = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    return Math.round((end - start) / 86400000);
+  }
+
+  function dayOfYear(date) {
+    return Math.round((new Date(date.getFullYear(), date.getMonth(), date.getDate()) - new Date(date.getFullYear(), 0, 1)) / 86400000) + 1;
+  }
+
+  readonly property int daysInYear: new Date(today.getFullYear(), 1, 29).getDate() === 29 ? 366 : 365
+  readonly property var upcoming: Holidays.upcoming(today, 3)
 
   contentWidth: Style.popupWidth
   contentHeight: column.implicitHeight + Style.popupPadding * 2
@@ -113,6 +151,36 @@ Popup {
 
     width: parent.width
     spacing: 2
+
+    PanelHero {
+      icon: "\u{f00ed}"
+      title: Qt.formatDate(root.today, "dddd d MMMM")
+      status: {
+        var parts = ["week " + Dates.isoWeek(root.today)];
+        var name = root.holiday(root.today);
+        if (name !== "")
+          parts.unshift(name);
+        return parts.join("  ·  ");
+      }
+      statusColor: root.holiday(root.today) !== "" ? Color.popupAccent : Color.popupMuted
+      value: Qt.formatTime(root.today, "HH:mm")
+    }
+
+    Grid {
+      width: parent.width
+      columns: 2
+      topPadding: 2
+      bottomPadding: 6
+
+      PanelStat {
+        label: "UTC"
+        value: root.today.toISOString().substring(11, 16)
+      }
+      PanelStat {
+        label: "Day"
+        value: root.dayOfYear(root.today) + " of " + root.daysInYear
+      }
+    }
 
     // Month header: arrows page a month at a time, the title resets to today.
     Item {
@@ -258,10 +326,26 @@ Popup {
             border.width: isToday ? 1 : 0
             border.color: Color.popupAccent
 
+            readonly property string holidayName: root.holiday(cell.day)
+
+            // A holiday is a dot under the number: the number itself stays legible, and
+            // today's ring and the selection still read over it.
+            Rectangle {
+              visible: cell.holidayName !== ""
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: 3
+              width: 4
+              height: 4
+              radius: 2
+              color: Color.popupAccent
+              opacity: cell.inMonth ? 1.0 : 0.35
+            }
+
             Text {
               anchors.fill: parent
               text: cell.day.getDate()
-              color: cell.isToday ? Color.popupAccent : Color.popupText
+              color: cell.isToday || cell.holidayName !== "" ? Color.popupAccent : Color.popupText
               opacity: cell.inMonth ? 1.0 : 0.35
               font.family: Style.fontFamily
               font.pixelSize: Style.fontSize
@@ -297,18 +381,58 @@ Popup {
       rule: true
     }
 
-    Item {
-      width: parent.width
-      height: 24
+    PanelRow {
+      icon: "\u{f00f0}"
+      label: Qt.formatDate(root.selected, "dddd d MMMM yyyy")
+      sublabel: {
+        var parts = [];
+        var name = root.holiday(root.selected);
+        if (name !== "")
+          parts.push(name);
+        var days = root.daysUntil(root.selected);
+        if (days === 0)
+          parts.push("today");
+        else
+          parts.push(days > 0 ? "in " + days + (days === 1 ? " day" : " days") : Math.abs(days) + (days === -1 ? " day ago" : " days ago"));
+        return parts.join("  ·  ");
+      }
+      enabled: false
+    }
 
-      Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: Qt.formatDate(root.selected, "dddd d MMMM yyyy")
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize
+    // --- The next days off, or near enough ------------------------------------------
+    PanelSection {
+      title: "Holidays"
+      value: "the Netherlands"
+      rule: true
+    }
+
+    Repeater {
+      model: root.upcoming
+
+      delegate: PanelRow {
+        id: holidayRow
+
+        required property var modelData
+
+        readonly property int days: root.daysUntil(modelData.date)
+
+        icon: "\u{f0153}"
+        label: modelData.name
+        sublabel: Qt.formatDate(modelData.date, "dddd d MMMM")
+        active: days === 0
+        // Clicking shows it in the grid.
+        onClicked: {
+          root.selected = modelData.date;
+          root.viewYear = modelData.date.getFullYear();
+          root.viewMonth = modelData.date.getMonth();
+        }
+
+        Text {
+          text: holidayRow.days === 0 ? "today" : "in " + holidayRow.days + (holidayRow.days === 1 ? " day" : " days")
+          color: holidayRow.days <= 7 ? Color.popupAccent : Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 2
+        }
       }
     }
   }
