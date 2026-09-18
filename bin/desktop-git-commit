@@ -1,34 +1,134 @@
 #!/bin/bash
+# desktop-git-commit: commit what is staged, with a message Claude writes from the diff.
+# lazygit's C key runs it.
+#
 # The prompt is read from the repo, not from ~/.claude/commands: a copy there was placed by
 # hand, so a clean install had no prompt at all, and it had already drifted from this one.
 PROMPT="${DESKTOP_PATH:-$HOME/.local/share/desktop}/config/claude/commands/gen-commit-msg.md"
-MSG=$(claude -p "$(cat "$PROMPT")")
+
+# Every way this could fail used to end in one message -- "that is not a single commit
+# message, stage less" -- including nothing being staged, which is the opposite advice,
+# and Claude failing outright. Each now says what it is.
+
+if git diff --cached --quiet; then
+  echo "Nothing is staged, so there is nothing to commit." >&2
+  echo "Stage files first -- in lazygit, space on a file, or a for all of them." >&2
+  exit 1
+fi
+
+# The diff goes to Claude rather than Claude being asked to run git diff itself: a repo
+# whose own .claude settings do not allow shell commands left it unable to look, in print
+# mode where nobody can approve one, and it answered with that instead of a message. It is
+# also a turn faster. A huge diff is cut, with a note, rather than refused.
+LIMIT=200000
+DIFF=$(git diff --cached --stat && echo && git diff --cached)
+if ((${#DIFF} > LIMIT)); then
+  DIFF="${DIFF:0:LIMIT}
+
+[the diff continues; it was cut at ${LIMIT} characters -- the --stat above lists every file]"
+fi
+
+# When the staged work is more than one change, Claude is asked for the split in a form
+# this script can carry out, instead of prose to read and redo by hand in lazygit.
+SPLIT_FORMAT='If, and only if, the staged changes belong in more than one commit, answer with
+JSON alone instead of a message:
+{"commits": [{"files": ["path", ...], "message": "type(scope): subject\n\nbody"}, ...]}
+Every staged file in exactly one commit, the commits in the order to make them, each
+message following the rules above. Otherwise answer with the single commit message.'
+
+ERR=$(mktemp)
+trap 'rm -f "$ERR"' EXIT
+MSG=$(printf '%s\n' "$DIFF" | claude -p "$(cat "$PROMPT")
+
+$SPLIT_FORMAT
+
+The staged diff is on standard input below; there is no need to run git." 2>"$ERR")
+STATUS=$?
+if ((STATUS != 0)); then
+  # A spent limit, an expired login, no network: Claude's own words say which.
+  echo "Claude could not write a message (exit $STATUS):" >&2
+  cat "$ERR" >&2
+  printf '%s\n' "$MSG" >&2
+  exit 1
+fi
+
+# Conventional Commits, with the agent's trailers and fences taken out -- see below.
+is_conventional() { head -n 1 <<<"$1" | grep -q -E '^[a-z]+(\([^)]+\))?!?: [^ ]'; }
+
+# A split, carried out: one `git commit --only` per group, which commits those paths and
+# leaves the rest staged for the next -- with the hooks and signing a commit normally gets.
+# --only takes the paths from the working tree, so it is exact only for files whose staged
+# version is their working version; a file with unstaged changes as well stops the split
+# rather than committing more than was staged. The plan is checked whole before the first
+# commit, so a bad one commits nothing.
+split_commit() {
+  local plan=$1 staged count i files message path
+  staged=$(git diff --cached --name-only | sort)
+  if [[ $(jq -r '.commits[].files[]' <<<"$plan" | sort) != "$staged" ]]; then
+    echo "Not committed: Claude's split does not cover each staged file exactly once." >&2
+    jq -r '.commits[] | "  " + (.message | split("\n")[0]) + ": " + (.files | join(", "))' <<<"$plan" >&2
+    return 1
+  fi
+  while read -r path; do
+    if ! git diff --quiet -- "$path"; then
+      echo "Not committed: $path also has unstaged changes, so it cannot be split off exactly." >&2
+      echo "Stage or stash them, and run this again." >&2
+      return 1
+    fi
+  done <<<"$staged"
+  count=$(jq '.commits | length' <<<"$plan")
+  for ((i = 0; i < count; i++)); do
+    message=$(jq -r ".commits[$i].message" <<<"$plan" | clean)
+    if ! is_conventional "$message"; then
+      echo "Not committed: part $((i + 1)) of the split has no Conventional Commits subject:" >&2
+      printf '%s\n' "$message" >&2
+      return 1
+    fi
+  done
+
+  echo "Staged work split into $count commits:"
+  for ((i = 0; i < count; i++)); do
+    mapfile -t files < <(jq -r ".commits[$i].files[]" <<<"$plan")
+    message=$(jq -r ".commits[$i].message" <<<"$plan" | clean)
+    echo
+    echo "Generated: $message"
+    git commit --only -m "$message" -- "${files[@]}" || return 1
+  done
+}
 
 # Claude Code signs whatever commit it writes, so the message came back with a
 # Co-Authored-By trailer (and sometimes a session link) that ended up on every commit.
 # The generator only ever sees the diff, so no trailer it adds can name a real co-author:
 # drop them all. Markdown fences go too, and blank lines collapse to one, with none left at
 # either end.
-MSG=$(printf '%s\n' "$MSG" |
+clean() {
   tr -d '\r' |
-  sed -E 's/[[:space:]]+$//' |
-  grep -v -i -E '^(co-authored-by:|claude-session:|```)|generated with \[?claude' |
-  awk 'NF { if (seen && gap) print ""; print; seen = 1; gap = 0; next } { gap = 1 }')
+    sed -E 's/[[:space:]]+$//' |
+    grep -v -i -E '^(co-authored-by:|claude-session:|```)|generated with \[?claude' |
+    awk 'NF { if (seen && gap) print ""; print; seen = 1; gap = 0; next } { gap = 1 }'
+}
+
+# A split comes back as JSON, possibly fenced; anything else is a single message.
+PLAN=$(printf '%s\n' "$MSG" | grep -v '^```' | jq -c 'select(.commits | type == "array" and length > 1)' 2>/dev/null)
+if [[ -n $PLAN ]]; then
+  split_commit "$PLAN"
+  exit
+fi
+
+MSG=$(printf '%s\n' "$MSG" | clean)
 
 if [ -z "$MSG" ]; then
-  echo "No commit message generated." >&2
+  echo "Claude answered with nothing to use as a message." >&2
   exit 1
 fi
 
-# When the staged changes are unrelated, Claude answers with a suggested split -- prose,
-# bold headings and one fenced message per commit -- and that whole answer used to become
-# the commit, so GitLab showed a sentence as the title and raw markdown below it. Commit
-# only what starts with a Conventional Commits subject; otherwise show the answer, which
-# is still worth reading, and leave the index alone.
-SUBJECT=$(printf '%s\n' "$MSG" | head -n 1)
-if ! printf '%s\n' "$SUBJECT" | grep -q -E '^[a-z]+(\([^)]+\))?!?: [^ ]'; then
+# A split used to come back as prose -- bold headings, one fenced message per commit -- and
+# that whole answer once became a single commit, a sentence for a title and raw markdown
+# below it. Splits come as JSON now, handled above; anything else that is not a
+# Conventional Commits message is shown and not committed.
+if ! is_conventional "$MSG"; then
   printf '%s\n\n' "$MSG"
-  echo "Not committed: that is not a single commit message. Stage less and try again." >&2
+  echo "Not committed: Claude answered with the above instead of a commit message." >&2
   exit 1
 fi
 
