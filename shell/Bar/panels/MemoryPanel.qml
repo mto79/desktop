@@ -41,10 +41,17 @@ Popup {
   property real zramOriginal: 0
   property real zramCompressed: 0
 
-  readonly property bool zramActive: zramOriginal > 0 && zramCompressed > 0
+  // Below a few megabytes the ratio is noise -- 51x on a handful of kernel pages -- so
+  // it is only claimed once there is something in zram to have compressed.
+  readonly property bool zramActive: zramOriginal > 16777216 && zramCompressed > 0
   readonly property real zramRatio: zramActive ? zramOriginal / zramCompressed : 0
 
   property var topProcesses: []
+
+  // The share of the last ten seconds some task spent waiting on memory -- reclaim,
+  // swap-in, compaction. Used and free say how full memory is; this says whether that
+  // fullness is costing anything, which is the question behind opening the panel.
+  property real pressure: -1
 
   function gb(kb) {
     return (kb / 1048576).toFixed(1) + "G";
@@ -145,7 +152,19 @@ Popup {
     }
   }
 
+  FileView {
+    id: psi
+
+    path: "/proc/pressure/memory"
+    printErrors: false
+    onLoaded: {
+      var m = text().match(/^some avg10=([\d.]+)/m);
+      root.pressure = m ? parseFloat(m[1]) : -1;
+    }
+  }
+
   function refresh() {
+    psi.reload();
     meminfo.reload();
     zramStat.reload();
     processProbe.reload();
@@ -175,16 +194,77 @@ Popup {
     width: parent.width
     spacing: 2
 
-    PanelSection {
-      title: "Memory"
-      value: root.memTotal > 0 ? root.gb(root.used) + " of " + root.gb(root.memTotal) : ""
+    // --- How full, big --------------------------------------------------------------------
+    Item {
+      width: parent.width
+      height: 56
+
+      Text {
+        id: heroIcon
+
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: "\u{f035b}"
+        color: Color.popupText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.iconSize * 2.4
+      }
+
+      Column {
+        anchors.left: heroIcon.right
+        anchors.leftMargin: 12
+        anchors.right: heroPercent.left
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 2
+
+        Text {
+          text: "Memory"
+          color: Color.popupText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize + 2
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width
+          text: {
+            if (root.memTotal <= 0)
+              return "";
+            var parts = [root.gb(root.used) + " of " + root.gb(root.memTotal)];
+            if (root.pressure > 1)
+              parts.push("under pressure");
+            return parts.join("  ·  ").toUpperCase();
+          }
+          color: root.pressure > 10 ? Color.popupUrgent : Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 2
+          font.bold: true
+          font.letterSpacing: 1
+          elide: Text.ElideRight
+        }
+      }
+
+      Text {
+        id: heroPercent
+
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.memTotal > 0 ? root.percent(root.used, root.memTotal) : "—"
+        color: root.memTotal > 0 && root.used / root.memTotal >= 0.9 ? Color.popupUrgent : Color.popupText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize * 2.2
+        font.bold: true
+      }
     }
 
     // The bar carries the point of the whole panel: the solid part is spoken for, the
     // faded part is cache you will get back.
     Item {
       width: parent.width
-      height: 26
+      height: 18
 
       PanelMeter {
         anchors.left: parent.left
@@ -197,84 +277,40 @@ Popup {
       }
     }
 
-    PanelRow {
-      icon: "\u{f035b}"
-      label: "Used"
-      sublabel: root.percent(root.used, root.memTotal) + " of total"
-      enabled: false
+    Grid {
+      width: parent.width
+      columns: 2
+      topPadding: 6
+      bottomPadding: 4
 
-      Text {
-        text: root.gb(root.used)
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "Used"
+        value: root.gb(root.used)
       }
-    }
-
-    PanelRow {
-      icon: "\u{f0877}"
-      label: "Available"
-      sublabel: "what a new program could take"
-      enabled: false
-
-      Text {
-        text: root.gb(root.memAvailable)
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "Available"
+        value: root.gb(root.memAvailable)
       }
-    }
-
-    PanelRow {
-      icon: "\u{f0a38}"
-      label: "Cache and buffers"
-      sublabel: "given back under pressure"
-      enabled: false
-
-      Text {
-        text: root.gb(root.cached)
-        color: Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "Cache"
+        value: root.gb(root.cached)
+        muted: true
       }
-    }
-
-    PanelSection {
-      title: root.zramActive ? "Swap (zram)" : "Swap"
-      value: root.swapTotal > 0 ? root.percent(root.swapUsed, root.swapTotal) + " used" : "none"
-      rule: true
-      visible: root.swapTotal > 0
-    }
-
-    PanelRow {
-      visible: root.swapTotal > 0
-      icon: "\u{f0322}"
-      label: "Swap in use"
-      sublabel: root.mb(root.swapUsed) + " of " + root.gb(root.swapTotal)
-      enabled: false
-
-      Text {
-        text: root.percent(root.swapUsed, root.swapTotal)
-        color: root.swapUsed > root.swapTotal * 0.5 ? Color.popupUrgent : Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "Pressure"
+        value: root.pressure < 0 ? "—" : (root.pressure < 0.1 ? "none" : root.pressure.toFixed(1) + "%")
+        warn: root.pressure > 10
       }
-    }
-
-    // The number that justifies zram existing: swapped pages are held in RAM, so what
-    // matters is how much smaller they got, not how many there are.
-    PanelRow {
-      visible: root.zramActive
-      icon: "\u{f04c1}"
-      label: "Compression"
-      sublabel: Math.round(root.zramOriginal / 1048576) + "M stored in " + Math.round(root.zramCompressed / 1048576) + "M"
-      enabled: false
-
-      Text {
-        text: root.zramRatio.toFixed(1) + "x"
-        color: Color.popupAccent
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: root.zramActive ? "zram" : "Swap"
+        value: root.swapTotal > 0 ? root.mb(root.swapUsed) + " / " + root.gb(root.swapTotal) : "none"
+        warn: root.swapTotal > 0 && root.swapUsed > root.swapTotal * 0.5
+      }
+      // The number that justifies zram existing: swapped pages are held in RAM, so what
+      // matters is how much smaller they got, not how many there are.
+      Stat {
+        label: "Compressed"
+        value: root.zramActive ? root.zramRatio.toFixed(1) + "×" : "—"
       }
     }
 
@@ -318,6 +354,36 @@ Popup {
         root.close();
         Quickshell.execDetached(root.launch(["desktop-launch-tui", "btop"]));
       }
+    }
+  }
+
+  component Stat: Item {
+    property string label: ""
+    property string value: ""
+    property bool warn: false
+    property bool muted: false
+
+    width: column.width / 2
+    height: 22
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: 6
+      anchors.verticalCenter: parent.verticalCenter
+      text: parent.label
+      color: Color.popupMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
+    }
+
+    Text {
+      anchors.right: parent.right
+      anchors.rightMargin: 10
+      anchors.verticalCenter: parent.verticalCenter
+      text: parent.value
+      color: parent.warn ? Color.popupUrgent : (parent.muted ? Color.popupMuted : Color.popupText)
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
     }
   }
 }
