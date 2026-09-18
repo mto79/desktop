@@ -2,8 +2,10 @@
 
 """The Claude Code sessions on this machine and what each is doing, newest need first.
 
-    desktop-agent-sessions          # a line per session
-    desktop-agent-sessions --json   # what the bar and the AI panel read
+    desktop-agent-sessions                # a line per session
+    desktop-agent-sessions --json         # what the bar and the AI panel read
+    desktop-agent-sessions --tmux-status  # "● 1 waiting · 2 working", for tmux's status-right
+    desktop-agent-sessions --pick         # choose one in fzf and jump to its pane
 
 Read from the records desktop-agent-state writes from Claude Code's hooks, one per session.
 Those are only ever removed by a SessionEnd hook, and a session that crashes, is killed, or
@@ -69,7 +71,7 @@ def duration(seconds):
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
-def sessions(now=None):
+def sessions(now=None, targets=True):
     now = time.time() if now is None else now
     home = str(Path.home())
     found = []
@@ -104,14 +106,94 @@ def sessions(now=None):
             "project": os.path.basename(cwd.rstrip("/")) or cwd or "?",
             "pane": record.get("pane") or "",
             "socket": record.get("socket") or "",
-            "target": pane_target(record.get("pane"), record.get("socket")),
+            "target": pane_target(record.get("pane"), record.get("socket")) if targets else None,
         })
 
     found.sort(key=lambda s: (ORDER[s["state"]], -s["since"]))
     return found
 
 
+def tmux_option(name, default):
+    try:
+        value = subprocess.run(["tmux", "show-options", "-gqv", name],
+                               capture_output=True, text=True, timeout=2).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        value = ""
+    return value or default
+
+
+def tmux_status():
+    """What every tmux status bar shows, whichever session it belongs to.
+
+    The tab marks only cover the windows of the session you are in, so an agent waiting
+    in another one was invisible from here. Counted across all of them, and nothing at all
+    when nothing is going on -- a status bar that always says "0 waiting" stops being read.
+    Waiting in the tabs' own colour; finished turns are left to the tabs, since "done" also
+    covers sessions that finished hours ago and were seen.
+
+    Runs every status-interval, for every client, so it asks tmux nothing per session.
+    """
+    listed = sessions(targets=False)
+    waiting = sum(1 for s in listed if s["state"] == "waiting")
+    working = sum(1 for s in listed if s["state"] == "working")
+    parts = []
+    if waiting:
+        colour = tmux_option("@agent-waiting-colour", "red")
+        parts.append(f"#[fg={colour}]● {waiting} waiting#[default]")
+    if working:
+        parts.append(f"· {working} working")
+    print("  ".join(parts) + ("   " if parts else ""), end="")
+    return 0
+
+
+def pick():
+    """The list in fzf, from a tmux popup: Enter jumps to the session's pane.
+
+    The jump is switch-client, which moves the client that opened the popup -- to another
+    session if need be, which is the point: the tabs cannot show those. A session in a
+    different tmux server cannot be switched to from this one, and says how to reach it.
+    """
+    listed = sessions()
+    if not listed:
+        print("No Claude Code sessions with hooks running.")
+        input("\nPress Enter to close. ")
+        return 0
+
+    colours = {"waiting": "\033[31m", "working": "\033[33m", "done": "\033[32m", "ready": "\033[2m"}
+    lines = []
+    for i, s in enumerate(listed):
+        where = s["target"] or "closed pane"
+        lines.append(f"{i}\t{colours[s['state']]}{s['state']:<8}\033[0m {s['for']:>6}  "
+                     f"{s['project']:<24} \033[2m{where}\033[0m")
+    try:
+        chosen = subprocess.run(
+            ["fzf", "--ansi", "--no-sort", "--layout=reverse", "--delimiter=\t", "--with-nth=2",
+             "--prompt=agent> ", "--header=Enter jumps to it · Esc closes", "--info=hidden"],
+            input="\n".join(lines), capture_output=True, text=True,
+        ).stdout.strip()
+    except OSError:
+        print("fzf is not installed.")
+        return 1
+    if not chosen:
+        return 0
+
+    s = listed[int(chosen.split("\t", 1)[0])]
+    if not s["target"]:
+        input("That session's pane has closed. Press Enter. ")
+        return 0
+    own = os.environ.get("TMUX", "").split(",")[0]
+    if s["socket"] and own and os.path.realpath(s["socket"]) != os.path.realpath(own):
+        input(f"It runs in another tmux server: tmux -S {s['socket']} attach -t {s['target']}\nPress Enter. ")
+        return 0
+    subprocess.run(["tmux", "switch-client", "-t", s["target"]])
+    return 0
+
+
 def main():
+    if "--tmux-status" in sys.argv[1:]:
+        return tmux_status()
+    if "--pick" in sys.argv[1:]:
+        return pick()
     listed = sessions()
     if "--json" in sys.argv[1:]:
         counts = {state: sum(1 for s in listed if s["state"] == state) for state in ORDER}
