@@ -15,7 +15,7 @@ trap 'rm -rf "$sandbox"' EXIT
 # A PATH holding only what is named here, so a real dnf or flatpak on this machine can
 # neither answer for the stubs nor be run by the test.
 mkdir -p "$sandbox/path" "$sandbox/runtime" "$sandbox/state"
-for tool in bash env git jq awk grep find flock timeout mv cat mkdir dirname sleep tr; do
+for tool in bash env git jq awk grep find flock timeout mv cat mkdir dirname sleep tr sed date; do
   ln -s "$(command -v "$tool")" "$sandbox/path/$tool"
 done
 ln -s "$ROOT/bin/desktop-cmd-present" "$sandbox/path/"
@@ -57,7 +57,9 @@ notifications() { [[ -e $sandbox/notified ]] && grep -c . "$sandbox/notified" ||
 out=$(sleep 30 | check_updates --json)
 check "a check under the bar does not wait on dnf's question" test -n "$out"
 check "packages are counted, and the obsoleting section is not" \
-  test "$(jq -c '.sources' <<<"$out")" = '[{"id":"dnf","count":2,"label":"Fedora packages"}]'
+  test "$(jq -c '.sources | map({id, count, label})' <<<"$out")" = '[{"id":"dnf","count":2,"label":"Fedora packages"}]'
+check "and named, without their architecture" test "$(jq -c '.sources[0].items' <<<"$out")" = '["kernel","mesa"]'
+check "the check says when it ran" test "$(jq '.checked > 1700000000' <<<"$out")" = true
 check "being level with upstream is not an update, and prints nothing else" \
   test "$(check_updates)" = "2 Fedora packages"
 
@@ -73,6 +75,22 @@ git -C "$sandbox/other" -c user.name=t -c user.email=t@t commit -q --allow-empty
 git -C "$sandbox/other" push -q 2>/dev/null
 out=$(check_updates --json --notify)
 check "commits upstream are counted" grep -q '{"id":"desktop","count":1,' <<<"$out"
+check "and listed by subject" test "$(jq -c '.sources[] | select(.id == "desktop") | .items' <<<"$out")" = '["two"]'
+
+# A check a minute old is reused, unless the panel asks for a fresh one.
+env -i PATH="$sandbox/path" HOME="$sandbox" SANDBOX="$sandbox" DESKTOP_PATH="$sandbox/desktop" \
+  XDG_RUNTIME_DIR="$sandbox/runtime" XDG_STATE_HOME="$sandbox/state" \
+  bash "$ROOT/bin/desktop-update-available" --json >/dev/null
+touch "$sandbox/no-packages"
+reused=$(env -i PATH="$sandbox/path" HOME="$sandbox" SANDBOX="$sandbox" DESKTOP_PATH="$sandbox/desktop" \
+  XDG_RUNTIME_DIR="$sandbox/runtime" XDG_STATE_HOME="$sandbox/state" \
+  bash "$ROOT/bin/desktop-update-available" --json)
+fresh=$(env -i PATH="$sandbox/path" HOME="$sandbox" SANDBOX="$sandbox" DESKTOP_PATH="$sandbox/desktop" \
+  XDG_RUNTIME_DIR="$sandbox/runtime" XDG_STATE_HOME="$sandbox/state" \
+  bash "$ROOT/bin/desktop-update-available" --json --fresh)
+rm "$sandbox/no-packages"
+check "a check a minute old is reused" grep -q '"id":"dnf"' <<<"$reused"
+check "and --fresh checks again" lacks '"id":"dnf"' <<<"$fresh"
 check "and a new source is announced" test "$(notifications)" = 2
 
 # desktop-update ran: nothing left, so the next updates are news again.

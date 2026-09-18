@@ -5,6 +5,11 @@
 #   desktop-update-available                  # one line per source with updates, or nothing
 #   desktop-update-available --json           # the same, counted, for the bar's tooltip
 #   desktop-update-available --json --notify  # and a notification when something is new
+#   desktop-update-available --json --fresh   # check now, even if a check just ran
+#
+# The JSON names what each source would update, for the update panel to show, and when
+# the check ran: {"checked":1789723682,"sources":[{"id":"dnf","count":207,
+# "label":"Fedora packages","items":["kernel","mesa-dri-drivers",...]}]}.
 #
 # The plain form is what waybar reads -- any output lights its icon -- so nothing but an
 # update may ever be printed there. Errors go to stderr. This script used to print "Error:
@@ -27,11 +32,12 @@ exec </dev/null
 DESKTOP_PATH=${DESKTOP_PATH:-$HOME/.local/share/desktop}
 STATE=${XDG_STATE_HOME:-$HOME/.local/state}/desktop/updates-notified
 
-json=false notify=false
+json=false notify=false fresh=false
 for arg in "$@"; do
   case $arg in
   --json) json=true ;;
   --notify) notify=true ;;
+  --fresh) fresh=true ;;
   esac
 done
 
@@ -51,16 +57,20 @@ print() {
   fi
 }
 
-if [[ -n $(find "$CACHE" -newermt '-60 seconds' 2>/dev/null) ]]; then
+# --fresh still takes the lock: a check already running is the one to wait for.
+if ! $fresh && [[ -n $(find "$CACHE" -newermt '-60 seconds' 2>/dev/null) ]]; then
   print
   exit 0
 fi
 
-ids=() counts=() labels=()
+ids=() counts=() labels=() items=()
 
+# found <id> <count> <label> <items, one per line>. The items are names for a person --
+# the package, the app, the device, the commit subject -- each listed once.
 found() {
   ((${2:-0} > 0)) || return 0
   ids+=("$1") counts+=("$2") labels+=("$3")
+  items+=("$(awk 'NF && !seen[$0]++' <<<"${4:-}")")
 }
 
 # This desktop, which desktop-update brings up to date with `git pull`. Behind the
@@ -68,32 +78,35 @@ found() {
 if git -C "$DESKTOP_PATH" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
   GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$DESKTOP_PATH" fetch -q 2>/dev/null ||
     echo "desktop-update-available: could not fetch $DESKTOP_PATH" >&2
-  found desktop "$(git -C "$DESKTOP_PATH" rev-list --count 'HEAD..@{u}' 2>/dev/null)" "desktop commits"
+  found desktop "$(git -C "$DESKTOP_PATH" rev-list --count 'HEAD..@{u}' 2>/dev/null)" "desktop commits" \
+    "$(git -C "$DESKTOP_PATH" log --format=%s 'HEAD..@{u}' 2>/dev/null)"
 fi
 
 # dnf lists one "name.arch version repo" line per package, then an "Obsoleting packages"
 # section that repeats some of them; only the part before it is counted.
 if desktop-cmd-present dnf; then
   timeout 120 dnf -q makecache >/dev/null 2>&1
-  found dnf "$(timeout 120 dnf -q check-upgrade 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 { n++ } END { print n + 0 }')" \
-    "Fedora packages"
+  packages=$(timeout 120 dnf -q check-upgrade 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 { print $1 }')
+  # "kernel-core.x86_64": the name without its architecture.
+  found dnf "$(grep -c . <<<"$packages")" "Fedora packages" "$(sed 's/\.[^.]*$//' <<<"$packages")"
 fi
 
 if desktop-cmd-present fwupdmgr; then
   timeout 60 fwupdmgr refresh >/dev/null 2>&1
-  found firmware "$(timeout 60 fwupdmgr get-updates --json 2>/dev/null | jq '[.Devices[]? | select((.Releases // []) | length > 0)] | length' 2>/dev/null)" \
-    "firmware updates"
+  devices=$(timeout 60 fwupdmgr get-updates --json 2>/dev/null |
+    jq -r '.Devices[]? | select((.Releases // []) | length > 0) | .Name' 2>/dev/null)
+  found firmware "$(grep -c . <<<"$devices")" "firmware updates" "$devices"
 fi
 
 if desktop-cmd-present flatpak; then
   timeout 60 flatpak update --appstream -y >/dev/null 2>&1
-  found flatpak "$(timeout 60 flatpak remote-ls --updates --app --runtime --columns=application 2>/dev/null | grep -c .)" \
-    "Flatpaks"
+  refs=$(timeout 60 flatpak remote-ls --updates --app --runtime --columns=name 2>/dev/null)
+  found flatpak "$(grep -c . <<<"$refs")" "Flatpaks" "$refs"
 fi
 
 if desktop-cmd-present cargo && cargo install-update --version >/dev/null 2>&1; then
-  found cargo "$(timeout 60 cargo install-update --list 2>/dev/null | awk 'NR > 1 && $NF == "Yes" { n++ } END { print n + 0 }')" \
-    "cargo binaries"
+  crates=$(timeout 60 cargo install-update --list 2>/dev/null | awk 'NR > 1 && $NF == "Yes" { print $1 }')
+  found cargo "$(grep -c . <<<"$crates")" "cargo binaries" "$crates"
 fi
 
 # One notification when there is something new to update, not one per poll: the sources
@@ -118,8 +131,9 @@ if $notify; then
 fi
 
 for i in "${!ids[@]}"; do
-  jq -nc --arg id "${ids[$i]}" --argjson count "${counts[$i]}" --arg label "${labels[$i]}" \
-    '{id: $id, count: $count, label: $label}'
-done | jq -sc '{sources: .}' >"$CACHE.new" && mv "$CACHE.new" "$CACHE"
+  jq -nc --arg id "${ids[$i]}" --argjson count "${counts[$i]}" --arg label "${labels[$i]}" --arg items "${items[$i]}" \
+    '{id: $id, count: $count, label: $label, items: ($items | split("\n") | map(select(. != "")))}'
+done | jq -sc --argjson checked "$(date +%s)" '{checked: $checked, sources: .}' >"$CACHE.new" &&
+  mv "$CACHE.new" "$CACHE"
 print
 exit 0

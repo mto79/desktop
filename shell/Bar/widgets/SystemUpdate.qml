@@ -23,13 +23,18 @@ BarItem {
 
   visible: available
   implicitWidth: visible ? content.implicitWidth + Style.itemPaddingH * 2 : 0
-  command: ["desktop-launch-floating-terminal-with-presentation", "desktop-update"]
+  // The panel says what the update is; the right click still runs it straight away.
+  panelId: "updates"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
+  rightCommand: ["desktop-launch-floating-terminal-with-presentation", "desktop-update"]
 
   tooltip: {
     var lines = ["Updates available"];
     for (var i = 0; i < sources.length; i++)
       lines.push(sources[i].count + " " + sources[i].label);
-    lines.push("", "Click to update");
+    lines.push("", "Click for details  ·  right-click to update");
     return lines.join("\n");
   }
 

@@ -151,6 +151,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  UpdatesPanel {
+    id: updatesPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   Variants {
     model: Quickshell.screens
 
