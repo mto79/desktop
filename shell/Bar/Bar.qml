@@ -130,6 +130,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  VpnPanel {
+    id: vpnPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   Variants {
     model: Quickshell.screens
 

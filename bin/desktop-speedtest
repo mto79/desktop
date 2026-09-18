@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+# desktop-speedtest: Latency, download and upload, measured against Cloudflare.
+#
+#   desktop-speedtest          # a readable summary
+#   desktop-speedtest --json   # one JSON line per stage, what the network panel reads
+#
+# Built on curl and speed.cloudflare.com rather than speedtest-cli or Ookla's binary:
+# curl is already on every install, so there is no package to forget, and Cloudflare
+# answers from the nearest edge, which is the question a panel is asking -- is this link
+# fast right now -- rather than a benchmark against a server picked from a list.
+#
+# Each direction is bounded by time, not by size. A fixed payload that suits a hotel
+# Wi-Fi finishes in a third of a second on fibre, too short to say anything, and one that
+# suits fibre would keep a slow link busy for minutes. Cloudflare refuses a single
+# download of 100 MB or more -- with a 403 that curl counts as success -- and meters big
+# ones, so the test is a run of 1 MB transfers, several at a time, until the time or the
+# cap is reached, and only the ones that finished with a 200 are counted.
+#
+# Every --json line carries the whole state so far, so a reader only ever keeps the last
+# one: {"stage":"download","server":"AMS","latency":18.4,"download":null,"upload":null}.
+# Rates are Mbit/s, latency milliseconds. The last line has stage "done" or "error".
+
+set -uo pipefail
+
+BASE=${DESKTOP_SPEEDTEST_URL:-https://speed.cloudflare.com}
+CHUNK=${DESKTOP_SPEEDTEST_CHUNK:-1000000}
+MAX_CHUNKS=${DESKTOP_SPEEDTEST_MAX_CHUNKS:-150}
+STREAMS=${DESKTOP_SPEEDTEST_STREAMS:-6}
+SECONDS_EACH=${DESKTOP_SPEEDTEST_SECONDS:-5}
+
+json=false
+[[ ${1:-} == "--json" ]] && json=true
+
+stage="" server="" latency=null download=null upload=null error=""
+
+emit() {
+  $json || return 0
+  local message=""
+  [[ -n $error ]] && message=$(printf '%s' "$error" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"stage":"%s","server":"%s","latency":%s,"download":%s,"upload":%s,"error":"%s"}\n' \
+    "$stage" "$server" "$latency" "$download" "$upload" "$message"
+}
+
+fail() {
+  error=$1 stage=error
+  emit
+  $json || echo "speedtest: $error" >&2
+  exit 1
+}
+
+stage=latency
+emit
+
+# The edge that answered, from the CF-RAY header's suffix: "a3ce67b93a2ca100-AMS".
+server=$(curl -sI --max-time 5 "$BASE/__down?bytes=0" | tr -d '\r' |
+  sed -n 's/^[Cc][Ff]-[Rr][Aa][Yy]: .*-\([A-Z]*\)$/\1/p')
+
+# Time to first byte less the connection setup, so it is the round trip rather than the
+# TLS handshake. The median of five, since one slow sample on Wi-Fi says little.
+samples=()
+for _ in 1 2 3 4 5; do
+  sample=$(curl -s -o /dev/null --max-time 5 -w '%{time_pretransfer} %{time_starttransfer}' "$BASE/__down?bytes=0") ||
+    continue
+  samples+=("$(awk '{ printf "%.1f", ($2 - $1) * 1000 }' <<<"$sample")")
+done
+((${#samples[@]} > 0)) || fail "could not reach $BASE"
+latency=$(printf '%s\n' "${samples[@]}" | sort -n | awk '{ v[NR] = $1 } END { print v[int((NR + 1) / 2)] }')
+
+stage=download
+emit
+
+# Mbit/s: the bytes of every transfer that came back 200, over the wall time the run took.
+# The transfers still in flight at the deadline are left out, which on a run of hundreds
+# costs a fraction of a percent. Line-buffered, because curl buffers -w into a pipe and the
+# kill at the deadline would take every line with it.
+#
+# Prints the rate, or "limited <seconds>" when Cloudflare answered 429 and nothing else.
+measure() {
+  local start=$EPOCHREALTIME
+  timeout "$SECONDS_EACH" stdbuf -oL curl -s --parallel --parallel-max "$STREAMS" -o /dev/null \
+    -w '%{http_code} %{size_download} %{size_upload} %header{retry-after}\n' "$@" >"$report"
+  local elapsed
+  elapsed=$(awk -v a="$start" -v b="$EPOCHREALTIME" 'BEGIN { print b - a }')
+  awk -v elapsed="$elapsed" '
+    $1 == 200 { bytes += $2 + $3 }
+    $1 == 429 { limited = 1; if ($4 > wait) wait = $4 }
+    END {
+      if (bytes > 0) printf "%.1f", bytes * 8 / elapsed / 1000000
+      else if (limited) print "limited", wait + 0
+    }' "$report"
+}
+
+# Cloudflare meters large downloads per address, and once over it answers 429 for up to
+# an hour. That is worth saying in words -- it is not the link that failed -- along with
+# how long, which it tells us.
+check_rate() {
+  if [[ $rate == limited* ]]; then
+    local minutes=$(((${rate#limited } + 59) / 60))
+    ((minutes > 0)) || minutes=a few
+    fail "Rate-limited by Cloudflare, try again in $minutes min"
+  fi
+  [[ -n $rate ]] || fail "$1 failed"
+}
+
+report=$(mktemp)
+payload=$(mktemp)
+trap 'rm -f "$report" "$payload"' EXIT
+
+# Small chunks, several at once. Cloudflare's meter is on large downloads -- 10 MB and up
+# were refused for an hour after a few tests, 1 MB ones never -- and parallel requests
+# keep a fast link full where one small request at a time would mostly measure the round
+# trip. The glob caps a test at CHUNK x MAX_CHUNKS each way: 150 MB, which a gigabit link
+# moves in just over a second, enough to measure and cheap enough to repeat.
+rate=$(measure "$BASE/__down?bytes=$CHUNK&n=[1-$MAX_CHUNKS]")
+check_rate download
+download=$rate
+
+stage=upload
+emit
+
+head -c "$CHUNK" /dev/zero >"$payload"
+rate=$(measure --data-binary "@$payload" "$BASE/__up?n=[1-$MAX_CHUNKS]")
+check_rate upload
+upload=$rate
+
+stage=done
+emit
+
+$json || printf 'Server    %s\nLatency   %s ms\nDownload  %s Mbit/s\nUpload    %s Mbit/s\n' \
+  "${server:-?}" "$latency" "$download" "$upload"
+exit 0

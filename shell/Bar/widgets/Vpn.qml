@@ -28,10 +28,12 @@ BarItem {
   // The names live here now that the bar shows only the glyph.
   tooltip: connected ? "VPN\n" + names.join("\n") : "No VPN connected"
 
-  // The network panel carries the VPN list, so the bar icon opens the same place the
-  // network icon does.
+  // Its own panel: the profiles and nothing else. It used to open the network panel, which
+  // made this a second network button with the tunnels at the bottom of a Wi-Fi list.
+  panelId: "vpn"
+
   onClicked: if (popups)
-    popups.toggle("network", this)
+    popups.toggle(root.panelId, this)
 
   IconLabel {
     icon: root.connected ? "\u{f099d}" : "\u{f099c}"

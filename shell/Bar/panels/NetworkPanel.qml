@@ -5,7 +5,7 @@ import Quickshell.Networking
 import qs.Commons
 import qs.Ui
 
-// Network panel: Wi-Fi networks, wired link state, and VPN profiles.
+// Network panel: Wi-Fi networks, wired link state, and a speed test.
 //
 // Wi-Fi comes from Quickshell's Networking service, which is a NetworkManager binding
 // -- no nmcli polling, unlike the bar widget that predates this panel. Two things about
@@ -18,8 +18,7 @@ import qs.Ui
 //     reason PopupHost keeps exactly one instance of this panel. It runs only while the
 //     panel is open, so a closed bar is not burning radio time.
 //
-// VPN still goes through nmcli: the service models devices and Wi-Fi, and has no
-// concept of a VPN profile.
+// VPN profiles have their own panel, VpnPanel, opened from the VPN icon.
 Popup {
   id: root
 
@@ -205,9 +204,7 @@ Popup {
   onVisibleChanged: {
     if (visible) {
       root.rebuild();
-      vpnProbe.reload();
     } else {
-      root.vpnError = "";
       root.filter = "";
       root.cursor = -1;
       root.pskTarget = null;
@@ -263,103 +260,62 @@ Popup {
     root.promptForPsk(network);
   }
 
-  // --- VPN ------------------------------------------------------------------------
+  // --- Speed test ------------------------------------------------------------------
   //
-  // NetworkManager profiles of type vpn or wireguard. Raw `openvpn --config` processes
-  // are the other half of the story on this machine -- see desktop-status-openvpn --
-  // and those stay with the terminal flow in the Advanced section, because starting one
-  // needs sudo.
+  // desktop-speedtest prints the whole state on every line, so the last line read is the
+  // result. It lives on the panel rather than inside the row: the panel is one instance
+  // for the life of the shell, so the last result is still there when it is reopened.
+  // A test outlives the panel being closed -- it is bounded to a few seconds, and
+  // killing it halfway would only throw away a number already half paid for.
 
-  property var vpns: []
-  property string vpnError: ""
-  property string vpnBusy: ""
+  property var speed: null
 
-  // nmcli -t escapes a literal colon inside a field as "\:", so a plain split() would
-  // tear a profile name like "work:eu" in half.
-  function splitFields(line) {
-    var fields = [];
-    var current = "";
-    for (var i = 0; i < line.length; i++) {
-      var c = line.charAt(i);
-      if (c === "\\" && i + 1 < line.length) {
-        current += line.charAt(++i);
-      } else if (c === ":") {
-        fields.push(current);
-        current = "";
-      } else {
-        current += c;
-      }
-    }
-    fields.push(current);
-    return fields;
+  readonly property bool speedRunning: speedtest.running
+
+  function speedSummary(data) {
+    if (!data)
+      return "";
+    var parts = [];
+    if (data.download !== null)
+      parts.push("\u2193 " + Math.round(data.download) + " Mbit/s");
+    if (data.upload !== null)
+      parts.push("\u2191 " + Math.round(data.upload) + " Mbit/s");
+    if (data.latency !== null)
+      parts.push(Math.round(data.latency) + " ms");
+    return parts.join("  \u00b7  ");
   }
 
   Process {
-    id: vpnProbe
+    id: speedtest
 
-    command: ["nmcli", "-t", "-f", "NAME,TYPE,STATE", "connection", "show"]
+    command: ["desktop-speedtest", "--json"]
 
-    function reload() {
-      if (!running)
-        running = true;
-    }
-
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var lines = text.split("\n");
-        var list = [];
-        for (var i = 0; i < lines.length; i++) {
-          if (lines[i] === "")
-            continue;
-          var parts = root.splitFields(lines[i]);
-          if (parts.length < 3)
-            continue;
-          if (parts[1] !== "vpn" && parts[1] !== "wireguard")
-            continue;
-          list.push({
-            name: parts[0],
-            type: parts[1],
-            active: parts[2] === "activated"
-          });
-        }
-        root.vpns = list;
+    stdout: SplitParser {
+      onRead: line => {
+        try {
+          root.speed = JSON.parse(line);
+        } catch (e) {}
       }
-    }
-  }
-
-  Process {
-    id: vpnAction
-
-    property string target: ""
-
-    stderr: StdioCollector {
-      onStreamFinished: root.vpnError = text.trim().split("\n").pop()
     }
 
     onExited: exitCode => {
-      root.vpnBusy = "";
-      if (exitCode === 0)
-        root.vpnError = "";
-      vpnProbe.reload();
+      // A script that died before it could say why still has to say something.
+      if (exitCode !== 0 && (!root.speed || root.speed.stage !== "error"))
+        root.speed = {
+          stage: "error",
+          error: "speed test exited with " + exitCode,
+          latency: null,
+          download: null,
+          upload: null
+        };
     }
   }
 
-  function toggleVpn(entry) {
-    if (!entry || vpnBusy !== "" || vpnAction.running)
+  function runSpeedtest() {
+    if (speedtest.running)
       return;
-    vpnError = "";
-    vpnBusy = entry.name;
-    vpnAction.target = entry.name;
-    vpnAction.command = ["nmcli", "connection", entry.active ? "down" : "up", "id", entry.name];
-    vpnAction.running = true;
-  }
-
-  Timer {
-    interval: 5000
-    repeat: true
-    running: root.visible
-    triggeredOnStart: true
-    onTriggered: vpnProbe.reload()
+    speed = null;
+    speedtest.running = true;
   }
 
   contentWidth: Style.popupWidth
@@ -506,52 +462,34 @@ Popup {
     }
 
     PanelSection {
-      title: "VPN"
+      title: "Speed test"
       value: {
-        var count = 0;
-        for (var i = 0; i < root.vpns.length; i++)
-          if (root.vpns[i].active)
-            count++;
-        return count > 0 ? count + " active" : "off";
+        if (!root.speed)
+          return "";
+        if (root.speed.stage === "done" && root.speed.server)
+          return "via " + root.speed.server;
+        return "";
       }
       rule: true
-      visible: root.vpns.length > 0
     }
 
-    Repeater {
-      model: root.vpns
-
-      delegate: PanelRow {
-        required property var modelData
-
-        icon: modelData.active ? "\u{f099d}" : "\u{f099c}"
-        label: modelData.name
-        sublabel: root.vpnBusy === modelData.name ? (modelData.active ? "disconnecting..." : "connecting...") : modelData.type
-        active: modelData.active
-        enabled: root.vpnBusy === ""
-        onClicked: root.toggleVpn(modelData)
+    PanelRow {
+      icon: "\u{f04c5}"
+      label: {
+        if (!root.speedRunning)
+          return root.speed ? "Run again" : "Run a speed test";
+        var stage = root.speed ? root.speed.stage : "latency";
+        return stage === "latency" ? "Measuring latency..." : "Testing " + stage + "...";
       }
-    }
-
-    // nmcli fails rather than prompting when a profile's secrets are not stored, and
-    // silently doing nothing would look like a broken panel.
-    Item {
-      width: parent.width
-      height: visible ? 22 : 0
-      visible: root.vpnError !== ""
-
-      Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.vpnError
-        color: Color.popupUrgent
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 2
-        elide: Text.ElideRight
+      sublabel: {
+        if (root.speed && root.speed.stage === "error")
+          return root.speed.error;
+        var summary = root.speedSummary(root.speed);
+        return summary !== "" ? summary : "A few seconds, via Cloudflare";
       }
+      active: root.speedRunning
+      enabled: !root.speedRunning
+      onClicked: root.runSpeedtest()
     }
 
     PanelSection {
@@ -566,16 +504,6 @@ Popup {
       onClicked: {
         root.close();
         Quickshell.execDetached(root.launch(["desktop-launch-wifi"]));
-      }
-    }
-
-    PanelRow {
-      icon: "\u{f0993}"
-      label: "OpenVPN configs"
-      sublabel: "Profiles outside NetworkManager"
-      onClicked: {
-        root.close();
-        Quickshell.execDetached(root.launch(["desktop-launch-floating-terminal-with-presentation", "desktop-launch-openvpn"]));
       }
     }
 
