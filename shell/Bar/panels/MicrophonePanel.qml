@@ -127,81 +127,27 @@ Popup {
     spacing: 2
 
     // --- The input, big ---------------------------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.muted ? "\u{f036d}" : "\u{f036c}"
-        color: root.muted ? Color.popupUrgent : (root.recorders.length > 0 ? Color.popupAccent : Color.popupText)
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
-
-        // The icon is the mute button, as it is on the bar.
-        MouseArea {
-          anchors.fill: parent
-          cursorShape: Qt.PointingHandCursor
-          onClicked: if (root.source && root.source.audio)
-            root.source.audio.muted = !root.source.audio.muted
-        }
+    PanelHero {
+      icon: root.muted ? "\u{f036d}" : "\u{f036c}"
+      iconColor: root.muted ? Color.popupUrgent : (root.recorders.length > 0 ? Color.popupAccent : Color.popupText)
+      title: root.source ? root.label(root.source) : "No microphone"
+      status: {
+        if (!root.source)
+          return "";
+        if (root.muted)
+          return root.recorders.length > 0 ? "MUTED  ·  " + root.recorderNames.join(", ") + " GETS SILENCE" : "MUTED";
+        if (root.recorders.length === 0)
+          return "NOT IN USE";
+        return ("listening  ·  " + root.recorderNames.join(", "));
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroVolume.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          width: parent.width
-          text: root.source ? root.label(root.source) : "No microphone"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-          elide: Text.ElideRight
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (!root.source)
-              return "";
-            if (root.muted)
-              return root.recorders.length > 0 ? "MUTED  ·  " + root.recorderNames.join(", ").toUpperCase() + " GETS SILENCE" : "MUTED";
-            if (root.recorders.length === 0)
-              return "NOT IN USE";
-            return ("listening  ·  " + root.recorderNames.join(", ")).toUpperCase();
-          }
-          color: root.muted ? Color.popupUrgent : (root.recorders.length > 0 ? Color.popupAccent : Color.popupMuted)
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroVolume
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.source ? root.volume + "%" : "—"
-        color: root.muted ? Color.popupMuted : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-        font.strikeout: root.muted
-      }
+      statusColor: root.muted ? Color.popupUrgent : (root.recorders.length > 0 ? Color.popupAccent : Color.popupMuted)
+      value: root.source ? root.volume + "%" : "—"
+      valueColor: root.muted ? Color.popupMuted : Color.popupText
+      struck: root.muted
+      iconClickable: true
+      // The icon is the mute button, as it is on the bar.
+      onIconClicked: if (root.source && root.source.audio)
+        root.source.audio.muted = !root.source.audio.muted
     }
 
     Item {

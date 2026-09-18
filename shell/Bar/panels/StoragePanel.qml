@@ -193,71 +193,19 @@ Popup {
     spacing: 2
 
     // --- How full, big -----------------------------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: "󰋊"
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
+    PanelHero {
+      icon: "󰋊"
+      title: root.system ? root.driveName(root.system) : "Storage"
+      status: {
+        if (!root.system)
+          return "";
+        var parts = [root.bytes(root.system.avail) + " free"];
+        if (root.system.encrypted)
+          parts.push("encrypted");
+        return parts.join("  ·  ");
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroPercent.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          width: parent.width
-          text: root.system ? root.driveName(root.system) : "Storage"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-          elide: Text.ElideRight
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (!root.system)
-              return "";
-            var parts = [root.bytes(root.system.avail) + " free"];
-            if (root.system.encrypted)
-              parts.push("encrypted");
-            return parts.join("  ·  ").toUpperCase();
-          }
-          color: Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroPercent
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.system ? root.usedPercent + "%" : "—"
-        color: root.usedPercent >= 90 ? Color.popupUrgent : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+      value: root.system ? root.usedPercent + "%" : "—"
+      valueColor: root.usedPercent >= 90 ? Color.popupUrgent : Color.popupText
     }
 
     Item {
@@ -282,28 +230,28 @@ Popup {
       bottomPadding: 4
       visible: !!root.system
 
-      Stat {
+      PanelStat {
         label: "Used"
         value: root.system ? root.bytes(root.system.used) : "—"
       }
-      Stat {
+      PanelStat {
         label: "Size"
         value: root.system ? root.bytes(root.system.size) : "—"
       }
-      Stat {
+      PanelStat {
         label: "Filesystem"
         value: root.system ? root.system.fstype : "—"
       }
-      Stat {
+      PanelStat {
         label: "Snapshots"
         value: root.snapshots !== null && root.snapshots !== undefined ? String(root.snapshots) : "—"
       }
-      Stat {
+      PanelStat {
         label: "/boot"
         value: root.boot ? root.bootPercent + "% full" : "—"
         warn: root.bootPercent >= 80
       }
-      Stat {
+      PanelStat {
         label: "Boot free"
         value: root.boot ? root.bytes(root.boot.avail) : "—"
         warn: root.bootPercent >= 80
@@ -405,35 +353,6 @@ Popup {
         root.close();
         root.launch(["desktop-launch-disk", "/"]);
       }
-    }
-  }
-
-  component Stat: Item {
-    property string label: ""
-    property string value: ""
-    property bool warn: false
-
-    width: column.width / 2
-    height: 22
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: 6
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.label
-      color: Color.popupMuted
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
-    }
-
-    Text {
-      anchors.right: parent.right
-      anchors.rightMargin: 10
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.value
-      color: parent.warn ? Color.popupUrgent : Color.popupText
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
     }
   }
 }

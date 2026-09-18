@@ -262,73 +262,25 @@ Popup {
     spacing: 2
 
     // --- On or off, and how much is connected, big ---------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.powered ? "\u{f00af}" : "\u{f00b2}"
-        color: root.powered ? Color.popupText : Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
+    PanelHero {
+      icon: root.powered ? "\u{f00af}" : "\u{f00b2}"
+      iconColor: root.powered ? Color.popupText : Color.popupMuted
+      title: "Bluetooth"
+      status: {
+        if (!root.adapter)
+          return "NO ADAPTER";
+        if (root.blocked)
+          return "BLOCKED IN HARDWARE";
+        if (!root.powered)
+          return "OFF";
+        var parts = ["on"];
+        if (root.adapter.discovering)
+          parts.push("scanning");
+        return parts.join("  ·  ");
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroCount.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          text: "Bluetooth"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (!root.adapter)
-              return "NO ADAPTER";
-            if (root.blocked)
-              return "BLOCKED IN HARDWARE";
-            if (!root.powered)
-              return "OFF";
-            var parts = ["on"];
-            if (root.adapter.discovering)
-              parts.push("scanning");
-            return parts.join("  ·  ").toUpperCase();
-          }
-          color: root.powered ? Color.popupMuted : (root.blocked ? Color.popupUrgent : Color.popupMuted)
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroCount
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.powered ? String(root.connectedDevices.length) : "—"
-        color: root.connectedDevices.length > 0 ? Color.popupText : Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+      statusColor: root.powered ? Color.popupMuted : (root.blocked ? Color.popupUrgent : Color.popupMuted)
+      value: root.powered ? String(root.connectedDevices.length) : "—"
+      valueColor: root.connectedDevices.length > 0 ? Color.popupText : Color.popupMuted
     }
 
     PanelRow {

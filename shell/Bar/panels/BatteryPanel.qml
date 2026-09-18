@@ -179,62 +179,13 @@ Popup {
     spacing: 2
 
     // --- The level, big enough to read from across the desk --------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.icon
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
-      }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroPercent.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          text: "Battery"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-        }
-
-        Text {
-          width: parent.width
-          text: root.status.toUpperCase()
-          color: root.charging ? Color.popupAccent : Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroPercent
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.present ? root.percent + "%" : "—"
-        color: root.onBattery && root.percent <= 10 ? Color.popupUrgent : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+    PanelHero {
+      icon: root.icon
+      title: "Battery"
+      status: root.status
+      statusColor: root.charging ? Color.popupAccent : Color.popupMuted
+      value: root.present ? root.percent + "%" : "—"
+      valueColor: root.onBattery && root.percent <= 10 ? Color.popupUrgent : Color.popupText
     }
 
     Item {
@@ -282,11 +233,11 @@ Popup {
 
       // Holding, there is no time to count down and no rate worth quoting -- "charging at
       // 0 W" reads like a fault -- so the row says where the power comes from instead.
-      Stat {
+      PanelStat {
         label: root.holding ? "Power" : (root.onBattery ? "Time left" : "Time to full")
         value: root.holding ? "AC" : (root.remaining !== "" ? root.remaining : "—")
       }
-      Stat {
+      PanelStat {
         label: root.holding ? "Battery" : (root.onBattery ? "Drawing" : "Charging at")
         value: {
           if (root.holding)
@@ -294,19 +245,19 @@ Popup {
           return root.info.watts !== undefined && root.info.watts !== null ? root.info.watts + " W" : "—";
         }
       }
-      Stat {
+      PanelStat {
         label: "Health"
         value: root.info.health ? root.info.health + "%" : "—"
       }
-      Stat {
+      PanelStat {
         label: "Capacity"
         value: root.info.full_wh ? root.info.full_wh + " Wh" : "—"
       }
-      Stat {
+      PanelStat {
         label: "Cycles"
         value: root.info.cycles ? String(root.info.cycles) : "—"
       }
-      Stat {
+      PanelStat {
         label: root.limitApplies ? "Limit" : "Mode"
         value: {
           if (root.limitApplies)
@@ -384,34 +335,6 @@ Popup {
           }
         }
       }
-    }
-  }
-
-  component Stat: Item {
-    property string label: ""
-    property string value: ""
-
-    width: column.width / 2
-    height: 22
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: 6
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.label
-      color: Color.popupMuted
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
-    }
-
-    Text {
-      anchors.right: parent.right
-      anchors.rightMargin: 10
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.value
-      color: Color.popupText
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
     }
   }
 }

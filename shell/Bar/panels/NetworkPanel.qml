@@ -511,97 +511,43 @@ Popup {
     spacing: 2
 
     // --- The connection in use, big -----------------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: {
-          if (!root.primary)
-            return "\u{f092b}";
-          if (root.primaryWifi)
-            return root.wifiIcon(root.activeNetwork);
-          return root.primary.type === "ethernet" ? "\u{f0200}" : "\u{f0318}";
-        }
-        color: root.primary ? Color.popupText : Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
+    PanelHero {
+      icon: {
+        if (!root.primary)
+          return "\u{f092b}";
+        if (root.primaryWifi)
+          return root.wifiIcon(root.activeNetwork);
+        return root.primary.type === "ethernet" ? "\u{f0200}" : "\u{f0318}";
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroValue.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          width: parent.width
-          text: {
-            if (!root.primary)
-              return "Offline";
-            if (root.primaryWifi && root.primary.wifi)
-              return root.primary.wifi.ssid;
-            return root.primary.connection || root.primary.iface;
-          }
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-          elide: Text.ElideRight
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (!root.primary)
-              return "NO DEFAULT ROUTE";
-            var parts = [];
-            if (root.primaryWifi && root.primary.wifi) {
-              var w = root.primary.wifi;
-              parts.push(w.standard || "Wi-Fi", w.band, w.signal_dbm + " dBm");
-            } else {
-              parts.push(root.primary.type === "ethernet" ? "Wired" : root.primary.type);
-              if (root.primary.speed)
-                parts.push(root.linkSpeed(root.primary.speed).replace(/([GM])$/, " $1") + "bit/s");
-            }
-            parts.push(root.primary.iface);
-            return parts.join("  ·  ").toUpperCase();
-          }
-          color: Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
+      iconColor: root.primary ? Color.popupText : Color.popupMuted
+      title: {
+        if (!root.primary)
+          return "Offline";
+        if (root.primaryWifi && root.primary.wifi)
+          return root.primary.wifi.ssid;
+        return root.primary.connection || root.primary.iface;
       }
-
-      // Wi-Fi: the signal, the thing that changes as you move. Wired: the link rate,
-      // which is where a bad cable or a 100M port shows itself.
-      Text {
-        id: heroValue
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: {
-          if (!root.primary)
-            return "";
-          if (root.primaryWifi)
-            return root.activeNetwork ? Math.round(root.activeNetwork.signalStrength * 100) + "%" : "";
-          return root.linkSpeed(root.primary.speed);
+      status: {
+        if (!root.primary)
+          return "NO DEFAULT ROUTE";
+        var parts = [];
+        if (root.primaryWifi && root.primary.wifi) {
+          var w = root.primary.wifi;
+          parts.push(w.standard || "Wi-Fi", w.band, w.signal_dbm + " dBm");
+        } else {
+          parts.push(root.primary.type === "ethernet" ? "Wired" : root.primary.type);
+          if (root.primary.speed)
+            parts.push(root.linkSpeed(root.primary.speed).replace(/([GM])$/, " $1") + "bit/s");
         }
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
+        parts.push(root.primary.iface);
+        return parts.join("  ·  ");
+      }
+      value: {
+        if (!root.primary)
+          return "";
+        if (root.primaryWifi)
+          return root.activeNetwork ? Math.round(root.activeNetwork.signalStrength * 100) + "%" : "";
+        return root.linkSpeed(root.primary.speed);
       }
     }
 

@@ -179,66 +179,16 @@ Popup {
     spacing: 2
 
     // --- Which layout, and how many screens --------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.layoutIcons[root.current] || "󰍹"
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
+    PanelHero {
+      icon: root.layoutIcons[root.current] || "󰍹"
+      title: "Displays"
+      status: {
+        if (root.applying !== "")
+          return "APPLYING " + root.applying + "...";
+        return root.current !== "" ? root.current + " LAYOUT" : "NO LAYOUT APPLIED";
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroCount.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          text: "Displays"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (root.applying !== "")
-              return "APPLYING " + root.applying.toUpperCase() + "...";
-            return root.current !== "" ? root.current.toUpperCase() + " LAYOUT" : "NO LAYOUT APPLIED";
-          }
-          color: root.applying !== "" ? Color.popupAccent : (root.current !== "" ? Color.popupMuted : Color.popupUrgent)
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroCount
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: String(root.active.length)
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+      statusColor: root.applying !== "" ? Color.popupAccent : (root.current !== "" ? Color.popupMuted : Color.popupUrgent)
+      value: String(root.active.length)
     }
 
     // --- The screens as Hyprland places them ------------------------------------------

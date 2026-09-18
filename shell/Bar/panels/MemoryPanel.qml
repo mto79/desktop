@@ -195,69 +195,20 @@ Popup {
     spacing: 2
 
     // --- How full, big --------------------------------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: "\u{f035b}"
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
+    PanelHero {
+      icon: "\u{f035b}"
+      title: "Memory"
+      status: {
+        if (root.memTotal <= 0)
+          return "";
+        var parts = [root.gb(root.used) + " of " + root.gb(root.memTotal)];
+        if (root.pressure > 1)
+          parts.push("under pressure");
+        return parts.join("  ·  ");
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroPercent.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          text: "Memory"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (root.memTotal <= 0)
-              return "";
-            var parts = [root.gb(root.used) + " of " + root.gb(root.memTotal)];
-            if (root.pressure > 1)
-              parts.push("under pressure");
-            return parts.join("  ·  ").toUpperCase();
-          }
-          color: root.pressure > 10 ? Color.popupUrgent : Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroPercent
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.memTotal > 0 ? root.percent(root.used, root.memTotal) : "—"
-        color: root.memTotal > 0 && root.used / root.memTotal >= 0.9 ? Color.popupUrgent : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+      statusColor: root.pressure > 10 ? Color.popupUrgent : Color.popupMuted
+      value: root.memTotal > 0 ? root.percent(root.used, root.memTotal) : "—"
+      valueColor: root.memTotal > 0 && root.used / root.memTotal >= 0.9 ? Color.popupUrgent : Color.popupText
     }
 
     // The bar carries the point of the whole panel: the solid part is spoken for, the
@@ -283,32 +234,32 @@ Popup {
       topPadding: 6
       bottomPadding: 4
 
-      Stat {
+      PanelStat {
         label: "Used"
         value: root.gb(root.used)
       }
-      Stat {
+      PanelStat {
         label: "Available"
         value: root.gb(root.memAvailable)
       }
-      Stat {
+      PanelStat {
         label: "Cache"
         value: root.gb(root.cached)
         muted: true
       }
-      Stat {
+      PanelStat {
         label: "Pressure"
         value: root.pressure < 0 ? "—" : (root.pressure < 0.1 ? "none" : root.pressure.toFixed(1) + "%")
         warn: root.pressure > 10
       }
-      Stat {
+      PanelStat {
         label: root.zramActive ? "zram" : "Swap"
         value: root.swapTotal > 0 ? root.mb(root.swapUsed) + " / " + root.gb(root.swapTotal) : "none"
         warn: root.swapTotal > 0 && root.swapUsed > root.swapTotal * 0.5
       }
       // The number that justifies zram existing: swapped pages are held in RAM, so what
       // matters is how much smaller they got, not how many there are.
-      Stat {
+      PanelStat {
         label: "Compressed"
         value: root.zramActive ? root.zramRatio.toFixed(1) + "×" : "—"
       }
@@ -354,36 +305,6 @@ Popup {
         root.close();
         Quickshell.execDetached(root.launch(["desktop-launch-tui", "btop"]));
       }
-    }
-  }
-
-  component Stat: Item {
-    property string label: ""
-    property string value: ""
-    property bool warn: false
-    property bool muted: false
-
-    width: column.width / 2
-    height: 22
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: 6
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.label
-      color: Color.popupMuted
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
-    }
-
-    Text {
-      anchors.right: parent.right
-      anchors.rightMargin: 10
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.value
-      color: parent.warn ? Color.popupUrgent : (parent.muted ? Color.popupMuted : Color.popupText)
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
     }
   }
 }

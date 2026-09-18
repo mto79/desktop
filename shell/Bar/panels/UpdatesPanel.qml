@@ -181,78 +181,22 @@ Popup {
     spacing: 2
 
     // --- How much is waiting ----------------------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.total > 0 ? "󰚰" : "󰄬"
-        color: root.total > 0 ? Color.popupAccent : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
-
-        // Turning while a check runs: the one moving thing, and only while it means work.
-        RotationAnimation on rotation {
-          running: root.checking
-          from: 0
-          to: 360
-          duration: 1200
-          loops: Animation.Infinite
-          onStopped: heroIcon.rotation = 0
-        }
+    PanelHero {
+      icon: root.total > 0 ? "󰚰" : "󰄬"
+      iconColor: root.total > 0 ? Color.popupAccent : Color.popupText
+      title: "Updates"
+      // Turning while a check runs: the one moving thing, and only while it means work.
+      spinning: root.checking
+      status: {
+        if (root.checking)
+          return "checking...";
+        if (root.total === 0)
+          return "up to date";
+        return root.newKernel ? "new kernel  ·  restart after" : "ready to install";
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroCount.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          text: "Updates"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            if (root.checking)
-              return "CHECKING...";
-            if (root.total === 0)
-              return "UP TO DATE";
-            return root.newKernel ? "NEW KERNEL  ·  RESTART AFTER" : "READY TO INSTALL";
-          }
-          color: root.checking || root.newKernel ? Color.popupAccent : Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroCount
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.total > 0 ? String(root.total) : "0"
-        color: root.total > 0 ? Color.popupText : Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+      statusColor: root.checking || root.newKernel ? Color.popupAccent : Color.popupMuted
+      value: String(root.total)
+      valueColor: root.total > 0 ? Color.popupText : Color.popupMuted
     }
 
     // --- Source by source -------------------------------------------------------------

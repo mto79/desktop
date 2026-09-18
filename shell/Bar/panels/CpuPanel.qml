@@ -308,73 +308,22 @@ Popup {
     spacing: 2
 
     // --- How busy, big ----------------------------------------------------------------
-    Item {
-      width: parent.width
-      height: 56
-
-      Text {
-        id: heroIcon
-
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: "\u{f0ee0}"
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.iconSize * 2.4
+    PanelHero {
+      icon: "\u{f0ee0}"
+      title: root.shortModel !== "" ? root.shortModel : "CPU"
+      status: {
+        var parts = [];
+        if (root.threadCount > 0)
+          parts.push(root.threadCount + " threads");
+        if (root.freqMhz > 0)
+          parts.push((root.freqMhz / 1000).toFixed(1) + " GHz");
+        if (root.tempC > 0)
+          parts.push(Math.round(root.tempC) + "°C");
+        return parts.join("  ·  ");
       }
-
-      Column {
-        anchors.left: heroIcon.right
-        anchors.leftMargin: 12
-        anchors.right: heroUsage.left
-        anchors.rightMargin: 8
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
-
-        Text {
-          width: parent.width
-          text: root.shortModel !== "" ? root.shortModel : "CPU"
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize + 2
-          font.bold: true
-          elide: Text.ElideRight
-        }
-
-        Text {
-          width: parent.width
-          text: {
-            var parts = [];
-            if (root.threadCount > 0)
-              parts.push(root.threadCount + " threads");
-            if (root.freqMhz > 0)
-              parts.push((root.freqMhz / 1000).toFixed(1) + " GHz");
-            if (root.tempC > 0)
-              parts.push(Math.round(root.tempC) + "°C");
-            return parts.join("  ·  ").toUpperCase();
-          }
-          color: root.tempC >= 85 ? Color.popupUrgent : Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-          font.bold: true
-          font.letterSpacing: 1
-          elide: Text.ElideRight
-        }
-      }
-
-      Text {
-        id: heroUsage
-
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.usage + "%"
-        color: root.usage >= 90 ? Color.popupUrgent : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize * 2.2
-        font.bold: true
-      }
+      statusColor: root.tempC >= 85 ? Color.popupUrgent : Color.popupMuted
+      value: root.usage + "%"
+      valueColor: root.usage >= 90 ? Color.popupUrgent : Color.popupText
     }
 
     // The last minute, as columns: whether the number at the top is a spike or the
@@ -490,27 +439,27 @@ Popup {
       topPadding: 4
       bottomPadding: 4
 
-      Stat {
+      PanelStat {
         label: "Load"
         value: root.loadAvg !== "" ? root.loadAvg.split("  ")[0] : "—"
       }
-      Stat {
+      PanelStat {
         label: "5 / 15 min"
         value: root.loadAvg !== "" ? root.loadAvg.split("  ").slice(1).join(" ") : "—"
       }
-      Stat {
+      PanelStat {
         label: "Runnable"
         value: root.runningThreads !== "" ? root.runningThreads.split("/")[0] : "—"
       }
-      Stat {
+      PanelStat {
         label: "Threads"
         value: root.runningThreads !== "" ? root.runningThreads.split("/")[1] : "—"
       }
-      Stat {
+      PanelStat {
         label: "Up"
         value: root.uptimeSeconds > 0 ? root.uptimeText(root.uptimeSeconds) : "—"
       }
-      Stat {
+      PanelStat {
         label: "Profile"
         value: root.profile === "power-saver" ? "saver" : (root.profile || "—")
       }
@@ -558,34 +507,6 @@ Popup {
         root.close();
         Quickshell.execDetached(root.launch(["desktop-launch-tui", "btop"]));
       }
-    }
-  }
-
-  component Stat: Item {
-    property string label: ""
-    property string value: ""
-
-    width: column.width / 2
-    height: 22
-
-    Text {
-      anchors.left: parent.left
-      anchors.leftMargin: 6
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.label
-      color: Color.popupMuted
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
-    }
-
-    Text {
-      anchors.right: parent.right
-      anchors.rightMargin: 10
-      anchors.verticalCenter: parent.verticalCenter
-      text: parent.value
-      color: Color.popupText
-      font.family: Style.fontFamily
-      font.pixelSize: Style.fontSize - 1
     }
   }
 }
