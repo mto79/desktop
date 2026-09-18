@@ -25,6 +25,39 @@ check "a port inside a range is admitted by the range" test "$(admitted 8080 tcp
 check "a port below the range is not" test -z "$(admitted 80 tcp)"
 check "the protocol has to match" test -z "$(admitted 22 udp)"
 
+# Reading a zone's ports is firewalld's config.info, which polkit meets with a password
+# or fingerprint prompt -- four an hour, from the timer, until the check learned to ask
+# pkcheck first. Without the permission no zone may be read, and the listener check may
+# not claim nothing is reachable, having looked at nothing.
+mkdir -p "$sandbox/fw"
+cat >"$sandbox/fw/systemctl" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+cat >"$sandbox/fw/pkcheck" <<STUB
+#!/usr/bin/env bash
+[ -e "$sandbox/allowed" ]
+STUB
+cat >"$sandbox/fw/firewall-cmd" <<STUB
+#!/usr/bin/env bash
+echo "\$*" >>"$sandbox/firewall-calls"
+[[ "\$*" == --get-active-zones ]] && printf 'public (default)\n  interfaces: eth0\n'
+[[ "\$*" == *--list-all* ]] && printf 'public\n  target: default\n  services: ssh\n  ports: \n'
+exit 0
+STUB
+chmod +x "$sandbox/fw/"*
+findings=() passed=() allowed_ports="" firewall_readable=true
+PATH="$sandbox/fw:$PATH" check_firewall
+check "without the permission, no zone's contents are asked for" lacks -- "--list-all" "$sandbox/firewall-calls"
+check "and it says the ports were not checked" test "$(jq -r .id <<<"${findings[0]}")" = firewall-unread
+PATH="$sandbox/fw:$PATH" check_exposed
+check "and the listeners are not declared unreachable" lacks "Nothing listening" <<<"${passed[*]}"
+touch "$sandbox/allowed"
+findings=() passed=() allowed_ports="" firewall_readable=true
+PATH="$sandbox/fw:$PATH" check_firewall
+check "with the permission, the zone is read" grep -q -- "--list-all" "$sandbox/firewall-calls"
+check "and its services count as admitted" test "$(admitted 22 tcp)" = ssh
+
 findings=()
 watch_list startup $'/etc/systemd/system/a.service\n/home/u/.config/autostart/b.desktop' "New startup items" "accept"
 check "the first run records, and reports nothing" test ${#findings[@]} = 0

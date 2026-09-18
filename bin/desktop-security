@@ -68,16 +68,30 @@ check_selinux() {
 # plus plain ports and ranges. A listener is only exposed if one of these admits it.
 allowed_ports=""
 zones=""
+firewall_readable=true
 check_firewall() {
   if ! systemctl is-active --quiet firewalld; then
     fact firewall '"off"'
     add firewall bad "The firewall is off" "firewalld is not running, so every listening port is reachable." "sudo systemctl enable --now firewalld"
     return
   fi
-  # One --list-all per zone: every firewall-cmd call costs two seconds of Python and
-  # D-Bus, and asking for target, ports and services apiece made this check take twenty.
+  # Which zones are active is free to ask. What a zone admits is not: firewalld files it
+  # under config.info, which polkit answers with a password -- or a fingerprint -- prompt,
+  # and this check runs every fifteen minutes. So polkit is asked first, without letting
+  # it prompt, and the ports are only read when that needs no one's finger. The rule in
+  # default/polkit allows the read for an admin at the local session.
   zones=$(firewall-cmd --get-active-zones 2>/dev/null | awk '/^[^ ]/ { print $1 }')
   fact firewall "$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$zones")"
+  if ! pkcheck --action-id org.fedoraproject.FirewallD1.config.info --process $$ >/dev/null 2>&1; then
+    firewall_readable=false
+    passing firewall "The firewall is on ($(tr '\n' ' ' <<<"$zones" | sed 's/ $//'))"
+    add firewall-unread info "Which ports the firewall admits is not checked" \
+      "Reading the firewall's zones needs authorisation, and a background check must not ask for it." \
+      "Run the migration that adds default/polkit/49-desktop-firewall-read.rules, or see the full audit"
+    return
+  fi
+  # One --list-all per zone: every firewall-cmd call costs two seconds of Python and
+  # D-Bus, and asking for target, ports and services apiece made this check take twenty.
   local zone info target service xml
   for zone in $zones; do
     info=$(firewall-cmd --zone="$zone" --list-all 2>/dev/null)
@@ -109,6 +123,9 @@ admitted() {
 }
 
 check_exposed() {
+  # Without the zones' contents there is nothing to judge a listener against; saying
+  # "nothing is reachable" then would be exactly the false pass this script is against.
+  $firewall_readable || return 0
   local exposed=() proto local port process via
   while read -r proto local process; do
     port=${local##*:}

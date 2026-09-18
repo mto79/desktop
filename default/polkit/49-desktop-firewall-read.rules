@@ -1,0 +1,14 @@
+// Let the desktop's security check read the firewall's configuration without asking.
+//
+// desktop-security runs every fifteen minutes and needs to know which ports each active
+// zone admits. firewalld files reading that under config.info, whose default is an admin
+// password -- which the polkit agent turned into a fingerprint prompt every fifteen
+// minutes. Reading only: changing the firewall still asks, and so does everything else.
+// Limited to an admin (wheel) at the local, active session: not a remote login, not a
+// service account.
+polkit.addRule(function (action, subject) {
+  if (action.id == "org.fedoraproject.FirewallD1.config.info" &&
+      subject.local && subject.active && subject.isInGroup("wheel")) {
+    return polkit.Result.YES;
+  }
+});
