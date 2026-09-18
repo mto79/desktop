@@ -12,6 +12,11 @@ import qs.Ui
 // notices has stopped running. Hence the age of the last backup as the headline: not
 // whether backups are configured, but whether one actually happened lately.
 //
+// Laid out like the battery panel: how long since the last copy left, big, and the state
+// in words under the title. There is no schedule -- a backup runs when it is started --
+// and the panel says so, because a backup that everyone assumes is automatic is the kind
+// that stops without anyone noticing.
+//
 // Restoring is deliberately not a button. The common need is one file from last
 // Tuesday, so "Browse" mounts the repository read-only and hands it to the file
 // manager, where picking the wrong thing cannot overwrite the right one.
@@ -35,6 +40,20 @@ Popup {
       "unreachable": "cannot reach the repository",
       "unconfigured": "not set up"
     })
+
+  property real lastAt: 0
+
+  // "3 days ago" in the status line, "3d" in the big number.
+  function shortAge(seconds) {
+    if (!seconds)
+      return "never";
+    var minutes = Math.floor((Date.now() / 1000 - seconds) / 60);
+    if (minutes < 60)
+      return minutes + "m";
+    if (minutes < 60 * 48)
+      return Math.floor(minutes / 60) + "h";
+    return Math.floor(minutes / 1440) + "d";
+  }
 
   function tone(name) {
     if (name === "stale" || name === "never")
@@ -69,6 +88,7 @@ Popup {
           root.repository = data.repository || "";
           root.host = data.host || "";
           root.lastAge = data.lastAge || "never";
+          root.lastAt = data.lastAt || 0;
           root.lastSnapshot = data.lastSnapshot || "";
           root.snapshots = data.snapshots || [];
         } catch (e) {
@@ -97,47 +117,67 @@ Popup {
     width: parent.width
     spacing: 2
 
-    PanelSection {
-      title: "Backups"
-      value: root.stateText[root.state] || root.state
-    }
-
-    PanelRow {
+    PanelHero {
       icon: "\u{f0167}"
-      label: "Last backup " + root.lastAge
-      sublabel: root.lastSnapshot !== "" ? "snapshot " + root.lastSnapshot : "nothing has been sent yet"
-      enabled: false
-
-      Text {
-        text: root.state === "running" ? "···" : ""
-        color: Color.popupAccent
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize
-      }
+      iconColor: root.tone(root.state)
+      title: "Backup"
+      status: root.stateText[root.state] || root.state
+      statusColor: root.tone(root.state)
+      spinning: root.state === "running"
+      value: root.state === "unconfigured" ? "—" : root.shortAge(root.lastAt)
+      valueColor: root.state === "stale" || root.state === "never" ? Color.popupUrgent : Color.popupText
     }
 
-    PanelRow {
-      icon: "\u{f048d}"
-      label: root.host !== "" ? root.host : "no repository set"
-      sublabel: root.repository
-      enabled: false
+    Grid {
+      width: parent.width
+      columns: 2
+      topPadding: 2
+      bottomPadding: 4
 
-      Text {
-        text: root.state === "unreachable" ? "offline" : ""
-        color: Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 2
+      PanelStat {
+        label: "Last"
+        value: root.lastAge
+        warn: root.state === "stale" || root.state === "never"
+      }
+      PanelStat {
+        label: "Snapshots"
+        value: root.snapshots.length > 0 ? String(root.snapshots.length) : "—"
+      }
+      PanelStat {
+        label: "To"
+        value: root.host !== "" ? root.host : "—"
+      }
+      PanelStat {
+        label: "Reachable"
+        value: root.state === "unconfigured" ? "—" : (root.state === "unreachable" ? "no" : "yes")
+        warn: root.state === "unreachable"
+      }
+      PanelStat {
+        label: "Schedule"
+        value: "by hand"
+        muted: true
+      }
+      PanelStat {
+        label: "Copy of"
+        value: "~"
+        muted: true
       }
     }
 
     // Nothing has been set up yet: say what is missing rather than showing an empty
     // list and letting it look broken.
+    // The one thing missing is a password file restic can read; the repository is already
+    // named in backup.conf. Both are a file edit away, so the panel opens the config.
     PanelRow {
       icon: "\u{f0026}"
-      label: "Not set up yet"
-      sublabel: "no password file yet -- see backup.conf"
-      enabled: false
+      label: "Set up backups"
+      sublabel: "needs ~/.config/desktop/restic-password  ·  opens backup.conf"
       visible: root.state === "unconfigured"
+      active: true
+      onClicked: {
+        root.close();
+        Quickshell.execDetached(root.launch(["desktop-launch-editor", Quickshell.env("HOME") + "/.config/desktop/backup.conf"]));
+      }
     }
 
     PanelSection {
