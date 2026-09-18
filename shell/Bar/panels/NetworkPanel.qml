@@ -5,7 +5,18 @@ import Quickshell.Networking
 import qs.Commons
 import qs.Ui
 
-// Network panel: Wi-Fi networks, wired link state, and a speed test.
+// Network panel: the connection in use and what it is made of, Wi-Fi networks, what the
+// machine is talking to, and a speed test.
+//
+// The top follows the battery panel: the state big, then the details -- address,
+// gateway, DNS, public address -- each one click from the clipboard, since the reason to
+// look one up is nearly always to paste it somewhere. The details come from
+// desktop-network-details and describe the interface traffic actually leaves by: in the
+// dock that is the wired link, and the Wi-Fi also up beside it is listed as a spare.
+//
+// The traffic section is a ten-second capture read back by desktop-network-traffic: who
+// the machine talked to, by name, with the process behind it. It needs tshark and the
+// wireshark group, and says so -- with the fix one click away -- when either is missing.
 //
 // Wi-Fi comes from Quickshell's Networking service, which is a NetworkManager binding
 // -- no nmcli polling, unlike the bar widget that predates this panel. Two things about
@@ -204,6 +215,8 @@ Popup {
   onVisibleChanged: {
     if (visible) {
       root.rebuild();
+      detailsProbe.reload();
+      publicProbe.reload();
     } else {
       root.filter = "";
       root.cursor = -1;
@@ -318,6 +331,176 @@ Popup {
     speedtest.running = true;
   }
 
+  // --- The connection in use -------------------------------------------------------
+
+  property var details: null
+  property var publicAddress: null
+  property string copied: ""
+
+  readonly property var primary: details ? details.primary : null
+  readonly property bool primaryWifi: !!(primary && primary.type === "wifi")
+
+  function stripPrefix(address) {
+    return address ? address.split("/")[0] : "";
+  }
+
+  function linkSpeed(mbps) {
+    if (!mbps)
+      return "";
+    return mbps >= 1000 ? (mbps / 1000) + "G" : mbps + "M";
+  }
+
+  // Copies with wl-copy, and says so on the row for a moment -- the only way to tell a
+  // click did anything, with nothing visible changing.
+  function copy(label, value) {
+    if (!value)
+      return;
+    Quickshell.execDetached(["wl-copy", "--", value]);
+    copied = label;
+    copiedTimer.restart();
+  }
+
+  Timer {
+    id: copiedTimer
+
+    interval: 1400
+    onTriggered: root.copied = ""
+  }
+
+  Process {
+    id: detailsProbe
+
+    command: ["desktop-network-details"]
+
+    function reload() {
+      if (!running)
+        running = true;
+    }
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          root.details = JSON.parse(text);
+        } catch (e) {}
+      }
+    }
+  }
+
+  Process {
+    id: publicProbe
+
+    command: ["desktop-network-details", "--public"]
+
+    function reload() {
+      if (!running)
+        running = true;
+    }
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var data = JSON.parse(text);
+          root.publicAddress = data.ip ? data : null;
+        } catch (e) {}
+      }
+    }
+  }
+
+  // A link can change under an open panel -- the dock unplugged, Wi-Fi roaming.
+  Timer {
+    interval: 5000
+    repeat: true
+    running: root.visible
+    onTriggered: detailsProbe.reload()
+  }
+
+  // --- Traffic ----------------------------------------------------------------------
+
+  readonly property int trafficSeconds: 10
+
+  property var traffic: null
+  property real trafficStarted: 0
+  property int trafficElapsed: 0
+
+  readonly property bool trafficRunning: trafficProbe.running
+
+  function bytes(value) {
+    var units = ["B", "KB", "MB", "GB"];
+    var unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+      value /= 1000;
+      unit++;
+    }
+    return (unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)) + " " + units[unit];
+  }
+
+  // Addresses that never leave this network: private IPv4, IPv6 link-local and ULA.
+  function isLocal(ip) {
+    return /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|fe80:|f[cd][0-9a-f]{2}:)/i.test(ip);
+  }
+
+  // Under the name: the program, and the address when a name took its place. A LAN
+  // device announcing itself has neither, which is worth saying in words.
+  function hostDetail(host) {
+    var parts = [];
+    if (host.process)
+      parts.push(host.process);
+    if (host.name)
+      parts.push(host.ip);
+    else if (!host.process)
+      parts.push(isLocal(host.ip) ? "local network" : "no name");
+    return parts.join("  ·  ");
+  }
+
+  function protocolSummary(data) {
+    if (!data || !data.protocols || data.bytes <= 0)
+      return "";
+    // mDNS is devices on the network announcing themselves; the acronym says nothing.
+    return data.protocols.slice(0, 4).map(function (p) {
+      return (p.name === "MDNS" ? "LAN discovery" : p.name) + " " + Math.round(p.bytes / data.bytes * 100) + "%";
+    }).join("  ·  ");
+  }
+
+  Process {
+    id: trafficProbe
+
+    command: ["desktop-network-traffic", "--seconds", String(root.trafficSeconds)]
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          root.traffic = JSON.parse(text);
+        } catch (e) {
+          root.traffic = {
+            error: "capture",
+            detail: "unreadable output"
+          };
+        }
+      }
+    }
+  }
+
+  Timer {
+    interval: 1000
+    repeat: true
+    running: root.trafficRunning
+    onTriggered: root.trafficElapsed = Math.round((Date.now() - root.trafficStarted) / 1000)
+  }
+
+  function watchTraffic() {
+    if (trafficProbe.running)
+      return;
+    traffic = null;
+    trafficStarted = Date.now();
+    trafficElapsed = 0;
+    trafficProbe.running = true;
+  }
+
+  function terminal(command) {
+    root.close();
+    Quickshell.execDetached(root.launch(["desktop-launch-floating-terminal-with-presentation"].concat(command)));
+  }
+
   contentWidth: Style.popupWidth
   contentHeight: column.implicitHeight + Style.popupPadding * 2
 
@@ -327,8 +510,148 @@ Popup {
     width: parent.width
     spacing: 2
 
+    // --- The connection in use, big -----------------------------------------------------
+    Item {
+      width: parent.width
+      height: 56
+
+      Text {
+        id: heroIcon
+
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: {
+          if (!root.primary)
+            return "\u{f092b}";
+          if (root.primaryWifi)
+            return root.wifiIcon(root.activeNetwork);
+          return root.primary.type === "ethernet" ? "\u{f0200}" : "\u{f0318}";
+        }
+        color: root.primary ? Color.popupText : Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.iconSize * 2.4
+      }
+
+      Column {
+        anchors.left: heroIcon.right
+        anchors.leftMargin: 12
+        anchors.right: heroValue.left
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 2
+
+        Text {
+          width: parent.width
+          text: {
+            if (!root.primary)
+              return "Offline";
+            if (root.primaryWifi && root.primary.wifi)
+              return root.primary.wifi.ssid;
+            return root.primary.connection || root.primary.iface;
+          }
+          color: Color.popupText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize + 2
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        Text {
+          width: parent.width
+          text: {
+            if (!root.primary)
+              return "NO DEFAULT ROUTE";
+            var parts = [];
+            if (root.primaryWifi && root.primary.wifi) {
+              var w = root.primary.wifi;
+              parts.push(w.standard || "Wi-Fi", w.band, w.signal_dbm + " dBm");
+            } else {
+              parts.push(root.primary.type === "ethernet" ? "Wired" : root.primary.type);
+              if (root.primary.speed)
+                parts.push(root.linkSpeed(root.primary.speed).replace(/([GM])$/, " $1") + "bit/s");
+            }
+            parts.push(root.primary.iface);
+            return parts.join("  ·  ").toUpperCase();
+          }
+          color: Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 2
+          font.bold: true
+          font.letterSpacing: 1
+          elide: Text.ElideRight
+        }
+      }
+
+      // Wi-Fi: the signal, the thing that changes as you move. Wired: the link rate,
+      // which is where a bad cable or a 100M port shows itself.
+      Text {
+        id: heroValue
+
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: {
+          if (!root.primary)
+            return "";
+          if (root.primaryWifi)
+            return root.activeNetwork ? Math.round(root.activeNetwork.signalStrength * 100) + "%" : "";
+          return root.linkSpeed(root.primary.speed);
+        }
+        color: Color.popupText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize * 2.2
+        font.bold: true
+      }
+    }
+
+    // --- What it is made of, one click to copy ------------------------------------------
+    Column {
+      width: parent.width
+      topPadding: 4
+      bottomPadding: 4
+      visible: !!root.primary
+
+      Detail {
+        label: "Address"
+        value: root.primary && root.primary.ipv4.length > 0 ? root.primary.ipv4.join(", ") : ""
+        copyValue: root.primary && root.primary.ipv4.length > 0 ? root.stripPrefix(root.primary.ipv4[0]) : ""
+      }
+      Detail {
+        label: "Gateway"
+        value: root.primary && root.primary.gateway ? root.primary.gateway : ""
+      }
+      Detail {
+        label: "DNS"
+        value: root.primary ? root.primary.dns.join(", ") : ""
+        copyValue: root.primary && root.primary.dns.length > 0 ? root.primary.dns[0] : ""
+      }
+      Detail {
+        label: "Public"
+        value: root.publicAddress ? root.publicAddress.ip + "  ·  " + root.publicAddress.country : ""
+        copyValue: root.publicAddress ? root.publicAddress.ip : ""
+      }
+      Detail {
+        label: "IPv6"
+        value: root.primary && root.primary.ipv6.length > 0 ? root.stripPrefix(root.primary.ipv6[0]) : ""
+      }
+      Detail {
+        label: "MAC"
+        value: root.primary && root.primary.mac ? root.primary.mac : ""
+      }
+      Detail {
+        label: "Also up"
+        // Names only: with addresses, two spares already overflow the line.
+        value: root.details ? root.details.others.map(function (o) {
+          return o.iface;
+        }).join("  ·  ") : ""
+        copyValue: ""
+      }
+    }
+
     PanelSection {
       title: "Wi-Fi"
+      rule: true
       value: {
         if (root.filter !== "")
           return "filter: " + root.filter;
@@ -347,13 +670,14 @@ Popup {
       onClicked: Networking.wifiEnabled = !Networking.wifiEnabled
     }
 
-    // Six rows of networks, then scroll. A busy street can produce forty of them, and
-    // the panel is not allowed to grow into a full-screen list.
+    // Five rows of networks, then scroll -- three when wired, where Wi-Fi is the spare.
+    // A busy street can produce forty of them, and with the details and traffic above
+    // and below, the panel has to fit a laptop screen on its own.
     Flickable {
       id: networkList
 
       width: parent.width
-      height: Math.min(contentHeight, Style.rowHeight * 6)
+      height: Math.min(contentHeight, Style.rowHeight * (root.primaryWifi ? 5 : 3))
       contentHeight: networkColumn.implicitHeight
       visible: root.wifiEnabled && root.visibleNetworks.length > 0 && !root.pskTarget
       clip: true
@@ -443,22 +767,73 @@ Popup {
       }
     }
 
+    // --- Who the machine is talking to --------------------------------------------------
     PanelSection {
-      title: "Wired"
-      value: root.wiredDevice && root.wiredDevice.connected ? "connected" : "no link"
+      title: "Traffic"
+      value: root.traffic && root.traffic.iface ? root.bytes(root.traffic.bytes) + " in " + root.traffic.seconds + " s  ·  " + root.traffic.iface : ""
       rule: true
-      visible: !!root.wiredDevice
     }
 
-    // Informational: pulling an ethernet link down by misclick is a worse outcome than
-    // having to reach for the settings app on the rare occasion you mean it.
     PanelRow {
-      visible: !!root.wiredDevice
-      icon: "\u{f0318}"
-      label: root.wiredDevice ? root.wiredDevice.name : ""
-      sublabel: root.wiredDevice && root.wiredDevice.address ? root.wiredDevice.address : ""
-      active: root.wiredDevice ? root.wiredDevice.connected : false
-      enabled: false
+      icon: "\u{f0b84}"
+      label: {
+        if (root.trafficRunning)
+          return "Listening...  " + Math.max(0, root.trafficSeconds - root.trafficElapsed) + " s";
+        return root.traffic && !root.traffic.error ? "Watch again" : "Watch traffic for " + root.trafficSeconds + " s";
+      }
+      sublabel: {
+        if (root.trafficRunning)
+          return "Capturing on the connection in use";
+        if (root.traffic && !root.traffic.error)
+          return root.protocolSummary(root.traffic);
+        if (root.traffic && root.traffic.error === "missing")
+          return "Needs tshark: click below to install";
+        if (root.traffic && root.traffic.error === "permission")
+          return "Not allowed to capture: needs the wireshark group";
+        if (root.traffic && root.traffic.error)
+          return root.traffic.detail || "Capture failed";
+        return "Who this machine talks to, by name and program";
+      }
+      active: root.trafficRunning
+      enabled: !root.trafficRunning && !(root.traffic && (root.traffic.error === "missing" || root.traffic.error === "permission"))
+      onClicked: root.watchTraffic()
+    }
+
+    PanelRow {
+      visible: !!(root.traffic && (root.traffic.error === "missing" || root.traffic.error === "permission"))
+      icon: "\u{f01da}"
+      label: "Install tshark"
+      sublabel: "Runs the install in a terminal, asks for sudo"
+      onClicked: root.terminal(["bash", Quickshell.env("DESKTOP_PATH") + "/install/packaging/wireshark.sh"])
+    }
+
+    Repeater {
+      // Five, not all eight: the panel has to fit a laptop screen with the Wi-Fi list open.
+      model: root.traffic && root.traffic.hosts ? root.traffic.hosts.slice(0, 5) : []
+
+      delegate: PanelRow {
+        required property var modelData
+
+        icon: "\u{f059f}"
+        label: modelData.name || modelData.ip
+        sublabel: root.hostDetail(modelData)
+        onClicked: root.copy(modelData.ip, modelData.name || modelData.ip)
+
+        Text {
+          text: root.copied === modelData.ip ? "copied" : root.bytes(modelData.bytes)
+          color: root.copied === modelData.ip ? Color.popupAccent : Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 2
+        }
+      }
+    }
+
+    PanelRow {
+      icon: "\u{f0cfb}"
+      label: "Live view"
+      sublabel: "Every lookup and connection as it happens, in a terminal"
+      enabled: !(root.traffic && (root.traffic.error === "missing" || root.traffic.error === "permission"))
+      onClicked: root.terminal(["desktop-network-traffic", "--live"])
     }
 
     PanelSection {
@@ -515,6 +890,61 @@ Popup {
         root.close();
         Quickshell.execDetached(root.launch(["uwsm", "app", "--", "nm-connection-editor"]));
       }
+    }
+  }
+
+  // A label and a value on one line, copied on click. Rows with nothing to say hide.
+  component Detail: Item {
+    id: detail
+
+    property string label: ""
+    property string value: ""
+    property string copyValue: value
+
+    width: column.width
+    height: visible ? 22 : 0
+    visible: value !== ""
+
+    Rectangle {
+      anchors.fill: parent
+      radius: 4
+      color: detailArea.containsMouse && detail.copyValue !== "" ? Color.popupHover : "transparent"
+    }
+
+    Text {
+      id: detailLabel
+
+      anchors.left: parent.left
+      anchors.leftMargin: 6
+      anchors.verticalCenter: parent.verticalCenter
+      width: 64
+      text: detail.label
+      color: Color.popupMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
+    }
+
+    Text {
+      anchors.left: detailLabel.right
+      anchors.right: parent.right
+      anchors.rightMargin: 6
+      anchors.verticalCenter: parent.verticalCenter
+      horizontalAlignment: Text.AlignRight
+      text: root.copied === detail.label ? "copied" : detail.value
+      color: root.copied === detail.label ? Color.popupAccent : Color.popupText
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
+      elide: Text.ElideLeft
+    }
+
+    MouseArea {
+      id: detailArea
+
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: detail.copyValue !== ""
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: root.copy(detail.label, detail.copyValue)
     }
   }
 }

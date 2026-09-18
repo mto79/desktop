@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+# desktop-network-details: The connection in use, and what it is made of, as JSON.
+#
+#   desktop-network-details            # the local picture, instant
+#   desktop-network-details --public   # the address the internet sees, and where
+#
+# "In use" means the interface carrying the default route with the lowest metric --
+# the one traffic actually leaves by. On a laptop in a dock both the wired link and
+# Wi-Fi are up, and the Wi-Fi one is a spare; asking NetworkManager which device is
+# "connected" would name both. The rest are listed as "others", VPN tunnels included.
+#
+#   {"primary":{"iface":"enp62s0u2u4","type":"ethernet","connection":"home-dell-wd19tb",
+#     "ipv4":["192.168.2.7/24"],"ipv6":[],"gateway":"192.168.2.1","dns":["192.168.2.1"],
+#     "mac":"28:00:AF:C5:28:CD","mtu":1500,"speed":1000,"wifi":null},
+#    "others":[{"iface":"wlp3s0f0","type":"wifi","connection":"mto-home","ipv4":[...]}]}
+#
+# --public asks Cloudflare's trace endpoint -- the same edge the speed test uses -- and
+# keeps the answer ten minutes, so an open-close-open of the panel is one request.
+
+set -uo pipefail
+
+if [[ ${1:-} == "--public" ]]; then
+  CACHE=${XDG_RUNTIME_DIR:-/tmp}/desktop-network-public.json
+  if [[ -n $(find "$CACHE" -newermt '-10 minutes' 2>/dev/null) ]]; then
+    cat "$CACHE"
+    exit 0
+  fi
+  trace=$(curl -s --max-time 5 https://1.1.1.1/cdn-cgi/trace) || {
+    echo '{"ip":null}'
+    exit 0
+  }
+  field() { sed -n "s/^$1=//p" <<<"$trace"; }
+  jq -nc --arg ip "$(field ip)" --arg loc "$(field loc)" --arg colo "$(field colo)" \
+    '{ip: $ip, country: $loc, edge: $colo}' | tee "$CACHE"
+  exit 0
+fi
+
+primary=$(ip -j route show default 2>/dev/null | jq -r 'sort_by(.metric // 0) | .[0].dev // ""')
+
+# One device as NetworkManager describes it. `nmcli -t device show` prints KEY:VALUE with
+# indexed keys for lists -- IP4.ADDRESS[1], IP4.ADDRESS[2] -- which jq folds into arrays.
+describe() {
+  local dev=$1
+  nmcli -t device show "$dev" 2>/dev/null | jq -Rn --arg dev "$dev" '
+    [inputs | capture("^(?<key>[^:]+):(?<value>.*)$")] as $pairs
+    | def one($k): ([$pairs[] | select(.key == $k) | .value] | first // "");
+      def many($k): [$pairs[] | select(.key | startswith($k + "[")) | .value | select(. != "")];
+    {
+      iface: $dev,
+      type: one("GENERAL.TYPE"),
+      connection: one("GENERAL.CONNECTION"),
+      ipv4: many("IP4.ADDRESS"),
+      ipv6: [many("IP6.ADDRESS")[] | select(startswith("fe80") | not)],
+      gateway: (one("IP4.GATEWAY") | if . == "" then null else . end),
+      gateway6: (one("IP6.GATEWAY") | if . == "" then null else . end),
+      dns: (many("IP4.DNS") + many("IP6.DNS")),
+      mac: (one("GENERAL.HWADDR") | if . == "" then null else . end),
+      mtu: (one("GENERAL.MTU") | tonumber? // null)
+    }'
+}
+
+# What `iw` knows and NetworkManager does not: the band and the rate the link runs at.
+wifi_of() {
+  iw dev "$1" link 2>/dev/null | awk '
+    /SSID:/ { sub(/^[^:]*: /, ""); ssid = $0 }
+    /freq:/ { freq = $2 }
+    /signal:/ { signal = $2 }
+    /tx bitrate:/ { rate = $3; std = ($0 ~ /EHT/) ? "Wi-Fi 7" : ($0 ~ /HE-/) ? "Wi-Fi 6" : ($0 ~ /VHT/) ? "Wi-Fi 5" : ($0 ~ /MCS/) ? "Wi-Fi 4" : "" }
+    END {
+      if (ssid == "") { print "null"; exit }
+      band = freq >= 5925 ? "6 GHz" : freq >= 4900 ? "5 GHz" : "2.4 GHz"
+      gsub(/"/, "\\\"", ssid)
+      printf "{\"ssid\":\"%s\",\"band\":\"%s\",\"signal_dbm\":%d,\"bitrate\":%s,\"standard\":\"%s\"}\n",
+        ssid, band, signal, (rate == "" ? "null" : int(rate)), std
+    }'
+}
+
+details=()
+for dev in $(nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: '$2 ~ /^connected/ && $1 != "lo" { print $1 }'); do
+  entry=$(describe "$dev")
+  [[ -n $entry ]] || continue
+  wifi=null
+  [[ $(jq -r .type <<<"$entry") == wifi ]] && wifi=$(wifi_of "$dev")
+  # The kernel's link speed, in Mb/s; -1 or unreadable on Wi-Fi and virtual links.
+  speed=$(cat "/sys/class/net/$dev/speed" 2>/dev/null)
+  [[ $speed =~ ^[0-9]+$ ]] || speed=null
+  details+=("$(jq -c --argjson wifi "$wifi" --argjson speed "$speed" '. + {wifi: $wifi, speed: $speed}' <<<"$entry")")
+done
+
+printf '%s\n' "${details[@]}" | jq -sc --arg primary "$primary" '
+  (map(select(.iface == $primary)) | first) as $main
+  | {primary: $main, others: map(select(.iface != $primary) | {iface, type, connection, ipv4})}'

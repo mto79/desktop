@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+
+# desktop-network-traffic: What this machine is talking to, from a short capture.
+#
+#   desktop-network-traffic [--seconds N] [--iface IF]   # JSON, for the network panel
+#   desktop-network-traffic --live [--iface IF]          # names as they happen, in a terminal
+#
+# The summary captures N seconds (default 10) on the interface carrying the default
+# route, then reads the capture back:
+#
+#   {"iface":"enp62s0u2u4","seconds":10,"bytes":5230044,"packets":4120,
+#    "hosts":[{"ip":"104.18.32.47","name":"api.anthropic.com","process":"claude","bytes":...}],
+#    "protocols":[{"name":"TLS","bytes":...},{"name":"QUIC","bytes":...}]}
+#
+# Addresses are named by what the traffic itself says, before asking anyone: the server
+# name a TLS or QUIC handshake carries (SNI), then the DNS answer that produced the
+# address, then -- for what was resolved before the capture started -- a reverse lookup.
+# The process is matched from `ss`, which shows the owner of this user's own sockets
+# without root; a system service's traffic has an address but no process.
+#
+# Capturing needs dumpcap, which Fedora lets only the wireshark group run. Right after
+# install/packaging/wireshark.sh adds the group, this session's processes do not have it
+# yet; sg picks it up from /etc/group, so the panel works before the next login too.
+#
+# Failures are JSON as well, for the panel to explain: {"error":"missing"} when tshark is
+# not installed, {"error":"permission"} when this user may not capture.
+
+set -uo pipefail
+
+seconds=10 iface="" live=false
+while (($# > 0)); do
+  case $1 in
+  --seconds)
+    seconds=$2
+    shift
+    ;;
+  --iface)
+    iface=$2
+    shift
+    ;;
+  --live) live=true ;;
+  esac
+  shift
+done
+
+fail() {
+  jq -nc --arg error "$1" --arg detail "${2:-}" '{error: $error, detail: $detail}'
+  exit 1
+}
+
+command -v tshark >/dev/null || fail missing "tshark is not installed"
+[[ -n $iface ]] || iface=$(ip -j route show default 2>/dev/null | jq -r 'sort_by(.metric // 0) | .[0].dev // ""')
+[[ -n $iface ]] || fail offline "no interface carries a default route"
+
+# Run a capture command with the wireshark group: directly when this process has it, via
+# sg when only /etc/group does (added since login), not at all otherwise.
+capture() {
+  if id -nG | tr ' ' '\n' | grep -qx wireshark; then
+    "$@"
+  elif getent group wireshark | cut -d: -f4 | tr ',' '\n' | grep -qx "$USER"; then
+    sg wireshark -c "$(printf '%q ' "$@")"
+  else
+    return 77
+  fi
+}
+
+if $live; then
+  echo "What this machine looks up and connects to, on $iface. Ctrl+C to stop."
+  echo "(tshark takes a second or two to start listening.)"
+  echo
+  capture tshark -i "$iface" -l -Q \
+    -Y 'dns.flags.response == 0 or tls.handshake.type == 1' \
+    -T fields -E separator=/t -e frame.time_epoch -e dns.qry.name -e tls.handshake.extensions_server_name \
+    -e ip.dst -e ipv6.dst |
+    awk -F'\t' '{
+      when = strftime("%H:%M:%S", $1)
+      if ($2 != "") line = sprintf("%s  lookup   %s", when, $2)
+      else if ($3 != "") line = sprintf("%s  connect  %-45s %s", when, $3, ($4 != "" ? $4 : $5))
+      else next
+      # Every name is asked for twice, once for IPv4 and once for IPv6: one line is enough.
+      if (line == last) next
+      last = line
+      print line
+      fflush()
+    }'
+  status=${PIPESTATUS[0]}
+  ((status == 77)) && echo "Not allowed to capture: $USER is not in the wireshark group."
+  exit 0
+fi
+
+work=$(mktemp -d "${XDG_RUNTIME_DIR:-/tmp}/desktop-network-traffic.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+# dumpcap runs as this user but with the group; the directory has to let it write.
+chmod 755 "$work"
+
+# Who owns each socket is asked of `ss` five times a second while the capture runs, not once
+# after it: a short-lived program -- a curl, a package check -- has closed its sockets
+# and gone by the time the capture ends, and would show as nobody's. Anything briefer
+# than a sample still is: a fetch answered from a CDN's cache is over in 40 ms, and only
+# kernel tracing, which needs root, would see its owner.
+while :; do
+  ss -tunpH 2>/dev/null
+  sleep 0.2
+done >"$work/sockets" &
+sampler=$!
+
+capture tshark -i "$iface" -a "duration:$seconds" -q -w "$work/capture.pcapng" 2>"$work/err"
+status=$?
+kill "$sampler" 2>/dev/null
+wait "$sampler" 2>/dev/null
+if ((status == 77)) || grep -qi "permission" "$work/err"; then
+  fail permission "$USER may not capture: not in the wireshark group"
+fi
+[[ -s $work/capture.pcapng ]] || fail capture "$(grep -v '^Capturing on' "$work/err" | tail -1)"
+
+read_back() { tshark -r "$work/capture.pcapng" -T fields -E separator=/t "$@" 2>/dev/null; }
+
+# This machine's own addresses, so each packet's other end can be told apart.
+ip -j addr 2>/dev/null | jq -r '.[].addr_info[].local' >"$work/local"
+
+# Every frame: its ends, its size, and the protocol it carried at the top.
+read_back -e ip.src -e ip.dst -e ipv6.src -e ipv6.dst -e frame.len -e _ws.col.protocol >"$work/frames"
+
+# Names, strongest first: SNI, then DNS answers. One name per address, the first seen.
+{
+  read_back -Y 'tls.handshake.type == 1' -e ip.dst -e ipv6.dst -e tls.handshake.extensions_server_name |
+    awk -F'\t' '$3 != "" { print ($1 != "" ? $1 : $2) "\t" $3 }'
+  read_back -Y 'dns.flags.response == 1' -e dns.qry.name -e dns.a -e dns.aaaa |
+    awk -F'\t' '{ n = split($2 "," $3, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") print a[i] "\t" $1 }'
+} | awk -F'\t' '!seen[$1]++' >"$work/names"
+
+# The owners of this user's sockets, by the address at the other end.
+awk '{
+  peer = $6; sub(/:[^:]*$/, "", peer); gsub(/[][]/, "", peer); sub(/^::ffff:/, "", peer)
+  if (match($0, /users:\(\("[^"]+"/)) { name = substr($0, RSTART + 9, RLENGTH - 10); print peer "\t" name }
+}' "$work/sockets" | sort -u >"$work/owners"
+
+awk -F'\t' -v OFS='\t' '
+  FILENAME == ARGV[1] { local[$1] = 1; next }
+  {
+    src = $1 != "" ? $1 : $3; dst = $2 != "" ? $2 : $4
+    remote = local[src] ? dst : src
+    # TLSv1.3 and TLSv1.2 are one protocol here, and so is "SSL": tshark calls TLS that
+    # when it meets it on a port it does not associate with TLS.
+    proto = $6; sub(/v1\.[0-9]$/, "", proto); if (proto == "SSL") proto = "TLS"
+    if (remote != "") hosts[remote] += $5
+    protos[proto] += $5
+    total += $5; packets++
+  }
+  END {
+    print "total", total + 0, packets + 0 > "'"$work/totals"'"
+    for (h in hosts) print h, hosts[h] > "'"$work/hosts"'"
+    for (p in protos) print p, protos[p] > "'"$work/protocols"'"
+  }' "$work/local" "$work/frames"
+touch "$work/hosts" "$work/protocols"
+
+# The top eight, named. A reverse lookup is the fallback, and slow ones are given up on.
+sort -t$'\t' -k2,2nr "$work/hosts" | head -8 | while IFS=$'\t' read -r host bytes; do
+  name=$(awk -F'\t' -v h="$host" '$1 == h { print $2; exit }' "$work/names")
+  [[ -n $name ]] || name=$(timeout 1 getent hosts "$host" | awk '{ print $2; exit }')
+  owner=$(awk -F'\t' -v h="$host" '$1 == h { print $2 }' "$work/owners" | sort -u | paste -sd, -)
+  jq -nc --arg ip "$host" --arg name "$name" --arg process "$owner" --argjson bytes "$bytes" \
+    '{ip: $ip, name: (if $name == "" then null else $name end),
+      process: (if $process == "" then null else $process end), bytes: $bytes}'
+done >"$work/top"
+
+sort -t$'\t' -k2,2nr "$work/protocols" | head -6 |
+  jq -Rc 'split("\t") | {name: .[0], bytes: (.[1] | tonumber)}' >"$work/proto-top"
+
+read -r _ total packets <"$work/totals"
+jq -nc --arg iface "$iface" --argjson seconds "$seconds" --argjson bytes "${total:-0}" --argjson packets "${packets:-0}" \
+  --slurpfile hosts "$work/top" --slurpfile protocols "$work/proto-top" \
+  '{iface: $iface, seconds: $seconds, bytes: $bytes, packets: $packets, hosts: $hosts, protocols: $protocols}'
