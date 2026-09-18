@@ -15,6 +15,10 @@ import qs.Ui
 //   * Discovery is adapter-global and writable, so it runs only while the panel is
 //     open. A bar sitting closed is not holding the radio in scan.
 //
+// Laid out like the battery panel: the state big at the top, then each connected device
+// as a card with its battery as a gauge -- the headset about to die is the thing worth
+// seeing at a glance -- and the list of everything else below.
+//
 // bluetui stays one gesture away under Advanced. Pairing a device that wants a
 // passkey confirmation still needs an agent, and this panel does not implement one.
 Popup {
@@ -96,15 +100,28 @@ Popup {
     return device.name || device.deviceName || device.address || "";
   }
 
+  readonly property var connectedDevices: devices.filter(function (d) {
+    return d.connected;
+  })
+
+  // The list below the cards: everything not already shown as one.
   readonly property var visibleDevices: {
-    if (filter === "")
-      return devices;
     var needle = filter.toLowerCase();
     var out = [];
-    for (var i = 0; i < devices.length; i++)
-      if (deviceName(devices[i]).toLowerCase().indexOf(needle) !== -1)
+    for (var i = 0; i < devices.length; i++) {
+      if (devices[i].connected)
+        continue;
+      if (needle === "" || deviceName(devices[i]).toLowerCase().indexOf(needle) !== -1)
         out.push(devices[i]);
+    }
     return out;
+  }
+
+  function batteryLevel(device) {
+    if (!device || !device.batteryAvailable)
+      return -1;
+    var value = device.battery;
+    return value <= 1 ? value : value / 100;
   }
 
   function moveCursor(delta) {
@@ -244,22 +261,73 @@ Popup {
     width: parent.width
     spacing: 2
 
-    PanelSection {
-      title: "Bluetooth"
-      value: {
-        if (root.filter !== "")
-          return "filter: " + root.filter;
-        if (!root.adapter)
-          return "no adapter";
-        if (root.blocked)
-          return "blocked";
-        if (!root.powered)
-          return "off";
-        var count = 0;
-        for (var i = 0; i < root.devices.length; i++)
-          if (root.devices[i].connected)
-            count++;
-        return count > 0 ? count + " connected" : "on";
+    // --- On or off, and how much is connected, big ---------------------------------------
+    Item {
+      width: parent.width
+      height: 56
+
+      Text {
+        id: heroIcon
+
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.powered ? "\u{f00af}" : "\u{f00b2}"
+        color: root.powered ? Color.popupText : Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.iconSize * 2.4
+      }
+
+      Column {
+        anchors.left: heroIcon.right
+        anchors.leftMargin: 12
+        anchors.right: heroCount.left
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 2
+
+        Text {
+          text: "Bluetooth"
+          color: Color.popupText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize + 2
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width
+          text: {
+            if (!root.adapter)
+              return "NO ADAPTER";
+            if (root.blocked)
+              return "BLOCKED IN HARDWARE";
+            if (!root.powered)
+              return "OFF";
+            var parts = ["on"];
+            if (root.adapter.discovering)
+              parts.push("scanning");
+            return parts.join("  ·  ").toUpperCase();
+          }
+          color: root.powered ? Color.popupMuted : (root.blocked ? Color.popupUrgent : Color.popupMuted)
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 2
+          font.bold: true
+          font.letterSpacing: 1
+          elide: Text.ElideRight
+        }
+      }
+
+      Text {
+        id: heroCount
+
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.powered ? String(root.connectedDevices.length) : "—"
+        color: root.connectedDevices.length > 0 ? Color.popupText : Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize * 2.2
+        font.bold: true
       }
     }
 
@@ -271,12 +339,113 @@ Popup {
           return "no adapter found";
         if (root.blocked)
           return "blocked in hardware";
-        return root.adapter.discovering ? "scanning..." : "";
+        return "click to turn " + (root.powered ? "off" : "on");
       }
       enabled: !!root.adapter && !root.blocked
       active: root.powered
       onClicked: if (root.adapter)
         root.adapter.enabled = !root.adapter.enabled
+    }
+
+    // --- Connected: a card each, battery as a gauge ------------------------------------
+    PanelSection {
+      title: "Connected"
+      value: "click to disconnect"
+      rule: true
+      visible: root.connectedDevices.length > 0
+    }
+
+    Repeater {
+      model: root.connectedDevices
+
+      delegate: Rectangle {
+        id: card
+
+        required property var modelData
+
+        readonly property real level: root.batteryLevel(modelData)
+
+        width: column.width
+        height: 58
+        radius: Style.radius
+        color: cardArea.containsMouse ? Color.popupHover : Color.popupSelected
+        border.width: 1
+        border.color: Color.popupBorder
+
+        Text {
+          id: cardIcon
+
+          anchors.left: parent.left
+          anchors.leftMargin: 12
+          anchors.verticalCenter: parent.verticalCenter
+          text: root.deviceIcon(card.modelData)
+          color: Color.popupAccent
+          font.family: Style.fontFamily
+          font.pixelSize: Style.iconSize + 8
+        }
+
+        Column {
+          anchors.left: cardIcon.right
+          anchors.leftMargin: 12
+          anchors.right: parent.right
+          anchors.rightMargin: 12
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: 5
+
+          Item {
+            width: parent.width
+            height: nameText.implicitHeight
+
+            Text {
+              id: nameText
+
+              anchors.left: parent.left
+              anchors.right: levelText.left
+              anchors.rightMargin: 8
+              text: root.deviceName(card.modelData)
+              color: Color.popupText
+              font.family: Style.fontFamily
+              font.pixelSize: Style.fontSize
+              font.bold: true
+              elide: Text.ElideRight
+            }
+
+            Text {
+              id: levelText
+
+              anchors.right: parent.right
+              text: card.level >= 0 ? Math.round(card.level * 100) + "%" : root.stateLabel(card.modelData)
+              color: card.level >= 0 && card.level <= 0.15 ? Color.popupUrgent : Color.popupMuted
+              font.family: Style.fontFamily
+              font.pixelSize: Style.fontSize - 1
+            }
+          }
+
+          // Only for devices that report a battery; a mouse on a cable has nothing to say.
+          PanelMeter {
+            width: parent.width
+            visible: card.level >= 0
+            value: card.level
+            fillColor: card.level <= 0.15 ? Color.popupUrgent : Color.popupAccent
+          }
+        }
+
+        MouseArea {
+          id: cardArea
+
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.activate(card.modelData)
+        }
+      }
+    }
+
+    PanelSection {
+      title: "Devices"
+      value: root.filter !== "" ? "filter: " + root.filter : (root.adapter && root.adapter.discovering ? "scanning..." : "")
+      rule: true
+      visible: root.powered
     }
 
     // Six rows then scroll, as in NetworkPanel: a scan in an office finds plenty, and
