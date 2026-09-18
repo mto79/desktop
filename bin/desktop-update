@@ -20,6 +20,10 @@ desktop-update-system-pkgs
 desktop-update-firmware
 desktop-update-restart
 
+# The answer desktop-update-available shares between bars is from before this run; it must
+# not be what the refresh gets back.
+rm -f "${XDG_RUNTIME_DIR:-/tmp}/desktop-update-available.json"
+
 # Clear the update indicator now rather than waiting for its next poll. This is the
 # Quickshell equivalent of the SIGRTMIN+7 nudge waybar used: it re-runs one widget's
 # check, not the whole shell. Failure is fine -- the shell may not be running, and the

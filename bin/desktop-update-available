@@ -1,51 +1,125 @@
 #!/usr/bin/env bash
 
-# Desktop updates via git
-latest_tag=$(git -C "$DESKTOP_PATH" ls-remote --tags origin | grep -v "{}" | awk '{print $2}' | sed 's#refs/tags/##' | sort -V | tail -n 1)
-if [[ -z "$latest_tag" ]]; then
-  echo "Error: Could not retrieve latest tag."
-  exit 1
+# desktop-update-available: What desktop-update would update, if it ran now.
+#
+#   desktop-update-available                  # one line per source with updates, or nothing
+#   desktop-update-available --json           # the same, counted, for the bar's tooltip
+#   desktop-update-available --json --notify  # and a notification when something is new
+#
+# The plain form is what waybar reads -- any output lights its icon -- so nothing but an
+# update may ever be printed there. Errors go to stderr. This script used to print "Error:
+# Could not retrieve latest tag." to stdout, and since this repo has no tags that error
+# was all it ever said: the icon was lit permanently, whether or not anything was new.
+#
+# Each check has a time limit, so a stuck one costs its own answer, not everyone's.
+# Checks run hourly from the bar, so they use the package managers' own caches: dnf
+# refreshes metadata once it expires, and fwupdmgr declines a refresh it did recently.
+# Forcing either every hour was traffic to Fedora and LVFS for nothing.
+
+set -uo pipefail
+
+# Nothing here may ask a question. dnf does, when a repository's signing key is not yet
+# imported ("Is this ok [y/N]"), and under the bar its stdin is a pipe that never closes:
+# the check waited on it forever and the icon never learned anything. With no stdin the
+# question reads end-of-file, which dnf takes as no, and the check carries on.
+exec </dev/null
+
+DESKTOP_PATH=${DESKTOP_PATH:-$HOME/.local/share/desktop}
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/desktop/updates-notified
+
+json=false notify=false
+for arg in "$@"; do
+  case $arg in
+  --json) json=true ;;
+  --notify) notify=true ;;
+  esac
+done
+
+# One check at a time, and one answer shared by everyone asking at once. Each monitor's bar
+# has its own update widget, all polling on the same clock: three copies fought over the
+# dnf and fwupd locks for most of a minute, and each would have sent its own notification.
+# The first does the work; the rest wait for it and reuse what it found, without notifying.
+CACHE=${XDG_RUNTIME_DIR:-/tmp}/desktop-update-available.json
+exec 9>"$CACHE.lock"
+flock 9
+
+print() {
+  if $json; then
+    cat "$CACHE"
+  else
+    jq -r '.sources[] | "\(.count) \(.label)"' "$CACHE"
+  fi
+}
+
+if [[ -n $(find "$CACHE" -newermt '-60 seconds' 2>/dev/null) ]]; then
+  print
+  exit 0
 fi
 
-current_tag=$(git -C "$DESKTOP_PATH" describe --tags "$(git -C "$DESKTOP_PATH" rev-list --tags --max-count=1)")
-if [[ -z "$current_tag" ]]; then
-  echo "Error: Could not retrieve current tag."
-  exit 1
+ids=() counts=() labels=()
+
+found() {
+  ((${2:-0} > 0)) || return 0
+  ids+=("$1") counts+=("$2") labels+=("$3")
+}
+
+# This desktop, which desktop-update brings up to date with `git pull`. Behind the
+# upstream is what counts; commits of your own not pushed yet are not an update.
+if git -C "$DESKTOP_PATH" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+  GIT_TERMINAL_PROMPT=0 timeout 30 git -C "$DESKTOP_PATH" fetch -q 2>/dev/null ||
+    echo "desktop-update-available: could not fetch $DESKTOP_PATH" >&2
+  found desktop "$(git -C "$DESKTOP_PATH" rev-list --count 'HEAD..@{u}' 2>/dev/null)" "desktop commits"
 fi
 
-if [[ "$current_tag" != "$latest_tag" ]]; then
-  echo "desktop update available ($latest_tag) via git"
-fi
-
-# Fedora system package updates via dnf
+# dnf lists one "name.arch version repo" line per package, then an "Obsoleting packages"
+# section that repeats some of them; only the part before it is counted.
 if desktop-cmd-present dnf; then
-  dnf -q makecache --refresh >/dev/null 2>&1
-  if dnf -q check-upgrade >/dev/null 2>&1; then
-    :
-  elif [[ $? -eq 100 ]]; then
-    echo "Fedora system package updates available via dnf"
-  fi
+  timeout 120 dnf -q makecache >/dev/null 2>&1
+  found dnf "$(timeout 120 dnf -q check-upgrade 2>/dev/null | awk '/^Obsoleting/ { exit } NF == 3 { n++ } END { print n + 0 }')" \
+    "Fedora packages"
 fi
 
-# Firmware updates via fwupdmgr
 if desktop-cmd-present fwupdmgr; then
-  fwupdmgr refresh --force >/dev/null 2>&1
-  if fwupdmgr get-updates 2>/dev/null | grep -qiE 'update available|upgrade available'; then
-    echo "Firmware updates available via fwupdmgr"
-  fi
+  timeout 60 fwupdmgr refresh >/dev/null 2>&1
+  found firmware "$(timeout 60 fwupdmgr get-updates --json 2>/dev/null | jq '[.Devices[]? | select((.Releases // []) | length > 0)] | length' 2>/dev/null)" \
+    "firmware updates"
 fi
 
-# Flatpak updates
 if desktop-cmd-present flatpak; then
-  flatpak update --appstream -y >/dev/null 2>&1
-  if flatpak remote-ls --updates --app --runtime --columns=application 2>/dev/null | grep -q .; then
-    echo "Flatpak updates available via flatpak"
-  fi
+  timeout 60 flatpak update --appstream -y >/dev/null 2>&1
+  found flatpak "$(timeout 60 flatpak remote-ls --updates --app --runtime --columns=application 2>/dev/null | grep -c .)" \
+    "Flatpaks"
 fi
 
-# Cargo built binaries (via cargo-update)
 if desktop-cmd-present cargo && cargo install-update --version >/dev/null 2>&1; then
-  if cargo install-update --list 2>/dev/null | awk 'NR>1 && $NF=="Yes"{found=1} END{exit !found}'; then
-    echo "Cargo-installed binary updates available via cargo install-update"
-  fi
+  found cargo "$(timeout 60 cargo install-update --list 2>/dev/null | awk 'NR > 1 && $NF == "Yes" { n++ } END { print n + 0 }')" \
+    "cargo binaries"
 fi
+
+# One notification when there is something new to update, not one per poll: the sources
+# notified about are remembered, and only a source that was not there before -- or
+# updates at all, after a run of desktop-update cleared them -- is news. A package count
+# that creeps up day by day is not; Fedora ships updates daily, and the icon says so.
+if $notify; then
+  mkdir -p "$(dirname "$STATE")"
+  new=()
+  for i in "${!ids[@]}"; do
+    grep -qx "${ids[$i]}" "$STATE" 2>/dev/null || new+=("$i")
+  done
+  if ((${#new[@]} > 0)); then
+    # Separated by dots, not newlines: the shell renders a body as one wrapped paragraph,
+    # and newlines ran the counts together into a single sentence.
+    body=""
+    for i in "${!ids[@]}"; do body+="${body:+  ·  }${counts[$i]} ${labels[$i]}"; done
+    notify-send -a "Updates" -i software-update-available "Updates available" \
+      "$body. Click the update icon in the bar to install." 2>/dev/null
+  fi
+  printf '%s\n' "${ids[@]}" | grep . >"$STATE" || true
+fi
+
+for i in "${!ids[@]}"; do
+  jq -nc --arg id "${ids[$i]}" --argjson count "${counts[$i]}" --arg label "${labels[$i]}" \
+    '{id: $id, count: $count, label: $label}'
+done | jq -sc '{sources: .}' >"$CACHE.new" && mv "$CACHE.new" "$CACHE"
+print
+exit 0
