@@ -1,8 +1,16 @@
 import QtQuick
+import Quickshell
+import Quickshell.Services.Mpris
+import Quickshell.Services.Pipewire
 import qs.Commons
 import qs.Ui
 
 // Media panel: what is playing, where it is, and the transport.
+//
+// Laid out like the battery panel, with the artwork as the big thing at the top: a cover
+// is recognised before a title is read. Then the progress, the transport with shuffle
+// and repeat where the player offers them, and the speaker it is coming out of --
+// "where is the sound going" being the other half of "what is playing".
 //
 // Everything reads through the Media singleton, so clicking a player here also changes
 // what the bar widget shows.
@@ -35,27 +43,67 @@ Popup {
     width: parent.width
     spacing: 2
 
-    PanelSection {
-      title: "Now playing"
-      value: root.player ? root.player.identity : "nothing"
-    }
-
-    // Track. Three lines that collapse individually, so a podcast with no album does
-    // not leave a gap where the album would be.
+    // --- The cover, big, and what it is ----------------------------------------------
     Item {
       width: parent.width
-      height: trackLines.implicitHeight + 8
-      visible: !!root.player
+      height: 104
 
-      Column {
-        id: trackLines
+      Rectangle {
+        id: cover
 
         anchors.left: parent.left
         anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        width: 92
+        height: 92
+        radius: Style.radius
+        color: Color.popupHover
+        clip: true
+
+        Image {
+          id: art
+
+          anchors.fill: parent
+          source: root.player && root.player.trackArtUrl ? root.player.trackArtUrl : ""
+          fillMode: Image.PreserveAspectCrop
+          asynchronous: true
+          // Browsers hand over a temp file that is gone by the next track; a failed
+          // load falls back to the glyph rather than an empty square.
+          visible: status === Image.Ready
+        }
+
+        Text {
+          anchors.centerIn: parent
+          visible: !art.visible
+          text: "\u{f075a}"
+          color: Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: 40
+        }
+      }
+
+      Column {
+        anchors.left: cover.right
+        anchors.leftMargin: 12
         anchors.right: parent.right
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
-        spacing: 2
+        spacing: 3
+
+        Text {
+          width: parent.width
+          text: {
+            if (!root.player)
+              return "NOTHING PLAYING";
+            return (root.player.identity + "  ·  " + (root.player.isPlaying ? "playing" : "paused")).toUpperCase();
+          }
+          color: root.player && root.player.isPlaying ? Color.popupAccent : Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 3
+          font.bold: true
+          font.letterSpacing: 1
+          elide: Text.ElideRight
+        }
 
         Text {
           width: parent.width
@@ -64,8 +112,10 @@ Popup {
           textFormat: Text.PlainText
           color: Color.popupText
           font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize
+          font.pixelSize: Style.fontSize + 2
           font.bold: true
+          wrapMode: Text.Wrap
+          maximumLineCount: 2
           elide: Text.ElideRight
         }
 
@@ -142,12 +192,22 @@ Popup {
     // Transport.
     Item {
       width: parent.width
-      height: 34
+      height: 44
       visible: !!root.player
 
       Row {
         anchors.centerIn: parent
-        spacing: 24
+        spacing: 18
+
+        // Shuffle and repeat only where the player offers them -- a browser tab does
+        // not -- lit when on.
+        TransportButton {
+          visible: !!root.player && root.player.shuffleSupported
+          glyph: "\u{f049d}"
+          lit: !!root.player && root.player.shuffle
+          active: !!root.player && root.player.canControl
+          onTriggered: root.player.shuffle = !root.player.shuffle
+        }
 
         TransportButton {
           glyph: ""
@@ -157,6 +217,7 @@ Popup {
 
         TransportButton {
           glyph: (root.player && root.player.isPlaying) ? "" : ""
+          size: Style.iconSize + 10
           active: !!root.player && root.player.canTogglePlaying
           onTriggered: root.player.togglePlaying()
         }
@@ -165,6 +226,18 @@ Popup {
           glyph: ""
           active: !!root.player && root.player.canGoNext
           onTriggered: root.player.next()
+        }
+
+        // Off, then the playlist, then the one track: the order players cycle in.
+        TransportButton {
+          visible: !!root.player && root.player.loopSupported
+          glyph: root.player && root.player.loopState === MprisLoopState.Track ? "\u{f0458}" : "\u{f0456}"
+          lit: !!root.player && root.player.loopState !== MprisLoopState.None
+          active: !!root.player && root.player.canControl
+          onTriggered: {
+            var state = root.player.loopState;
+            root.player.loopState = state === MprisLoopState.None ? MprisLoopState.Playlist : (state === MprisLoopState.Playlist ? MprisLoopState.Track : MprisLoopState.None);
+          }
         }
       }
     }
@@ -193,6 +266,16 @@ Popup {
             root.player.volume = v;
         }
       }
+    }
+
+    // Where it comes out: the default output, which is where a player sends its sound
+    // unless told otherwise. A click hands over to the sound panel, which can change it.
+    PanelRow {
+      visible: !!root.player && !!Pipewire.defaultAudioSink
+      icon: "\u{f057e}"
+      label: Pipewire.defaultAudioSink ? (Pipewire.defaultAudioSink.description || Pipewire.defaultAudioSink.name) : ""
+      sublabel: "playing through  ·  click to change"
+      onClicked: Quickshell.execDetached(["desktop-shell", "shell", "togglePanel", "audio"])
     }
 
     // Only worth a list when there is a choice to make.
@@ -224,21 +307,23 @@ Popup {
 
     property string glyph: ""
     property bool active: false
+    property bool lit: false
+    property int size: Style.iconSize + 2
 
     signal triggered
 
     implicitWidth: label.implicitWidth + 16
-    implicitHeight: 26
+    implicitHeight: Math.max(26, button.size + 8)
 
     Text {
       id: label
 
       anchors.centerIn: parent
       text: button.glyph
-      color: mouse.containsMouse && button.active ? Color.popupAccent : Color.popupText
+      color: button.lit || (mouse.containsMouse && button.active) ? Color.popupAccent : Color.popupText
       opacity: button.active ? 1.0 : 0.35
       font.family: Style.fontFamily
-      font.pixelSize: Style.iconSize
+      font.pixelSize: button.size
     }
 
     MouseArea {
