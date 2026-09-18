@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+
+# desktop-reboot-check: Will this machine come back up after a reboot?
+#
+#   desktop-reboot-check     # a verdict per check; exits 1 if any says the boot would fail
+#
+# Run by desktop-update-restart before it offers to reboot, and fine to run on its own
+# after any update. It checks what an update can leave half done, in the order a boot
+# meets it:
+#
+#   * the newest kernel is the one GRUB will start, and has an initramfs
+#   * that initramfs can unlock the disk, when / is on LUKS
+#   * the NVIDIA module exists for that kernel and matches the NVIDIA libraries to the
+#     version -- a mismatch is the classic black screen after an update
+#   * /boot has room for the next kernel, so the one after this does not half-install
+#   * every mount in fstab either exists or is allowed to be missing: a disk that is not
+#     there and not marked nofail stops the boot in emergency mode
+#   * an older kernel is still installed to fall back to, with its driver
+#
+# Some of it needs root -- the initramfs and GRUB's default are root-only -- and uses sudo
+# only if it can without asking, as it can inside desktop-update. Without it those checks
+# say they were not run, rather than passing.
+
+set -uo pipefail
+
+# Where to look, overridable so the test can point them at a fake machine.
+BOOT=${DESKTOP_BOOT:-/boot}
+DEVDISK=${DESKTOP_DEVDISK:-/dev/disk}
+
+bad=0
+verdict() {
+  printf '%-4s %s\n' "$1" "$2"
+  [[ $1 == BAD ]] && bad=1
+  return 0
+}
+
+root() { sudo -n "$@" 2>/dev/null; }
+have_root() { sudo -n true 2>/dev/null; }
+
+kernels=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' 2>/dev/null | sort -V)
+newest=$(tail -1 <<<"$kernels")
+older=$(head -n -1 <<<"$kernels" | tail -1)
+running=$(uname -r)
+
+if [[ -z $newest ]]; then
+  verdict BAD "no kernel-core package is installed"
+  exit 1
+fi
+
+echo "Reboot check: $(grep -c . <<<"$kernels") kernels installed, the newest $newest, running $running"
+
+# --- which kernel boots -------------------------------------------------------------------
+
+if have_root; then
+  default=$(root grubby --default-kernel)
+  default=${default##*/vmlinuz-}
+  if [[ $default == "$newest" ]]; then
+    verdict OK "GRUB will start the newest kernel"
+  elif [[ -n $default ]]; then
+    verdict WARN "GRUB will start $default, not the newest ($newest)"
+  else
+    verdict WARN "GRUB's default kernel could not be read"
+  fi
+else
+  verdict SKIP "which kernel GRUB starts (needs sudo)"
+fi
+
+initramfs=$BOOT/initramfs-$newest.img
+size=$(stat -c %s "$initramfs" 2>/dev/null || echo 0)
+if ((size > 10 * 1024 * 1024)); then
+  verdict OK "the initramfs for $newest is there"
+else
+  verdict BAD "the initramfs for $newest is missing or empty: sudo dracut -f --kver $newest"
+fi
+
+# --- unlocking the disk -------------------------------------------------------------------
+
+rootsource=$(findmnt -no SOURCE / 2>/dev/null | sed 's/\[.*\]$//')
+if lsblk -no TYPE -s "$rootsource" 2>/dev/null | grep -q crypt; then
+  if ! have_root; then
+    verdict SKIP "that the initramfs can unlock the disk (needs sudo)"
+  elif root lsinitrd "$initramfs" 2>/dev/null | grep -q 'systemd-cryptsetup\|/cryptsetup'; then
+    verdict OK "the initramfs can unlock the encrypted disk"
+  else
+    verdict BAD "the initramfs for $newest cannot unlock the disk -- it would stop at boot: sudo dracut -f --kver $newest"
+  fi
+fi
+
+# --- the NVIDIA driver --------------------------------------------------------------------
+
+# The libraries' version, from whichever package this machine got them from.
+nvidia_libs=$(rpm -q --qf '%{VERSION}\n' nvidia-driver-libs nvidia-driver xorg-x11-drv-nvidia-libs 2>/dev/null | grep -v 'not installed' | head -1)
+nvidia_module_version() { modinfo -k "$1" -F version nvidia 2>/dev/null; }
+
+if [[ -n $nvidia_libs ]]; then
+  module=$(nvidia_module_version "$newest")
+  if [[ -z $module ]]; then
+    if rpm -q akmod-nvidia >/dev/null 2>&1; then
+      verdict WARN "no NVIDIA module for $newest yet -- akmods builds it at boot, so the first boot is slow"
+    else
+      verdict BAD "no NVIDIA module for $newest -- it would boot without graphics: sudo dkms autoinstall -k $newest"
+    fi
+  elif [[ $module != "$nvidia_libs" ]]; then
+    verdict BAD "the NVIDIA module for $newest is $module, the libraries $nvidia_libs -- a mismatch starts no desktop"
+  else
+    verdict OK "the NVIDIA module for $newest matches the libraries ($module)"
+  fi
+fi
+
+# --- room for the next update -------------------------------------------------------------
+
+free=$(df --output=avail -B1M "$BOOT" 2>/dev/null | tail -1 | tr -d ' ')
+if [[ -n $free ]] && ((free < 300)); then
+  verdict WARN "/boot has ${free} MB free -- the next kernel may not fit"
+elif [[ -n $free ]]; then
+  verdict OK "/boot has room for the next kernel (${free} MB free)"
+fi
+
+# --- mounts the boot waits for ------------------------------------------------------------
+
+mounts_ok=true
+while read -r spec target type options _; do
+  [[ -z $spec || $spec == \#* || $type == swap || $target == none ]] && continue
+  [[ $options == *nofail* || $options == *noauto* ]] && continue
+  case $type in
+  nfs | nfs4 | cifs | smb3 | sshfs | fuse.*)
+    verdict WARN "$target is a network mount without nofail: an unreachable server delays the boot"
+    mounts_ok=false
+    continue
+    ;;
+  esac
+  # udev's links rather than findfs, which can need root to resolve a UUID -- and a
+  # lookup that failed for want of it would read as a disk that is not there.
+  case $spec in
+  UUID=*) device=$DEVDISK/by-uuid/${spec#UUID=} ;;
+  LABEL=*) device=$DEVDISK/by-label/${spec#LABEL=} ;;
+  PARTUUID=*) device=$DEVDISK/by-partuuid/${spec#PARTUUID=} ;;
+  *) device=$spec ;;
+  esac
+  if [[ ! -e $device ]]; then
+    verdict BAD "$target needs $spec, which is not here -- the boot would stop in emergency mode (add nofail in /etc/fstab)"
+    mounts_ok=false
+  fi
+done <"${DESKTOP_FSTAB:-/etc/fstab}"
+$mounts_ok && verdict OK "every mount the boot waits for is present"
+
+# --- the way back -------------------------------------------------------------------------
+
+if [[ -z $older ]]; then
+  verdict WARN "only one kernel is installed: nothing to fall back to in GRUB"
+elif [[ -n $nvidia_libs && -z $(nvidia_module_version "$older") ]]; then
+  verdict WARN "$older is still installed, but has no NVIDIA module to fall back with"
+else
+  verdict OK "$older is still there to pick in GRUB if this one fails"
+fi
+
+exit $bad

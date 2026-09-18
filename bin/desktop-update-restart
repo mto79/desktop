@@ -2,8 +2,22 @@
 
 STATE_DIR=$HOME/.local/state/desktop
 
+# Whether the machine will come back up is worth knowing after every update, not only when
+# one asks for a reboot: a kernel is installed now and booted whenever that happens.
+echo
+reboot_safe=true
+desktop-reboot-check || reboot_safe=false
+echo
+
 if [ -f "$STATE_DIR/reboot-required" ]; then
-  gum confirm "Updates require reboot. Ready?" && desktop-state clear re*-required && sudo reboot now
+  if $reboot_safe; then
+    gum confirm "Updates require reboot. Ready?" && desktop-state clear re*-required && sudo reboot now
+  else
+    # Not a refusal -- the fix may be deliberate, or already under way -- but the default
+    # is no, so a reflexive Enter does not reboot into a machine that will not start.
+    gum confirm --default=false "The check above found something that would stop the boot. Reboot anyway?" &&
+      desktop-state clear re*-required && sudo reboot now
+  fi
 elif [ -f "$STATE_DIR/relaunch-required" ]; then
   gum confirm "Updates require Hyprland relaunch. Ready?" && desktop-state clear relaunch-required && uwsm stop
 fi
