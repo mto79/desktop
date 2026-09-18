@@ -179,6 +179,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  SecurityPanel {
+    id: securityPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   StoragePanel {
     id: storagePanel
 

@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+
+# desktop-security-audit: The security checks that need root, with a verdict each, to a
+# report file. Run by `desktop-security audit`, from the security panel, in a terminal.
+#
+# desktop-security check runs every fifteen minutes without root and covers what a user
+# can see. This is the rest, and it is slow -- rpm verifies every installed file -- so it
+# is started by hand and watched. Every section ends in a verdict, OK / WARN / BAD, so the
+# report can be read by its margin; the raw output behind a verdict follows it, for when
+# the verdict needs checking. A check that could not run says so rather than passing.
+#
+# The report goes to ~/.local/state/desktop/security/audit-<date>.txt, and its verdicts to
+# audit-last.json beside it, which the panel shows until the next audit.
+
+set -uo pipefail
+
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/desktop/security
+mkdir -p "$STATE"
+REPORT=$STATE/audit-$(date +%Y%m%d-%H%M).txt
+VERDICTS=$STATE/audit-verdicts.tsv
+: >"$VERDICTS"
+
+echo "The full audit needs root for sshd's config, the audit log, sudoers and rpm."
+sudo -v || {
+  echo "No sudo, no audit."
+  exit 1
+}
+# Keep sudo's ticket alive through rpm -Va, which outlasts the default five minutes.
+while sudo -n true 2>/dev/null; do sleep 60; done &
+keepalive=$!
+trap 'kill $keepalive 2>/dev/null' EXIT
+
+exec > >(tee "$REPORT") 2>&1
+
+section() { printf '\n== %s %s\n' "$1" "$(printf '%.0s=' $(seq 1 $((70 - ${#1}))))"; }
+verdict() {
+  printf '%-4s %s\n' "$1" "$2"
+  printf '%s\t%s\t%s\n' "$1" "$3" "$2" >>"$VERDICTS"
+}
+detail() { sed 's/^/     /'; }
+
+echo "Security audit of $(hostname) -- $(date '+%Y-%m-%d %H:%M')"
+echo "$(cat /etc/fedora-release), kernel $(uname -r)"
+
+section "Quick checks (the same as the panel's)"
+"$(dirname "$0")/desktop-security" check | detail
+
+section "SSH server"
+if systemctl is-active --quiet sshd; then
+  config=$(sudo sshd -T 2>/dev/null)
+  get() { awk -v k="$1" '$1 == k { print $2 }' <<<"$config"; }
+  if [[ $(get passwordauthentication) == yes || $(get kbdinteractiveauthentication) == yes ]]; then
+    verdict BAD "sshd accepts passwords -- guessable from anywhere port 22 reaches" ssh-passwords
+  else
+    verdict OK "sshd takes keys only" ssh-passwords
+  fi
+  case $(get permitrootlogin) in
+  no) verdict OK "root cannot log in over SSH" ssh-root ;;
+  prohibit-password | without-password) verdict WARN "root can log in over SSH with a key" ssh-root ;;
+  *) verdict BAD "root can log in over SSH with a password" ssh-root ;;
+  esac
+  grep -E '^(port|listenaddress|permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|x11forwarding|allowusers|allowgroups) ' <<<"$config" | detail
+else
+  verdict OK "sshd is not running" ssh-passwords
+fi
+
+section "Who can become root"
+nopasswd=$(sudo grep -rhE '^[^#].*NOPASSWD' /etc/sudoers /etc/sudoers.d 2>/dev/null)
+if [[ -n $nopasswd ]]; then
+  verdict WARN "sudo without a password is configured" sudo-nopasswd
+  printf '%s\n' "$nopasswd" | detail
+else
+  verdict OK "sudo always asks for a password" sudo-nopasswd
+fi
+empty=$(sudo awk -F: '$2 == "" { print $1 }' /etc/shadow)
+if [[ -n $empty ]]; then
+  verdict BAD "accounts with no password at all: $(paste -sd' ' <<<"$empty")" empty-passwords
+else
+  verdict OK "no account has an empty password" empty-passwords
+fi
+echo "     wheel: $(getent group wheel | cut -d: -f4)"
+
+section "Logins"
+failed=$(sudo lastb -n 200 2>/dev/null | grep -cvE '^(btmp|$)')
+if ((failed > 10)); then
+  verdict WARN "$failed failed logins recorded" failed-logins
+else
+  verdict OK "$failed failed logins recorded" failed-logins
+fi
+sudo lastb -n 10 2>/dev/null | grep -v '^btmp' | detail
+echo "     last logins:"
+last -n 8 -a 2>/dev/null | grep -vE '^(wtmp|$)' | detail
+
+section "SELinux denials, last 24 hours"
+denials=$(sudo ausearch -m AVC,USER_AVC -ts yesterday 2>/dev/null | grep -c '^type=AVC')
+if ((denials > 0)); then
+  verdict WARN "$denials SELinux denials -- something tried what policy forbids" selinux-denials
+  sudo ausearch -m AVC -ts yesterday 2>/dev/null | grep -oE 'comm="[^"]+"|scontext=[^ ]+|tclass=[^ ]+' |
+    paste - - - | sort | uniq -c | sort -rn | head -10 | detail
+else
+  verdict OK "no SELinux denials" selinux-denials
+fi
+
+section "Listening sockets, with their owners"
+sudo ss -lntupH | awk '{ print $1, $5, $7 }' | grep -vE ' (127\.|\[::1\])' | sort -u | detail
+
+section "Kernel modules no package installed"
+unowned=$(for module in $(lsmod | awk 'NR > 1 { print $1 }'); do
+  file=$(modinfo -n "$module" 2>/dev/null) || continue
+  [[ $file == /* ]] || continue
+  rpm -qf "$file" >/dev/null 2>&1 || echo "$module ($file)"
+done)
+if [[ -n $unowned ]]; then
+  verdict WARN "kernel modules loaded that no package owns" unowned-modules
+  printf '%s\n' "$unowned" | detail
+else
+  verdict OK "every loaded kernel module belongs to a package" unowned-modules
+fi
+
+section "Startup items no package installed"
+units=$(sudo find /etc/systemd/system /etc/cron.d /etc/cron.hourly /etc/cron.daily -type f 2>/dev/null |
+  grep -vE '\.wants/|\.requires/' | while read -r f; do rpm -qf "$f" >/dev/null 2>&1 || echo "$f"; done)
+root_cron=$(sudo crontab -l 2>/dev/null | grep -vE '^(#|$)')
+if [[ -n $units || -n $root_cron ]]; then
+  verdict WARN "system startup items no package installed -- check each is yours" unowned-startup
+  printf '%s\n' "$units" | detail
+  [[ -n $root_cron ]] && printf 'root crontab: %s\n' "$root_cron" | detail
+else
+  verdict OK "every system startup item belongs to a package" unowned-startup
+fi
+
+section "Installed files changed since install (rpm -Va, several minutes)"
+# Only checksums of files that are not configuration: config is meant to be edited, and
+# a changed binary in /usr is not.
+changed=$(sudo rpm -Va --noconfig --nomtime 2>/dev/null | awk '$1 ~ /5/ { print $NF }' | grep -E '^/usr/(s?bin|lib|lib64|libexec)/')
+if [[ -n $changed ]]; then
+  verdict BAD "$(grep -c . <<<"$changed") installed programs differ from their package" rpm-verify
+  head -20 <<<"$changed" | while read -r f; do echo "$f  ($(rpm -qf "$f" 2>/dev/null))"; done | detail
+else
+  verdict OK "no installed program differs from its package" rpm-verify
+fi
+
+if command -v lynis >/dev/null; then
+  section "Lynis"
+  sudo lynis audit system --quick --no-colors 2>/dev/null | grep -E 'Hardening index|Warning|Suggestion' | head -30 | detail
+fi
+
+section "Summary"
+awk -F'\t' '{ n[$1]++ } END { printf "%d BAD, %d WARN, %d OK\n", n["BAD"], n["WARN"], n["OK"] }' "$VERDICTS"
+awk -F'\t' '$1 != "OK" { print "  " $1 "  " $3 }' "$VERDICTS"
+echo
+echo "Report: $REPORT"
+
+jq -Rn --arg report "$REPORT" --argjson at "$(date +%s)" '
+  [inputs | split("\t") | {level: (.[0] | ascii_downcase), id: .[1], title: .[2]}]
+  | {at: $at, report: $report, verdicts: .}' <"$VERDICTS" >"$STATE/audit-last.json"
+rm -f "$VERDICTS"
+
+echo
+read -rp "Press Enter to close." _

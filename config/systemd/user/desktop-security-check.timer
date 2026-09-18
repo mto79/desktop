@@ -1,0 +1,10 @@
+[Unit]
+Description=Desktop security check, every fifteen minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=15min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

@@ -142,6 +142,9 @@
           "id": "spacer"
         },
         {
+          "id": "security"
+        },
+        {
           "id": "backup",
           "type": "command",
           "exec": "desktop-backup status --bar",

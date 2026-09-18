@@ -1,0 +1,457 @@
+#!/usr/bin/env bash
+
+# desktop-security: What about this machine's security is worth knowing, as verdicts.
+#
+#   desktop-security check             # a readable list of findings
+#   desktop-security check --json      # the same, for the security panel
+#   desktop-security check --notify    # and a notification for anything new and wrong
+#   desktop-security audit             # the checks that need root, with sudo, to a report
+#
+# `check` runs every fifteen minutes from a user timer, without root, in a few seconds.
+# `audit` is the long one, started by hand, because what it reads -- sshd's effective
+# config, the audit log, rpm's verification of every installed file, sudoers -- is
+# readable by root only.
+#
+# The difference from a dump of `ss`, `find -perm -4000` and friends is that each check
+# says whether what it found is fine. A listening port is only worth mentioning when the
+# firewall lets it be reached; a setuid binary only when no package owns it; /tmp is
+# supposed to be world-writable and the finding is a missing sticky bit. And the checks
+# that need root are not attempted here and quietly swallowed -- a skipped check that
+# looks like a passed one is worse than no check.
+#
+# Some of it is about change rather than state: new startup items, new setuid files and
+# changed shell profiles are how something that got in stays in. The first run records
+# what is there; later runs report what was added. `--notify` announces a finding once,
+# when it first appears, and again only if it goes away and comes back.
+#
+# Findings: {"id":"ssh-exposed","level":"warn","title":"...","detail":"...","fix":"..."}
+# with level bad (act on it), warn (worth a look) or info (context, never notified).
+
+set -uo pipefail
+
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/desktop/security
+BASELINE=$STATE/baseline
+mkdir -p "$BASELINE"
+
+findings=()
+passed=()
+
+# add <id> <level> <title> <detail> [fix]
+add() {
+  # IPv4 and IPv6 sockets of one service arrive as two listeners and one finding.
+  local existing
+  for existing in "${findings[@]}"; do
+    [[ $(jq -r .id <<<"$existing") == "$1" ]] && return
+  done
+  findings+=("$(jq -nc --arg id "$1" --arg level "$2" --arg title "$3" --arg detail "$4" --arg fix "${5:-}" \
+    '{id: $id, level: $level, title: $title, detail: $detail, fix: $fix}')")
+}
+passing() { passed+=("$(jq -nc --arg id "$1" --arg title "$2" '{id: $id, title: $title}')"); }
+
+facts='{}'
+fact() { facts=$(jq -c --arg k "$1" --argjson v "$2" '. + {($k): $v}' <<<"$facts"); }
+
+# --------------------------------------------------------------------------- the checks
+
+check_selinux() {
+  local mode
+  mode=$(getenforce 2>/dev/null || echo unknown)
+  fact selinux "\"$mode\""
+  case $mode in
+  Enforcing) passing selinux "SELinux is enforcing" ;;
+  Permissive) add selinux bad "SELinux only logs" "It is permissive: denials are recorded, not enforced." "sudo setenforce 1, and SELINUX=enforcing in /etc/selinux/config" ;;
+  *) add selinux bad "SELinux is off" "Mode: $mode" "Set SELINUX=enforcing in /etc/selinux/config and relabel" ;;
+  esac
+}
+
+# The zones on the active interfaces, and what each lets in: services resolved to ports,
+# plus plain ports and ranges. A listener is only exposed if one of these admits it.
+allowed_ports=""
+zones=""
+check_firewall() {
+  if ! systemctl is-active --quiet firewalld; then
+    fact firewall '"off"'
+    add firewall bad "The firewall is off" "firewalld is not running, so every listening port is reachable." "sudo systemctl enable --now firewalld"
+    return
+  fi
+  # One --list-all per zone: every firewall-cmd call costs two seconds of Python and
+  # D-Bus, and asking for target, ports and services apiece made this check take twenty.
+  zones=$(firewall-cmd --get-active-zones 2>/dev/null | awk '/^[^ ]/ { print $1 }')
+  fact firewall "$(jq -Rsc 'split("\n") | map(select(. != ""))' <<<"$zones")"
+  local zone info target service xml
+  for zone in $zones; do
+    info=$(firewall-cmd --zone="$zone" --list-all 2>/dev/null)
+    target=$(sed -n 's/^ *target: //p' <<<"$info")
+    if [[ $target == ACCEPT ]]; then
+      add "firewall-accept-$zone" bad "The $zone zone lets everything in" "Its target is ACCEPT: the firewall is on and admits all traffic." "sudo firewall-cmd --permanent --zone=$zone --set-target=default"
+    fi
+    allowed_ports+=$(sed -n 's/^ *ports: //p' <<<"$info" | tr ' ' '\n')$'\n'
+    # A service's ports, from its definition rather than one more firewall-cmd each.
+    for service in $(sed -n 's/^ *services: //p' <<<"$info"); do
+      for xml in /etc/firewalld/services/$service.xml /usr/lib/firewalld/services/$service.xml; do
+        [[ -f $xml ]] || continue
+        allowed_ports+=$(sed -n 's/.*<port protocol="\([a-z]*\)" port="\([0-9-]*\)".*/\2\/\1 '"$service"'/p' "$xml")$'\n'
+        break
+      done
+    done
+  done
+  passing firewall "The firewall is on ($(tr '\n' ' ' <<<"$zones" | sed 's/ $//'))"
+}
+
+# Is port/proto admitted by the zones? Echoes the service or range that admits it.
+admitted() {
+  local port=$1 proto=$2
+  awk -v port="$port" -v proto="$proto" '
+    NF == 0 { next }
+    { split($1, pp, "/"); if (pp[2] != proto) next
+      n = split(pp[1], range, "-"); lo = range[1]; hi = (n > 1 ? range[2] : range[1])
+      if (port + 0 >= lo + 0 && port + 0 <= hi + 0) { print ($2 != "" ? $2 : pp[1]); exit } }' <<<"$allowed_ports"
+}
+
+check_exposed() {
+  local exposed=() proto local port process via
+  while read -r proto local process; do
+    port=${local##*:}
+    # Loopback, and multicast groups joined for discovery, are not listeners anyone reaches.
+    [[ $local =~ ^(127\.|\[::1\]|\[::ffff:127\.|224\.|239\.|\[ff0) ]] && continue
+    via=$(admitted "$port" "$proto")
+    [[ -n $via ]] || continue
+    process=$(sed -n 's/.*(("\([^"]*\)".*/\1/p' <<<"$process")
+    # Root's sockets have no visible owner without root; the service name says enough.
+    exposed+=("$port/$proto ${process:-$via}")
+    case $port in
+    5353 | 5355 | 546)
+      # Discovery and address configuration, admitted by Fedora's own zones on purpose.
+      # On an untrusted network they announce this machine; they do not open it.
+      add "exposed-$via" info "Network discovery is on ($via)" \
+        "Other machines on the network can see this one by name." \
+        "On public Wi-Fi: sudo firewall-cmd --zone=public --remove-service=$via" ;;
+    22)
+      add ssh-exposed warn "SSH is open to the network" \
+        "sshd listens on port 22 and the $via rule admits it, on every active interface -- VPN included." \
+        "If you do not log in to this machine remotely: sudo systemctl disable --now sshd. If you do, the audit checks password login is off." ;;
+    11434)
+      add ollama-exposed bad "Ollama is open to the network" \
+        "Port 11434 is reachable: anyone who can reach this machine can run models and read what they return." \
+        "Unset OLLAMA_HOST=0.0.0.0 so it listens on 127.0.0.1 only" ;;
+    *)
+      add "exposed-$port-$proto" warn "Port $port is open to the network" \
+        "${process:-a system service} listens on $local, and the firewall admits it ($via)." \
+        "Stop the service, bind it to 127.0.0.1, or remove $via from the zone" ;;
+    esac
+  done < <(ss -lntupH 2>/dev/null | awk '{ print $1, $5, $7 }' | sort -u)
+  fact exposed "$(printf '%s\n' "${exposed[@]}" | jq -Rsc 'split("\n") | map(select(. != "")) | unique')"
+  ((${#exposed[@]} > 0)) || passing exposed "Nothing listening is reachable from the network"
+}
+
+check_secure_boot() {
+  local state tainted nvidia=""
+  state=$(mokutil --sb-state 2>/dev/null | head -1)
+  if [[ $state == *enabled* ]]; then
+    fact secureBoot true
+    passing secure-boot "Secure Boot is on"
+    return
+  fi
+  fact secureBoot false
+  tainted=$(cat /proc/sys/kernel/tainted 2>/dev/null || echo 0)
+  # /sys/module rather than lsmod | grep -q: under pipefail, grep leaving early makes
+  # lsmod's broken pipe fail the test, and the explanation never showed.
+  [[ -d /sys/module/nvidia ]] && nvidia=" The NVIDIA driver is loaded as an unsigned module, which Secure Boot would refuse unless it is signed with an enrolled key -- the usual reason it is off."
+  add secure-boot warn "Secure Boot is off" \
+    "Anything that gets root can replace the kernel or bootloader, and it would still boot.$nvidia" \
+    "Enroll a key for akmods (sudo kmodgenca; sudo mokutil --import /etc/pki/akmods/certs/public_key.der), then enable Secure Boot in the firmware"
+}
+
+check_encryption() {
+  # btrfs reports the subvolume too -- /dev/mapper/luks-...[/root] -- which lsblk rejects.
+  local source
+  source=$(findmnt -no SOURCE / | sed 's/\[.*\]$//')
+  if lsblk -no TYPE -s "$source" 2>/dev/null | grep -q crypt; then
+    fact encrypted true
+    passing encryption "The system disk is encrypted"
+  else
+    fact encrypted false
+    add encryption bad "The system disk is not encrypted" "A lost or stolen laptop gives away everything on it." "Encryption needs a reinstall with LUKS"
+  fi
+}
+
+# Firmware security from fwupd's HSI report. It changes with firmware settings, not by
+# the minute, so it is asked once a day. Secure Boot and lockdown are left out of the
+# list: Secure Boot has its own finding, and lockdown follows from it.
+check_firmware() {
+  local cache=$STATE/hsi.json
+  if [[ ! -s $cache || -z $(find "$cache" -newermt '-1 day' 2>/dev/null) ]]; then
+    timeout 30 fwupdmgr security --json 2>/dev/null >"$cache.new" && mv "$cache.new" "$cache" || rm -f "$cache.new"
+  fi
+  [[ -s $cache ]] || return
+  local level failing
+  # The HSI level is the highest one whose checks, and all below it, pass: one short of
+  # the lowest level with a failure.
+  level=$(jq -r '[.SecurityAttributes[] | select(.HsiLevel != null) | select((.Flags // []) | index("success") | not) | .HsiLevel]
+    | (min // 6) - 1' "$cache")
+  fact hsi "$level"
+  failing=$(jq -r '.SecurityAttributes[] | select(.HsiLevel != null and .HsiLevel <= 3)
+    | select((.Flags // []) | index("success") | not) | .Name' "$cache" | paste -sd, - | sed 's/,/, /g')
+  if [[ -n $failing ]]; then
+    add firmware info "Firmware security: HSI level $level of 5" "Not met: $failing." "fwupdmgr security explains each; most are firmware settings"
+  else
+    passing firmware "Firmware security: HSI level $level"
+  fi
+}
+
+# Pending security advisories, from dnf's cache -- the update check refreshes it, and
+# this must not reach for the network every fifteen minutes.
+check_advisories() {
+  local list critical names
+  list=$(timeout 60 dnf -C -q advisory list --security 2>/dev/null | awk 'NR > 1 && $2 == "security" { print $3 "\t" $4 }')
+  local count
+  count=$(awk -F'\t' '{ print $1 }' <<<"$list" | grep -c . )
+  fact securityUpdates "$count"
+  if ((count == 0)); then
+    passing updates "No security updates waiting"
+    return
+  fi
+  critical=$(awk -F'\t' '$1 == "Critical" || $1 == "Important"' <<<"$list")
+  if [[ -n $critical ]]; then
+    names=$(awk -F'\t' '{ sub(/-[0-9][^-]*-[^-]*$/, "", $2); print $2 }' <<<"$critical" | sort -u | head -4 | paste -sd, - | sed 's/,/, /g')
+    add security-updates bad "Critical security updates are waiting" \
+      "$(grep -c . <<<"$critical") fixes rated critical or important: $names." "Update from the updates panel, or run desktop-update"
+  else
+    add security-updates info "$count security updates waiting" "None rated critical or important." "Update when convenient"
+  fi
+}
+
+check_screen_lock() {
+  if pgrep -x hypridle >/dev/null && grep -qs 'lock' "${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hypridle.conf"; then
+    passing screen-lock "The screen locks when idle"
+  else
+    add screen-lock warn "The screen does not lock when idle" "hypridle is not running, or has no lock step." "Start hypridle, and check hypr/hypridle.conf locks on timeout"
+  fi
+}
+
+check_ssh_keys() {
+  local dir=$HOME/.ssh key mode
+  [[ -d $dir ]] || return
+  mode=$(stat -c %a "$dir")
+  [[ $mode == 700 ]] || add ssh-dir bad "~/.ssh can be read by others" "Its mode is $mode, not 700." "chmod 700 ~/.ssh"
+  local plain=()
+  for key in "$dir"/*; do
+    [[ -f $key ]] && head -1 "$key" 2>/dev/null | grep -q 'PRIVATE KEY' || continue
+    mode=$(stat -c %a "$key")
+    [[ $mode == 600 || $mode == 400 ]] || add "ssh-key-mode-$(basename "$key")" bad "$(basename "$key") can be read by others" "A private key with mode $mode." "chmod 600 $key"
+    # A key that opens with an empty passphrase is a key anyone who copies the file has.
+    ssh-keygen -y -P "" -f "$key" >/dev/null 2>&1 && plain+=("$(basename "$key")")
+  done
+  if ((${#plain[@]} > 0)); then
+    add ssh-key-plain warn "SSH keys without a passphrase" \
+      "${plain[*]}: whoever copies the file can use the key." "ssh-keygen -p -f ~/.ssh/<key> adds one; ssh-agent means typing it once per session"
+  else
+    passing ssh-keys "SSH keys are passphrase-protected"
+  fi
+  if [[ -s $dir/authorized_keys ]] && systemctl is-active --quiet sshd; then
+    add authorized-keys info "$(grep -cE '^(ssh|ecdsa|sk-)' "$dir/authorized_keys") keys may log in over SSH" "From ~/.ssh/authorized_keys, while sshd is running." "Remove the lines you do not recognise"
+  fi
+}
+
+check_accounts() {
+  local extra
+  extra=$(awk -F: '$3 == 0 && $1 != "root" { print $1 }' /etc/passwd | paste -sd, -)
+  if [[ -n $extra ]]; then
+    add uid0 bad "Another account has root's powers" "UID 0: $extra." "Remove or renumber it: it is root under another name"
+  else
+    passing uid0 "Only root has UID 0"
+  fi
+}
+
+check_filesystem() {
+  local dir mode
+  for dir in /tmp /var/tmp /dev/shm; do
+    mode=$(stat -c %a "$dir" 2>/dev/null) || continue
+    # World-writable is the point of these; without the sticky bit, anyone can delete or
+    # replace anyone else's files in them.
+    [[ $mode == 1777 ]] || add "sticky-${dir//\//}" bad "$dir has no sticky bit" "Mode $mode: any user can remove others' files there." "sudo chmod 1777 $dir"
+  done
+  # Read for others is the problem; execute alone lets another account open a path it
+  # already knows, not list or read the folder.
+  mode=$(stat -c %a "$HOME")
+  case $((${mode: -1} & 4)) in
+  4) add home-mode warn "Your home folder can be read by other users" "Mode $mode: other accounts on this machine can list and read it." "chmod 700 ~" ;;
+  *) if [[ ${mode: -1} != 0 ]]; then
+       add home-mode info "Other users can pass through your home folder" "Mode $mode: they cannot list it, but can open a path inside they already know." "chmod 700 ~, unless a service needs to reach into it"
+     else
+       passing home-mode "Your home folder is private"
+     fi ;;
+  esac
+}
+
+# Programs running from a temp folder: where a download is dropped and started, and
+# where little else legitimate runs from. Only this user's processes are visible without
+# root -- which is also where a browser exploit would land.
+check_processes() {
+  local hits exe target mount
+  # AppImages are the exception: they mount themselves under /tmp/.mount_* and run from
+  # there by design -- Obsidian and KeePassXC do on this machine. The mount says which.
+  local appimages
+  appimages=$(findmnt -rno TARGET,SOURCE -t fuse 2>/dev/null; findmnt -rno TARGET,SOURCE 2>/dev/null | awk '$2 ~ /\.AppImage$/')
+  hits=$(for exe in /proc/[0-9]*/exe; do
+    target=$(readlink "$exe" 2>/dev/null) || continue
+    [[ $target =~ ^(/tmp/|/var/tmp/|/dev/shm/) ]] || continue
+    mount=$(awk -v t="$target" '$2 ~ /\.AppImage$/ && index(t, $1 "/") == 1 { print $1; exit }' <<<"$appimages")
+    [[ -n $mount ]] && continue
+    printf '%s\n' "$target"
+  done | sort | uniq -c | awk '{ print $2 ($1 > 1 ? " (" $1 " processes)" : "") }' | head -5 | paste -sd, - | sed 's/,/, /g')
+  if [[ -n $hits ]]; then
+    add temp-process bad "A program is running from a temp folder" "$hits." "Find its process with pgrep -af, check what it is, and kill it if you did not start it"
+  else
+    passing temp-process "Nothing runs from a temp folder, AppImages aside"
+  fi
+}
+
+check_logins() {
+  local failed
+  failed=$(journalctl --since "-24h" -q --no-pager 2>/dev/null | grep -ciE 'authentication failure|failed password|invalid user')
+  fact failedLogins "${failed:-0}"
+  if ((failed > 5)); then
+    add failed-logins warn "$failed failed logins in the last day" "From the journal: sudo, the lock screen, or SSH." "journalctl --since -24h | grep -iE 'authentication failure|failed password'"
+  else
+    passing failed-logins "No run of failed logins"
+  fi
+}
+
+check_hardening() {
+  local weak=()
+  (($(sysctl -n kernel.kptr_restrict 2>/dev/null || echo 0) >= 1)) || weak+=("kernel addresses visible (kptr_restrict)")
+  (($(sysctl -n kernel.randomize_va_space 2>/dev/null || echo 0) == 2)) || weak+=("address randomisation not full")
+  (($(sysctl -n kernel.yama.ptrace_scope 2>/dev/null || echo 0) >= 1)) || weak+=("any process may trace another (ptrace_scope)")
+  (($(sysctl -n kernel.unprivileged_bpf_disabled 2>/dev/null || echo 0) >= 1)) || weak+=("unprivileged BPF allowed")
+  if ((${#weak[@]} > 0)); then
+    add hardening info "Kernel hardening is partial" "$(IFS=';'; echo "${weak[*]}" | sed 's/;/; /g')." "Set in /etc/sysctl.d; Fedora leaves some off for debugging tools"
+  else
+    passing hardening "Kernel hardening settings are on"
+  fi
+}
+
+# --------------------------------------------------------------------------- what changed
+#
+# Each list is compared with the one kept from the last run. New entries are findings
+# until they are accepted with `desktop-security accept`; the first run only records.
+
+watch_list() {
+  local name=$1 current=$2 title=$3 fix=$4 level=${5:-warn}
+  local file=$BASELINE/$name
+  if [[ ! -f $file ]]; then
+    printf '%s\n' "$current" | grep . | sort -u >"$file"
+    return
+  fi
+  local added
+  added=$(comm -13 "$file" <(printf '%s\n' "$current" | grep . | sort -u))
+  [[ -n $added ]] || return
+  add "new-$name" "$level" "$title" "$(head -5 <<<"$added" | paste -sd, - | sed 's/,/, /g')." "$fix"
+}
+
+check_changes() {
+  local units autostart cron suid unowned profiles
+  units=$(find "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user" /etc/systemd/system -maxdepth 2 \( -name '*.service' -o -name '*.timer' \) -type f 2>/dev/null)
+  autostart=$(find "${XDG_CONFIG_HOME:-$HOME/.config}/autostart" /etc/xdg/autostart -name '*.desktop' 2>/dev/null)
+  cron=$( (crontab -l 2>/dev/null | grep -v '^#'; ls /etc/cron.d /etc/cron.daily /etc/cron.hourly 2>/dev/null) | grep .)
+  watch_list startup "$(printf '%s\n%s\n%s\n' "$units" "$autostart" "$cron")" \
+    "New startup items" "desktop-security accept, once you know what they are -- this is how something that got in stays in"
+
+  # A shell profile that changed runs its new contents in every terminal.
+  profiles=$(for f in ~/.bashrc ~/.bash_profile ~/.profile ~/.zshrc "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"; do
+    [[ -f $f ]] && printf '%s %s\n' "$(sha256sum <"$f" | cut -c1-16)" "$f"
+  done)
+  watch_list profiles "$profiles" "A shell profile changed" "desktop-security accept if you changed it yourself"
+
+  suid=$(nice -n 19 find /usr /opt -xdev \( -perm -4000 -o -perm -2000 \) -type f 2>/dev/null)
+  unowned=$( [[ -n $suid ]] && rpm -qf $suid 2>/dev/null | sed -n 's/^file \(.*\) is not owned by any package$/\1/p')
+  if [[ -n $unowned ]]; then
+    add suid-unowned bad "A setuid program no package installed" "$(head -5 <<<"$unowned" | paste -sd, - | sed 's/,/, /g')." "Find out where it came from; rpm -qf says no package owns it"
+  else
+    passing suid "Every setuid program belongs to a package"
+  fi
+  watch_list suid "$suid" "New setuid programs" "desktop-security accept, if a package you installed brought them" bad
+}
+
+# --------------------------------------------------------------------------- output
+
+run_checks() {
+  check_selinux
+  check_firewall
+  check_exposed
+  check_secure_boot
+  check_encryption
+  check_firmware
+  check_advisories
+  check_screen_lock
+  check_ssh_keys
+  check_accounts
+  check_filesystem
+  check_processes
+  check_logins
+  check_hardening
+  check_changes
+}
+
+report() {
+  local findings_json passed_json
+  findings_json=$(printf '%s\n' "${findings[@]}" | grep . | jq -sc 'sort_by({"bad": 0, "warn": 1, "info": 2}[.level])')
+  passed_json=$(printf '%s\n' "${passed[@]}" | grep . | jq -sc .)
+  jq -nc --argjson findings "${findings_json:-[]}" --argjson passed "${passed_json:-[]}" --argjson facts "$facts" \
+    --argjson checked "$(date +%s)" --arg audit "$(ls -t "$STATE"/audit-*.txt 2>/dev/null | head -1)" \
+    '{checked: $checked,
+      status: (if any($findings[]; .level == "bad") then "bad" elif any($findings[]; .level == "warn") then "warn" else "ok" end),
+      findings: $findings, passed: $passed, facts: $facts,
+      audit: (if $audit == "" then null else $audit end)}'
+}
+
+# Once per finding: a bad or warn finding is announced the first run it appears in, and
+# again only after it has gone and come back.
+notify() {
+  local result=$1 known=$STATE/notified
+  touch "$known"
+  jq -r '.findings[] | select(.level != "info") | [.id, .level, .title, .detail] | @tsv' <<<"$result" |
+    while IFS=$'\t' read -r id level title detail; do
+      grep -qx "$id" "$known" && continue
+      notify-send -a "Security" -i security-high ${level:+$([[ $level == bad ]] && echo "-u critical")} "$title" "$detail" 2>/dev/null
+    done
+  jq -r '.findings[] | select(.level != "info") | .id' <<<"$result" >"$known"
+}
+
+case ${1:-check} in
+check)
+  shift
+  json=false do_notify=false
+  for arg in "$@"; do
+    [[ $arg == --json ]] && json=true
+    [[ $arg == --notify ]] && do_notify=true
+  done
+  run_checks
+  result=$(report)
+  printf '%s\n' "$result" >"$STATE/last.json"
+  $do_notify && notify "$result"
+  if $json; then
+    printf '%s\n' "$result"
+  elif $do_notify; then
+    # From the timer: the notification is the output, and a report every fifteen
+    # minutes would only fill the journal.
+    :
+  else
+    jq -r '.findings[] | "\(.level | ascii_upcase | .[0:4])  \(.title)\n      \(.detail)" + (if .fix != "" then "\n      fix: \(.fix)" else "" end)' <<<"$result"
+    jq -r '"\n\(.passed | length) checks passed: " + ([.passed[].title] | join("; "))' <<<"$result"
+  fi
+  ;;
+accept)
+  # Whatever is there now is what is expected from here on.
+  rm -f "$BASELINE"/*
+  run_checks >/dev/null
+  echo "Startup items, shell profiles and setuid programs recorded as they are now."
+  ;;
+audit)
+  exec "$(dirname "$0")/desktop-security-audit"
+  ;;
+*)
+  echo "usage: desktop-security check [--json] [--notify] | accept | audit" >&2
+  exit 2
+  ;;
+esac

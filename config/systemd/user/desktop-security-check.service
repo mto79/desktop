@@ -1,0 +1,11 @@
+[Unit]
+Description=Desktop security check
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/desktop/bin/desktop-security check --notify
+# A background check has no business competing with what you are doing.
+Nice=15
+IOSchedulingClass=idle
+LogLevelMax=warning
