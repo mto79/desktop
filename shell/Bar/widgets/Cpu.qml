@@ -94,7 +94,9 @@ BarItem {
 
   IconLabel {
     icon: root.icon
-    text: root.graph + " " + root.usage + "%"
+    // Padded to "100%" so going from 8% to 13% does not shift the widgets beside it, and
+    // with them any panel open under one -- the same reason Network.qml pads its rates.
+    text: root.graph + " " + (root.usage + "%").padStart(4, " ")
     color: Color.barText
   }
 }

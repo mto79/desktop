@@ -81,16 +81,27 @@ BarItem {
   readonly property bool showSpeed: !(widgetConfig && widgetConfig.showSpeed === false)
 
   // Binary units, matching what the disk and memory widgets beside it already print.
-  // One decimal only below 10, so the label does not change width every second.
+  //
+  // Always four characters wide, padded on the left. The label changes every two seconds,
+  // and a label that changes width moves every widget beside it -- and every panel
+  // hanging under one of them, so an open panel shuffled sideways as a download ran. The
+  // bar font is monospace, so a fixed count of characters is a fixed width. Moving up a
+  // unit at 1000 rather than 1024 is what caps it at four: 1000-1023 would be "1010K",
+  // and is "1.0M" instead. Rounding can land on 1000 too, hence the second check.
   function rate(bytes) {
     var units = ["B", "K", "M", "G"];
     var value = bytes;
     var unit = 0;
-    while (value >= 1024 && unit < units.length - 1) {
+    while (value >= 1000 && unit < units.length - 1) {
       value /= 1024;
       unit++;
     }
-    return (unit === 0 || value >= 10 ? Math.round(value) : value.toFixed(1)) + units[unit];
+    var shown = unit === 0 || value >= 9.95 ? String(Math.round(value)) : value.toFixed(1);
+    if (shown.length > 3 && unit < units.length - 1) {
+      shown = (value / 1024).toFixed(1);
+      unit++;
+    }
+    return (shown + units[unit]).padStart(4, " ");
   }
 
   function sample(text) {
