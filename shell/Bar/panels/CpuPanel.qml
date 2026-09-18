@@ -15,6 +15,9 @@ import qs.Ui
 // two reads -- the first tick after opening has nothing to compare against and shows
 // zero, exactly as the widget does.
 //
+// Laid out like the battery panel: the load big at the top, a minute of history under
+// it, then the per-core strip and the numbers in a grid.
+//
 // Everything polls only while the panel is open.
 Popup {
   id: root
@@ -39,6 +42,27 @@ Popup {
   property real freqMhz: 0
 
   property var topProcesses: []
+
+  // A minute of the total at two-second samples, oldest first, from when the panel
+  // opened. Not kept across opens: joined to the samples of the last time, the strip
+  // would draw a minute that never happened.
+  property var history: []
+  readonly property int historyLength: 30
+
+  property real uptimeSeconds: 0
+  property string profile: ""
+
+  // "Intel(R) Core(TM) Ultra 9 185H" is "Core Ultra 9 185H" to a person.
+  readonly property string shortModel: modelName.replace(/\((R|TM)\)/g, "").replace(/^(Intel|AMD)\s+/, "").replace(/\s+(CPU|Processor)\b.*$/, "").replace(/\s+/g, " ").trim()
+
+  function uptimeText(seconds) {
+    var days = Math.floor(seconds / 86400);
+    var hours = Math.floor((seconds % 86400) / 3600);
+    var minutes = Math.floor((seconds % 3600) / 60);
+    if (days > 0)
+      return days + "d " + hours + "h";
+    return hours > 0 ? hours + "h " + minutes + "m" : minutes + "m";
+  }
 
   // idle + iowait, as the widget counts them.
   function idleOf(parts) {
@@ -65,8 +89,10 @@ Popup {
         var idle = idleOf(parts);
         if (lastTotal > 0) {
           var dt = total - lastTotal;
-          if (dt > 0)
+          if (dt > 0) {
             usage = Math.round((1 - (idle - lastIdle) / dt) * 100);
+            history = history.concat([usage]).slice(-historyLength);
+          }
         }
         lastTotal = total;
         lastIdle = idle;
@@ -155,12 +181,40 @@ Popup {
     }
   }
 
+  FileView {
+    id: uptime
+
+    path: "/proc/uptime"
+    onLoaded: root.uptimeSeconds = parseFloat(text().split(" ")[0]) || 0
+  }
+
+  // The power profile caps what the CPU may do, so it belongs next to what it is doing;
+  // the battery panel is where it is changed.
+  Process {
+    id: profileProbe
+
+    command: ["powerprofilesctl", "get"]
+
+    function reload() {
+      if (!running)
+        running = true;
+    }
+
+    stdout: StdioCollector {
+      onStreamFinished: root.profile = text.trim()
+    }
+  }
+
   // Summed by command, for the reason MemoryPanel spells out: brave is a dozen
   // processes and five rows of "brave" answer nothing.
+  //
+  // top's second sample, not ps: ps reports each process's average since it started, so
+  // a browser opened this morning that has just begun spinning looked idle. top's first
+  // sample has the same flaw; the second covers the one second between them.
   Process {
     id: processProbe
 
-    command: ["ps", "-eo", "pcpu=,comm="]
+    command: ["bash", "-c", "top -b -n 2 -d 1 -w 512 -o %CPU | awk '/^top -/ { block++ } block == 2 && /^ *PID/ { on = 1; next } on && NF >= 12 { print $9, $12 }'"]
 
     function reload() {
       if (!running)
@@ -200,6 +254,7 @@ Popup {
       // Drop the previous sample: the gap since the panel was last open would
       // otherwise be averaged into the first reading as one enormous delta.
       root.lastTotal = 0;
+      root.history = [];
       root.lastCoreTotal = [];
       root.lastCoreIdle = [];
       cpuinfo.reload();
@@ -225,6 +280,8 @@ Popup {
     onTriggered: {
       sensors.reload();
       processProbe.reload();
+      profileProbe.reload();
+      uptime.reload();
     }
   }
 
@@ -250,30 +307,142 @@ Popup {
     width: parent.width
     spacing: 2
 
-    PanelSection {
-      title: "CPU"
-      value: root.usage + "%"
-    }
-
+    // --- How busy, big ----------------------------------------------------------------
     Item {
       width: parent.width
-      height: 26
+      height: 56
 
-      PanelMeter {
+      Text {
+        id: heroIcon
+
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: "\u{f0ee0}"
+        color: Color.popupText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.iconSize * 2.4
+      }
+
+      Column {
+        anchors.left: heroIcon.right
+        anchors.leftMargin: 12
+        anchors.right: heroUsage.left
+        anchors.rightMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 2
+
+        Text {
+          width: parent.width
+          text: root.shortModel !== "" ? root.shortModel : "CPU"
+          color: Color.popupText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize + 2
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        Text {
+          width: parent.width
+          text: {
+            var parts = [];
+            if (root.threadCount > 0)
+              parts.push(root.threadCount + " threads");
+            if (root.freqMhz > 0)
+              parts.push((root.freqMhz / 1000).toFixed(1) + " GHz");
+            if (root.tempC > 0)
+              parts.push(Math.round(root.tempC) + "°C");
+            return parts.join("  ·  ").toUpperCase();
+          }
+          color: root.tempC >= 85 ? Color.popupUrgent : Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize - 2
+          font.bold: true
+          font.letterSpacing: 1
+          elide: Text.ElideRight
+        }
+      }
+
+      Text {
+        id: heroUsage
+
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.usage + "%"
+        color: root.usage >= 90 ? Color.popupUrgent : Color.popupText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize * 2.2
+        font.bold: true
+      }
+    }
+
+    // The last minute, as columns: whether the number at the top is a spike or the
+    // normal state of things, which one reading cannot say.
+    Item {
+      width: parent.width
+      height: 44
+
+      Row {
+        id: historyStrip
+
         anchors.left: parent.left
         anchors.leftMargin: 6
         anchors.right: parent.right
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
-        value: root.usage / 100
+        height: 36
+        spacing: 2
+        layoutDirection: Qt.RightToLeft
+
+        // Right to left, newest at the right edge, so the strip fills in from where the
+        // eye expects "now" to be.
+        Repeater {
+          model: root.history.slice().reverse()
+
+          delegate: Rectangle {
+            required property var modelData
+
+            width: (historyStrip.width - (root.historyLength - 1) * historyStrip.spacing) / root.historyLength
+            height: Math.max(2, historyStrip.height * modelData / 100)
+            anchors.bottom: parent.bottom
+            radius: 1
+            color: modelData >= 85 ? Color.popupUrgent : Color.popupAccent
+            opacity: 0.85
+          }
+        }
+      }
+
+      Rectangle {
+        anchors.left: historyStrip.left
+        anchors.right: historyStrip.right
+        anchors.bottom: historyStrip.bottom
+        height: 1
+        color: Color.popupBorder
+      }
+
+      Text {
+        visible: root.history.length < 2
+        anchors.centerIn: historyStrip
+        text: "the last minute fills in here"
+        color: Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize - 3
       }
     }
 
     // One bar per hardware thread. An average hides the difference between a machine
     // that is busy and a machine with one runaway thread; this does not.
+    PanelSection {
+      title: "Per thread"
+      value: root.threadCount > 0 ? root.threadCount + " threads" : ""
+      rule: true
+      visible: root.coreUsage.length > 0
+    }
+
     Item {
       width: parent.width
-      height: 40
+      height: 34
       visible: root.coreUsage.length > 0
 
       Row {
@@ -284,7 +453,7 @@ Popup {
         anchors.right: parent.right
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
-        height: 30
+        height: 26
         spacing: 2
 
         Repeater {
@@ -298,6 +467,7 @@ Popup {
 
             Rectangle {
               anchors.fill: parent
+              radius: 1
               color: Color.popupHover
             }
 
@@ -306,6 +476,7 @@ Popup {
               anchors.right: parent.right
               anchors.bottom: parent.bottom
               height: parent.height * Math.max(0, Math.min(100, parent.modelData)) / 100
+              radius: 1
               color: root.coreColor(parent.modelData)
             }
           }
@@ -313,66 +484,35 @@ Popup {
       }
     }
 
-    Item {
+    Grid {
       width: parent.width
-      height: 20
-      visible: root.modelName !== ""
+      columns: 2
+      topPadding: 4
+      bottomPadding: 4
 
-      Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 6
-        anchors.right: parent.right
-        anchors.rightMargin: 6
-        anchors.verticalCenter: parent.verticalCenter
-        text: root.modelName + (root.threadCount > 0 ? "  ·  " + root.threadCount + " threads" : "")
-        color: Color.popupMuted
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 2
-        elide: Text.ElideRight
+      Stat {
+        label: "Load"
+        value: root.loadAvg !== "" ? root.loadAvg.split("  ")[0] : "—"
       }
-    }
-
-    PanelRow {
-      icon: "\u{f0685}"
-      label: "Load average"
-      sublabel: root.runningThreads !== "" ? root.runningThreads + " runnable" : "1, 5 and 15 minutes"
-      enabled: false
-
-      Text {
-        text: root.loadAvg
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "5 / 15 min"
+        value: root.loadAvg !== "" ? root.loadAvg.split("  ").slice(1).join(" ") : "—"
       }
-    }
-
-    PanelRow {
-      icon: "\u{f0322}"
-      label: "Frequency"
-      sublabel: "averaged across all threads"
-      enabled: false
-      visible: root.freqMhz > 0
-
-      Text {
-        text: (root.freqMhz / 1000).toFixed(2) + " GHz"
-        color: Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "Runnable"
+        value: root.runningThreads !== "" ? root.runningThreads.split("/")[0] : "—"
       }
-    }
-
-    PanelRow {
-      icon: "\u{f0e01}"
-      label: "Temperature"
-      sublabel: "package"
-      enabled: false
-      visible: root.tempC > 0
-
-      Text {
-        text: Math.round(root.tempC) + "°C"
-        color: root.tempC >= 85 ? Color.popupUrgent : Color.popupText
-        font.family: Style.fontFamily
-        font.pixelSize: Style.fontSize - 1
+      Stat {
+        label: "Threads"
+        value: root.runningThreads !== "" ? root.runningThreads.split("/")[1] : "—"
+      }
+      Stat {
+        label: "Up"
+        value: root.uptimeSeconds > 0 ? root.uptimeText(root.uptimeSeconds) : "—"
+      }
+      Stat {
+        label: "Profile"
+        value: root.profile === "power-saver" ? "saver" : (root.profile || "—")
       }
     }
 
@@ -418,6 +558,34 @@ Popup {
         root.close();
         Quickshell.execDetached(root.launch(["desktop-launch-tui", "btop"]));
       }
+    }
+  }
+
+  component Stat: Item {
+    property string label: ""
+    property string value: ""
+
+    width: column.width / 2
+    height: 22
+
+    Text {
+      anchors.left: parent.left
+      anchors.leftMargin: 6
+      anchors.verticalCenter: parent.verticalCenter
+      text: parent.label
+      color: Color.popupMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
+    }
+
+    Text {
+      anchors.right: parent.right
+      anchors.rightMargin: 10
+      anchors.verticalCenter: parent.verticalCenter
+      text: parent.value
+      color: Color.popupText
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
     }
   }
 }
