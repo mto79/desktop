@@ -14,6 +14,10 @@ import qs.Ui
 // something to say, and each is the button that starts the thing as well as the light
 // that says it is running.
 //
+// Each opens a panel on click -- RecordingPanel, DictationPanel, CapturePanel -- with the
+// options, the state and what it made; the right click still does the thing at once,
+// for when the panel is one step too many. The keys do too.
+//
 // The recording button counts up. That a recording is running matters far less than
 // that it has been running for eleven minutes.
 BarWidget {
@@ -72,6 +76,23 @@ BarWidget {
     property string tip: ""
     // The key that does what this button does, shown under the tip.
     property string shortcut: ""
+    // The panel a click opens; the right click is `alternate`, the thing done at once.
+    property string panelId: ""
+
+    function registerAnchor() {
+      if (root.popups && panelId !== "")
+        root.popups.registerAnchor(panelId, toggle);
+    }
+
+    Component.onCompleted: registerAnchor()
+
+    Connections {
+      target: root
+
+      function onPopupsChanged() {
+        toggle.registerAnchor();
+      }
+    }
     // Draws attention while something is genuinely happening, and only then.
     property bool pulsing: false
 
@@ -147,6 +168,8 @@ BarWidget {
           root.tooltips.release(toggle);
         if (mouse.button === Qt.RightButton)
           toggle.alternate();
+        else if (toggle.panelId !== "" && root.popups)
+          root.popups.toggle(toggle.panelId, toggle);
         else
           toggle.triggered();
       }
@@ -278,11 +301,11 @@ BarWidget {
       active: root.recording
       pulsing: root.recording
       tone: Color.barUrgent
-      tip: root.recording ? root.recordingTip : "Record a region  ·  right-click for a whole screen"
+      tip: root.recording ? "Recording  ·  click for the panel, right-click to stop" : "Screen recording  ·  right-click to record a region"
       shortcut: Shortcuts.forExec("desktop-cmd-screenrecord region")
+      panelId: "recording"
 
-      onTriggered: root.launch(["desktop-cmd-screenrecord"])
-      onAlternate: root.launch(["desktop-cmd-screenrecord", "output"])
+      onAlternate: root.launch(["desktop-cmd-screenrecord"])
     }
 
     Toggle {
@@ -294,10 +317,11 @@ BarWidget {
       // the two colours so a glance can tell them apart.
       tone: root.voice === "transcribing" ? Color.barAccent : Color.barUrgent
       pulsing: root.voice === "recording"
-      tip: root.voiceTip !== "" ? root.voiceTip : "Dictate  ·  click to start talking"
+      tip: root.voiceTip !== "" ? root.voiceTip : "Dictation  ·  right-click to start talking"
       shortcut: Shortcuts.dictation
+      panelId: "dictation"
 
-      onTriggered: root.launch(["voxtype", "record", "toggle"])
+      onAlternate: root.launch(["voxtype", "record", "toggle"])
     }
 
     Toggle {
@@ -311,11 +335,13 @@ BarWidget {
       active: root.meeting || root.meetingTranscribing
       pulsing: root.meeting || root.meetingTranscribing
       tone: root.meeting ? Color.barUrgent : Color.barAccent
-      tip: (root.meeting || root.meetingTranscribing) ? root.meetingTip
-        : "Capture both sides of a call, transcribed locally  ·  click to start"
+      tip: root.meeting ? "Capturing the call  ·  right-click to stop and transcribe"
+        : root.meetingTranscribing ? root.meetingTip
+        : "Meeting capture  ·  right-click to start"
       shortcut: Shortcuts.forExec("desktop-meeting-capture toggle")
+      panelId: "capture"
 
-      onTriggered: root.launch(["desktop-meeting-capture", "toggle"])
+      onAlternate: root.launch(["desktop-meeting-capture", "toggle"])
     }
   }
 }

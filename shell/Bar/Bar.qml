@@ -109,8 +109,22 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  CapturePanel {
+    id: capturePanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   CpuPanel {
     id: cpuPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
+  DictationPanel {
+    id: dictationPanel
 
     Component.onCompleted: popupHost.register(panelId, this)
     onDismissed: popupHost.notifyClosed(panelId)
@@ -153,6 +167,13 @@ Item {
 
   VpnPanel {
     id: vpnPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
+  RecordingPanel {
+    id: recordingPanel
 
     Component.onCompleted: popupHost.register(panelId, this)
     onDismissed: popupHost.notifyClosed(panelId)

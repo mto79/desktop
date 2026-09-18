@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# desktop-captures: The latest screen recordings or meeting captures, as JSON.
+#
+#   desktop-captures screen     # desktop-cmd-screenrecord's .mp4 files
+#   desktop-captures meetings   # desktop-meeting-capture's .flac files and transcripts
+#
+#   [{"path":".../meeting-2026-09-18_13-19-22.flac","name":"meeting","at":1789730362,
+#     "bytes":113147,"seconds":6,"transcript":".../meeting-2026-09-18_13-19-22.txt",
+#     "preview":"Can you hear me?","words":4}]
+#
+# Newest first, eight at most: the panels show the last few, not an archive. The folders
+# are the ones the recording scripts write to, read the same way, so a DESKTOP_*_DIR set
+# for one is honoured here too.
+
+set -uo pipefail
+
+[[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
+videos=${XDG_VIDEOS_DIR:-$HOME/Videos}
+
+case ${1:-} in
+screen)
+  dir=${DESKTOP_SCREENRECORD_DIR:-$videos}
+  pattern='screenrecording-*.mp4'
+  ;;
+meetings)
+  dir=${DESKTOP_MEETING_DIR:-$videos/Meetings}
+  pattern='*.flac'
+  ;;
+*)
+  echo "usage: desktop-captures screen|meetings" >&2
+  exit 2
+  ;;
+esac
+
+[[ -d $dir ]] || {
+  echo '[]'
+  exit 0
+}
+
+find -L "$dir" -maxdepth 1 -type f -name "$pattern" -printf '%T@\t%s\t%p\n' 2>/dev/null |
+  sort -t$'\t' -k1,1nr | head -8 |
+  while IFS=$'\t' read -r mtime bytes path; do
+    seconds=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$path" 2>/dev/null)
+    base=${path%.*}
+    transcript="" preview="" words=0
+    if [[ -f $base.txt ]]; then
+      transcript=$base.txt
+      # The first line that is speech: not a "## You" heading, not a "(silent ...)" note.
+      preview=$(grep -vE '^(##|\(|$)' "$transcript" | head -1 | cut -c1-120)
+      words=$(grep -vE '^(##|\()' "$transcript" | wc -w)
+    fi
+    # "meeting-2026-09-18_13-19-22" -> "meeting": the name given at start.
+    name=$(basename "$base" | sed -E 's/-?[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}$//')
+    jq -nc --arg path "$path" --arg name "${name:-recording}" --argjson at "${mtime%.*}" --argjson bytes "$bytes" \
+      --arg seconds "$seconds" --arg transcript "$transcript" --arg preview "$preview" --argjson words "$words" \
+      '{path: $path, name: $name, at: $at, bytes: $bytes,
+        seconds: (($seconds | tonumber? // 0) | floor),
+        transcript: (if $transcript == "" then null else $transcript end),
+        preview: $preview, words: $words}'
+  done | jq -sc .

@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+# desktop-dictation-details: How dictation is set up, and what was dictated lately.
+#
+#   {"installed":true,"running":true,"backend":"GPU (Vulkan)","model":"large-v3-turbo",
+#    "languages":["en","nl"],"key":"Right Alt, hold","maxSeconds":20,"output":"type",
+#    "recent":[{"at":"2026-09-18 11:32","spoken":5.2,"took":1.98,"text":"Thank you."}]}
+#
+# The settings come from voxtype's config file and its own report of the GPU backend.
+# The recent dictations come from voxtype's journal, which logs each transcript -- the
+# only record of them, and the way to get back text that was typed into the wrong window.
+# They stay on this machine; the panel shows the last five.
+
+set -uo pipefail
+
+if ! command -v voxtype >/dev/null; then
+  echo '{"installed":false}'
+  exit 0
+fi
+
+CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}/voxtype/config.toml
+
+# key = "value" or key = 20 from one [section] of the TOML file; enough for these keys.
+setting() {
+  awk -v section="[$1]" -v key="$2" '
+    /^\[/ { inside = ($0 == section); next }
+    inside && $1 == key { sub(/^[^=]*=[ \t]*/, ""); gsub(/"/, ""); print; exit }' "$CONFIG" 2>/dev/null
+}
+
+running=false
+systemctl --user is-active --quiet voxtype 2>/dev/null && running=true
+
+backend=$(timeout 5 voxtype setup gpu --status 2>/dev/null | sed -n 's/^Active backend: //p')
+
+# Three lines per dictation: "Transcribing 5.2s of audio...", then "Transcription
+# completed in 1.98s: ..." with the text cut at fifty characters, then "Transcribed:
+# ..." with all of it. The full one is the one kept -- copying back a transcript that
+# ends in "..." would be worse than not offering it. A dictation that failed has no
+# completed line and is dropped with its start.
+recent=$(journalctl --user -u voxtype --since "-7 days" --no-pager -o short-iso 2>/dev/null |
+  awk '
+    /Transcribing [0-9.]+s of audio/ { match($0, /Transcribing [0-9.]+s/); spoken = substr($0, RSTART + 13, RLENGTH - 14); took = ""; next }
+    /Transcription completed in/ && spoken != "" { match($0, /completed in [0-9.]+s/); took = substr($0, RSTART + 13, RLENGTH - 14); next }
+    /INFO Transcribed: "/ && took != "" {
+      at = substr($1, 1, 10) " " substr($1, 12, 5)
+      text = $0; sub(/^.*INFO Transcribed: "/, "", text); sub(/"$/, "", text)
+      print at "\t" spoken "\t" took "\t" text
+      spoken = ""; took = ""
+    }' | tail -5 | tac |
+  jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {at: .[0], spoken: (.[1] | tonumber), took: (.[2] | tonumber), text: .[3]})')
+
+key=$(setting hotkey key)
+mode=$(setting hotkey mode)
+languages=$(setting whisper language)
+
+jq -nc \
+  --argjson running "$running" \
+  --arg backend "$backend" \
+  --arg model "$(setting whisper model)" \
+  --arg languages "$languages" \
+  --arg key "$key" \
+  --arg mode "$mode" \
+  --arg max "$(setting audio max_duration_secs)" \
+  --arg output "$(setting output mode)" \
+  --argjson recent "${recent:-[]}" \
+  '{installed: true, running: $running,
+    backend: (if $backend == "" then null else $backend end),
+    model: $model,
+    languages: ($languages | gsub("[\\[\\] ]"; "") | split(",") | map(select(. != ""))),
+    key: (($key | ascii_downcase | sub("^right"; "Right ") | sub("^left"; "Left ")
+           | split(" ") | map((.[:1] | ascii_upcase) + .[1:]) | join(" "))
+          + (if $mode == "push_to_talk" then ", hold" else "" end)),
+    maxSeconds: ($max | tonumber? // null),
+    output: $output,
+    recent: $recent}'
