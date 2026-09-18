@@ -17,9 +17,12 @@ BarItem {
 
   tooltip: free === "" ? "" : free + " free of " + size + " (" + usedPercent + " used)\non " + path
 
-  // Left click opens the usage analyzer on the filesystem being reported -- the thing
-  // the number is asking you to look at -- and right click the file manager on it.
-  command: ["desktop-launch-disk", root.path]
+  // Left click opens the storage panel, which says where the space went and carries
+  // the usage analyzer; right click still opens the file manager on the filesystem.
+  panelId: "storage"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
   rightCommand: ["desktop-launch-files", root.path]
 
   Process {

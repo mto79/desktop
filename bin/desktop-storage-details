@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+# desktop-storage-details: The disks, and what fills them, as JSON for the storage panel.
+#
+#   desktop-storage-details           # filesystems and snapshots, instant
+#   desktop-storage-details --usage   # the usual suspects, one JSON line per folder
+#
+# Filesystems come from df, grouped by device: on btrfs / and /home are one volume with
+# two mount points, and listing it twice would count its space twice. Pseudo filesystems
+# and FUSE mounts are left out -- an AppImage is a filesystem too, and KeePassXC alone
+# mounts two. Each one carries what lsblk knows of the disk under it, through any LUKS
+# or LVM layer: its model, whether it is encrypted, whether it can be unplugged.
+#
+# --usage measures the folders that grow without anyone deciding they should: downloads,
+# the trash, caches, container images, Flatpak runtimes. du over container storage takes
+# minutes, so each folder is printed as soon as it is measured, at idle priority, and the
+# whole answer is kept for an hour; a panel reopened within the hour gets it instantly.
+#
+#   {"id":"trash","label":"Trash","path":"/home/mto/.local/share/Trash","bytes":123456}
+
+set -uo pipefail
+
+if [[ ${1:-} == "--usage" ]]; then
+  CACHE=${XDG_RUNTIME_DIR:-/tmp}/desktop-storage-usage.jsonl
+  if [[ -s $CACHE && -n $(find "$CACHE" -newermt '-1 hour' 2>/dev/null) ]]; then
+    cat "$CACHE"
+    exit 0
+  fi
+
+  # One measurement at a time: a second panel opening mid-measure waits and reads the
+  # cache, rather than running du over the same gigabytes alongside.
+  exec 9>"$CACHE.lock"
+  flock 9
+  if [[ -s $CACHE && -n $(find "$CACHE" -newermt '-1 hour' 2>/dev/null) ]]; then
+    cat "$CACHE"
+    exit 0
+  fi
+
+  data=${XDG_DATA_HOME:-$HOME/.local/share}
+  # xdg-user-dir answers with $HOME itself when no download folder is configured, and
+  # measuring all of home as "Downloads" would be a large and wrong number.
+  downloads=$(xdg-user-dir DOWNLOAD 2>/dev/null)
+  [[ -z $downloads || $downloads == "$HOME" || $downloads == "$HOME/" ]] && downloads=$HOME/Downloads
+  folders=(
+    "downloads|Downloads|$downloads"
+    "trash|Trash|$data/Trash"
+    "cache|Caches|${XDG_CACHE_HOME:-$HOME/.cache}"
+    "flatpak|Flatpak apps|$data/flatpak /var/lib/flatpak"
+    "containers|Containers|$data/containers"
+  )
+
+  : >"$CACHE.new"
+  for entry in "${folders[@]}"; do
+    IFS='|' read -r id label paths <<<"$entry"
+    existing=()
+    for path in $paths; do [[ -d $path ]] && existing+=("$path"); done
+    ((${#existing[@]} > 0)) || continue
+    # -x keeps each measurement on its own filesystem; unreadable corners (container
+    # layers owned by subuids) are skipped rather than failing the total. -D follows a
+    # folder that is itself a symlink -- ~/Downloads often points into a data disk, and
+    # measured as a link it is 28 bytes -- without following links inside it.
+    bytes=$(nice -n 19 ionice -c 3 timeout 600 du -sxbcD "${existing[@]}" 2>/dev/null | awk 'END { print $1 + 0 }')
+    jq -nc --arg id "$id" --arg label "$label" --arg path "${existing[0]}" --argjson bytes "${bytes:-0}" \
+      '{id: $id, label: $label, path: $path, bytes: $bytes}' | tee -a "$CACHE.new"
+  done
+  mv "$CACHE.new" "$CACHE"
+  exit 0
+fi
+
+# The disk at the bottom of a device's stack -- through dm-crypt, LVM, partitions -- and
+# whether anything on the way down was a crypt layer.
+disk_of() {
+  lsblk -Jso NAME,TYPE,RM,HOTPLUG,TRAN,MODEL,PATH "$1" 2>/dev/null | jq -c '
+    [.. | objects | select(has("type"))] as $chain
+    | ($chain | map(select(.type == "disk")) | first) as $disk
+    | {model: ($disk.model // null), transport: ($disk.tran // null),
+       removable: (($disk.rm // false) or ($disk.hotplug // false)),
+       disk: ($disk.path // null), encrypted: ($chain | any(.type == "crypt"))}'
+}
+
+filesystems=$(df -B1 --output=source,fstype,size,used,avail,target \
+  -x tmpfs -x devtmpfs -x efivarfs -x overlay -x squashfs 2>/dev/null |
+  awk 'NR > 1 && $2 !~ /^fuse/ && $3 > 0 { print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 }' |
+  while IFS=$'\t' read -r source fstype size used avail target; do
+    info='{}'
+    [[ $source == /dev/* ]] && info=$(disk_of "$source")
+    jq -nc --arg source "$source" --arg fstype "$fstype" --arg target "$target" \
+      --argjson size "$size" --argjson used "$used" --argjson avail "$avail" --argjson info "${info:-\{\}}" \
+      '{device: $source, fstype: $fstype, size: $size, used: $used, avail: $avail, mount: $target} + $info'
+  done | jq -sc '
+    group_by(.device)
+    | map(.[0] + {mounts: map(.mount)} | .mount = (.mounts | sort_by(length) | first))
+    | sort_by(if .mount == "/" then 0 elif .removable then 2 else 1 end, .mount)')
+
+# snapper keeps one numbered directory per snapshot; counting them needs no root, where
+# `snapper list` does.
+snapshots=null
+[[ -d /.snapshots ]] && snapshots=$(find /.snapshots -mindepth 1 -maxdepth 1 -regex '.*/[0-9]+' 2>/dev/null | wc -l)
+
+jq -nc --argjson filesystems "${filesystems:-[]}" --argjson snapshots "$snapshots" \
+  '{filesystems: $filesystems, snapshots: $snapshots}'
