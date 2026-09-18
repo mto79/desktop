@@ -246,9 +246,36 @@ Popup {
     width: parent.width
     spacing: 2
 
-    PanelSection {
+    // The fullest limit, big: the bar shows the same number, and the meters below say
+    // which limit it is and when it resets. Sessions waiting on you come first in the
+    // status line, since they are the thing to act on.
+    PanelHero {
+      readonly property var fullest: {
+        var top = null;
+        for (var i = 0; i < root.limits.length; i++)
+          if (!top || root.limits[i].percent > top.percent)
+            top = root.limits[i];
+        return top;
+      }
+
+      icon: "\u{f06a9}"
+      iconColor: root.waitingCount > 0 ? Color.popupUrgent : Color.popupText
       title: "Claude Code"
-      value: root.plan
+      status: {
+        var parts = [];
+        if (root.waitingCount > 0)
+          parts.push(root.waitingCount + " waiting for you");
+        else if (root.sessions.length > 0)
+          parts.push(root.sessions.length + (root.sessions.length === 1 ? " session" : " sessions"));
+        if (root.plan !== "")
+          parts.push(root.plan + " plan");
+        if (!root.available)
+          parts.push("limits unavailable");
+        return parts.join("  ·  ");
+      }
+      statusColor: root.waitingCount > 0 ? Color.popupUrgent : Color.popupMuted
+      value: fullest ? fullest.percent + "%" : "—"
+      valueColor: fullest ? root.tone(fullest.severity, fullest.percent) === Color.popupUrgent ? Color.popupUrgent : Color.popupText : Color.popupMuted
     }
 
     Repeater {
