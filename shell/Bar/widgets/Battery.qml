@@ -44,7 +44,11 @@ BarItem {
 
   visible: present
   implicitWidth: visible ? label.implicitWidth + Style.itemPaddingH * 2 : 0
-  command: ["desktop-menu", "power"]
+  // The battery panel, which carries the power profile the old click opened a menu for.
+  panelId: "battery"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
 
   IconLabel {
     id: label

@@ -88,6 +88,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  BatteryPanel {
+    id: batteryPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   BluetoothPanel {
     id: bluetoothPanel
 

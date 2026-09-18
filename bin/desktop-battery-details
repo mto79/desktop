@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+
+# desktop-battery-details: The battery facts UPower does not carry, as JSON, for the
+# battery panel.
+#
+#   {"present":true,"ac":true,"status":"Not charging","watts":0,"full_wh":70.5,
+#    "design_wh":98.1,"health":72,"cycles":228,"mode":"Adaptive","limit_start":50,
+#    "limit_end":90}
+#
+# The panel takes level, state and time remaining from UPower, which smooths them;
+# everything here is read straight from the kernel. Two things it gets right that a
+# first reading would not:
+#
+#   * Drivers report either energy (µWh, power in µW) or charge (µAh, current in µA).
+#     This Dell reports charge, so both are handled: charge times voltage is energy.
+#     Rate is instantaneous -- UPower's own figure lags the kernel by tens of seconds --
+#     and unsigned: some drivers report a draw as negative, which is still a draw.
+#   * A charge limit only means something when the firmware applies it. Dell's limits
+#     sit in charge_control_*_threshold whatever the mode, but only bind in "Custom";
+#     in "Adaptive" the firmware picks its own. So the mode is reported alongside them,
+#     and the panel only claims a limit the battery is actually held to.
+#
+# DESKTOP_POWER_SUPPLY_PATH points it at another tree, which is how the test runs it.
+
+set -uo pipefail
+
+ROOT=${DESKTOP_POWER_SUPPLY_PATH:-/sys/class/power_supply}
+
+battery=""
+ac=false
+for supply in "$ROOT"/*; do
+  [[ -r $supply/type ]] || continue
+  case $(<"$supply/type") in
+  Battery)
+    # Peripherals -- a mouse, a headset -- are batteries too; they say so with scope.
+    [[ -r $supply/scope && $(<"$supply/scope") == Device ]] && continue
+    [[ -z $battery ]] && battery=$supply
+    ;;
+  Mains)
+    [[ -r $supply/online && $(<"$supply/online") == 1 ]] && ac=true
+    ;;
+  esac
+done
+
+if [[ -z $battery ]]; then
+  echo '{"present":false}'
+  exit 0
+fi
+
+read_value() { [[ -r $battery/$1 ]] && tr -d '\n' <"$battery/$1"; }
+
+# Watt-hours from either unit. Charge is converted at the design minimum voltage, as
+# UPower does: it is the one voltage that does not move with the level.
+wh() {
+  local energy charge volts
+  energy=$(read_value "energy_$1")
+  if [[ -n $energy ]]; then
+    awk -v e="$energy" 'BEGIN { printf "%.1f", e / 1000000 }'
+    return
+  fi
+  charge=$(read_value "charge_$1")
+  volts=$(read_value voltage_min_design)
+  [[ -n $volts ]] || volts=$(read_value voltage_now)
+  [[ -n $charge && -n $volts ]] && awk -v c="$charge" -v v="$volts" 'BEGIN { printf "%.1f", c * v / 1e12 }'
+}
+
+full=$(wh full)
+design=$(wh full_design)
+
+watts=$(read_value power_now)
+if [[ -n $watts ]]; then
+  watts=$(awk -v p="$watts" 'BEGIN { if (p < 0) p = -p; printf "%.1f", p / 1000000 }')
+else
+  current=$(read_value current_now)
+  volts=$(read_value voltage_now)
+  [[ -n $current && -n $volts ]] &&
+    watts=$(awk -v i="$current" -v v="$volts" 'BEGIN { w = i * v / 1e12; if (w < 0) w = -w; printf "%.1f", w }')
+fi
+
+health=""
+[[ -n $full && -n $design ]] && health=$(awk -v f="$full" -v d="$design" 'BEGIN { if (d > 0) printf "%d", f / d * 100 + 0.5 }')
+
+# charge_types lists every mode with the active one in brackets: "Trickle [Adaptive] Custom".
+mode=$(read_value charge_types | grep -o '\[[^]]*\]' | tr -d '[]')
+
+jq -nc \
+  --argjson ac "$ac" \
+  --arg status "$(read_value status)" \
+  --arg watts "$watts" \
+  --arg full "$full" \
+  --arg design "$design" \
+  --arg health "$health" \
+  --arg cycles "$(read_value cycle_count)" \
+  --arg mode "$mode" \
+  --arg start "$(read_value charge_control_start_threshold)" \
+  --arg end "$(read_value charge_control_end_threshold)" \
+  'def num: if . == "" then null else tonumber end;
+   {present: true, ac: $ac, status: $status, watts: ($watts | num),
+    full_wh: ($full | num), design_wh: ($design | num), health: ($health | num),
+    cycles: (($cycles | num) as $c | if $c == 0 then null else $c end),
+    mode: (if $mode == "" then null else $mode end),
+    limit_start: ($start | num), limit_end: ($end | num)}'
