@@ -130,6 +130,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  MonitorsPanel {
+    id: monitorsPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   NetworkPanel {
     id: networkPanel
 

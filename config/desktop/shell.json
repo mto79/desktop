@@ -64,7 +64,8 @@
             "laptop": "muted",
             "unknown": "urgent"
           },
-          "onClick": "desktop-menu monitors"
+          "panel": "monitors",
+          "onRightClick": "desktop-menu monitors"
         },
         {
           "id": "toggles"
