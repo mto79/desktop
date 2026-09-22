@@ -1,0 +1,9 @@
+-- Picture-in-picture overlays
+hl.window_rule({ match = { title = "(Picture.?in.?[Pp]icture)" }, tag = "+pip" })
+hl.window_rule({ match = { tag = "pip" }, float = true })
+hl.window_rule({ match = { tag = "pip" }, pin = true })
+hl.window_rule({ match = { tag = "pip" }, size = { 600, 338 } })
+hl.window_rule({ match = { tag = "pip" }, keep_aspect_ratio = true })
+hl.window_rule({ match = { tag = "pip" }, border_size = 0 })
+hl.window_rule({ match = { tag = "pip" }, opacity = "1 1" })
+hl.window_rule({ match = { tag = "pip" }, move = { "100%-w-40", "4%" } })
