@@ -1,0 +1,286 @@
+#!/usr/bin/env python3
+
+"""A column down the left of every tmux window: the sessions, their windows, their agents.
+
+    desktop-tmux-sidebar --toggle          # prefix + e: on or off, everywhere at once
+    desktop-tmux-sidebar                   # the column itself; the toggle runs this
+    desktop-tmux-sidebar --attach <window> # give one window a column (the new-window hook)
+
+Sessions in bold with their windows underneath, the window you are in marked, and each
+window carrying the state of the agent in it -- ● waiting on you, · working, ✓ done and
+not yet seen -- from the records the tabs and the bar already read. Click a row to go
+there, or move with j/k and press Enter.
+
+prefix + s and prefix + g show the same things, one at a time and only when asked. This
+is for having them in view while working, which is what herdr's sidebar is for.
+
+It is on or off for the whole server rather than for one window, because a pane belongs to
+one window: a single column would vanish the moment it was used to switch away from the
+window holding it. So the toggle puts one in every window and hooks new ones, and switching
+around lands somewhere that has its own. They all read the same tmux, so they all agree.
+
+A column that is not being looked at asks tmux nothing: only the ones on screen refresh.
+"""
+
+import curses
+import json
+import os
+import subprocess
+import sys
+import time
+
+WIDTH = 30
+REFRESH_SECONDS = 2
+
+# A window opened while the sidebar is on gets one too. The index keeps these out of the
+# way of the hooks tmux.conf sets on the same events.
+HOOKS = ("after-new-window[50]", "after-new-session[50]")
+
+# The marks the window tabs use, so a row reads the same as the tab it belongs to.
+MARKS = {"waiting": "●", "working": "·", "done": "✓", "ready": "○"}
+COLOURS = {"waiting": 3, "working": 4, "done": 2, "ready": 0}
+
+
+def tmux(*args):
+    try:
+        done = subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=5)
+        return done.stdout.rstrip("\n") if done.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+# --- what to draw --------------------------------------------------------------------------
+
+
+def agents():
+    """Agent state per "session:window", for the agents on this tmux server.
+
+    Keyed by window: one agent to a window, and the pane it sits in is not worth a column
+    this narrow. Agents on another server -- a second tmux, or one in a container -- are
+    left out, since nothing here could switch to them.
+    """
+    socket = tmux("display-message", "-p", "#{socket_path}")
+    try:
+        out = subprocess.run(["desktop-agent-sessions", "--json"],
+                             capture_output=True, text=True, timeout=5)
+        listed = json.loads(out.stdout).get("sessions", [])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+    found = {}
+    for agent in listed:
+        target = agent.get("target") or ""
+        if not target or (socket and agent.get("socket") != socket):
+            continue
+        found.setdefault(target.rsplit(".", 1)[0], agent)
+    return found
+
+
+def rows(here):
+    """The tree as rows to draw: a session, then its windows, then the next session."""
+    states = agents()
+    listing = tmux("list-windows", "-a", "-F",
+                   "#{session_name}\t#{window_index}\t#{window_name}\t#{@agent_state}")
+    sessions = {}
+    for line in listing.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4:
+            continue
+        name, index, window, state = parts[:4]
+        agent = states.get(f"{name}:{index}", {})
+        sessions.setdefault(name, []).append({
+            "kind": "window", "session": name, "index": index, "text": window,
+            "state": agent.get("state") or state, "for": agent.get("for", ""),
+            "current": f"{name}:{index}" == here,
+        })
+
+    out = []
+    for name in sorted(sessions):
+        windows = sessions[name]
+        out.append({
+            "kind": "session", "session": name, "text": name,
+            "waiting": sum(1 for w in windows if w["state"] == "waiting"),
+            "current": name == here.split(":")[0],
+        })
+        out.extend(windows)
+    return out
+
+
+def line_of(row, width):
+    """A row as the text and the colour pair to draw it in."""
+    if row["kind"] == "session":
+        text = f" {row['text']}"
+        if row["waiting"]:
+            text += f"  {MARKS['waiting']}{row['waiting']}"
+        return text[:width].ljust(width), curses.color_pair(3 if row["waiting"] else 1) | curses.A_BOLD
+
+    mark = MARKS.get(row["state"], " ")
+    text = f"{'▸' if row['current'] else ' '}  {mark} {row['text']}"
+    # How long it has been waiting or working, when there is room for it.
+    if row["for"] and row["state"] in ("waiting", "working"):
+        room = width - len(text) - len(row["for"]) - 1
+        if room > 0:
+            text += " " * room + row["for"]
+    colour = curses.color_pair(COLOURS.get(row["state"], 0))
+    return text[:width].ljust(width), colour | (curses.A_BOLD if row["current"] else 0)
+
+
+def draw(screen, listed, cursor, offset):
+    height, width = screen.getmaxyx()
+    screen.erase()
+    for line, row in enumerate(listed[offset:offset + height]):
+        text, colour = line_of(row, width)
+        if offset + line == cursor:
+            colour |= curses.A_REVERSE
+        try:
+            screen.addstr(line, 0, text, colour)
+        except curses.error:
+            pass  # The bottom right cell cannot be written; the row is drawn regardless.
+    screen.refresh()
+
+
+def go(row, here):
+    """Switch to what was picked. The window first, so it is one jump and not two."""
+    if row["kind"] == "window":
+        tmux("select-window", "-t", f"{row['session']}:{row['index']}")
+    # Named, because a command run from inside a pane has no client of its own: without
+    # -c tmux switches whichever client it decides is current, and the one looking at
+    # this sidebar stays where it was. The busiest client of this session is the one
+    # whose window the sidebar is in.
+    clients = tmux("list-clients", "-t", here.split(":")[0], "-F", "#{client_activity} #{client_tty}")
+    busiest = sorted(line.split(" ", 1) for line in clients.splitlines() if " " in line)
+    if busiest:
+        tmux("switch-client", "-c", busiest[-1][1], "-t", row["session"])
+
+
+def sidebar(screen):
+    curses.curs_set(0)
+    curses.use_default_colors()
+    for pair, colour in enumerate(
+            [curses.COLOR_BLUE, curses.COLOR_GREEN, curses.COLOR_RED, curses.COLOR_YELLOW], 1):
+        curses.init_pair(pair, colour, -1)
+    curses.mousemask(curses.BUTTON1_CLICKED | curses.BUTTON4_PRESSED | curses.BUTTON5_PRESSED)
+    screen.timeout(200)
+
+    pane = os.environ.get("TMUX_PANE", "")
+    where = ["display-message", "-p", "-t", pane, "#{session_name}:#{window_index}"]
+    room = ["display-message", "-p", "-t", pane, "#{window_width}"]
+    visible = ["display-message", "-p", "-t", pane, "#{&&:#{window_active},#{session_attached}}"]
+
+    here = tmux(*where)
+    listed = rows(here)
+    cursor = next((i for i, row in enumerate(listed) if row["current"] and row["kind"] == "window"), 0)
+    offset = 0
+    last = time.time()
+    dirty = True
+
+    while True:
+        height = screen.getmaxyx()[0]
+        if cursor < offset:
+            offset = cursor
+        elif cursor >= offset + height:
+            offset = cursor - height + 1
+        if dirty:
+            draw(screen, listed, cursor, offset)
+            dirty = False
+
+        key = screen.getch()
+        if key == ord("q"):
+            # The same as the key that opened it: one column is never wanted on its own,
+            # so q closes them all rather than leaving the other windows with theirs.
+            toggle()
+            return
+        elif key in (ord("j"), curses.KEY_DOWN):
+            cursor, dirty = min(cursor + 1, len(listed) - 1), True
+        elif key in (ord("k"), curses.KEY_UP):
+            cursor, dirty = max(cursor - 1, 0), True
+        elif key in (ord("\n"), curses.KEY_ENTER, ord("l"), curses.KEY_RIGHT):
+            if listed:
+                go(listed[cursor], here)
+        elif key == ord("r"):
+            last = 0
+        elif key == curses.KEY_RESIZE:
+            dirty = True
+            # tmux resizes panes in proportion, so a wider or narrower terminal would
+            # leave the column wider or narrower than it needs to be. It is a fixed thing
+            # and asks for its width back. Nothing to loop on: a resize that changes
+            # nothing raises no further event.
+            if screen.getmaxyx()[1] != WIDTH and int(tmux(*room) or 0) > WIDTH + 20:
+                tmux("resize-pane", "-t", pane, "-x", str(WIDTH))
+        elif key == curses.KEY_MOUSE:
+            try:
+                _, _, row, _, state = curses.getmouse()
+            except curses.error:
+                continue
+            if state & curses.BUTTON4_PRESSED:
+                cursor, dirty = max(cursor - 1, 0), True
+            elif state & curses.BUTTON5_PRESSED:
+                cursor, dirty = min(cursor + 1, len(listed) - 1), True
+            elif 0 <= offset + row < len(listed):
+                cursor, dirty = offset + row, True
+                draw(screen, listed, cursor, offset)
+                go(listed[cursor], here)
+
+        # On a timer, because an agent that starts waiting has to appear on its own and
+        # tmux has no hook for that. Skipped entirely while this window is not on screen.
+        if time.time() - last >= REFRESH_SECONDS:
+            last = time.time()
+            if tmux(*visible) != "1":
+                continue
+            here = tmux(*where)
+            fresh = rows(here)
+            if fresh != listed:
+                listed, dirty = fresh, True
+                cursor = min(cursor, max(0, len(listed) - 1))
+
+
+# --- putting them in the windows, and taking them out --------------------------------------
+
+
+def panes():
+    """Every sidebar pane on this server."""
+    listing = tmux("list-panes", "-a", "-F", "#{pane_id}\t#{@sidebar}")
+    return [line.split("\t")[0] for line in listing.splitlines() if line.endswith("\t1")]
+
+
+def attach(window):
+    """Open a sidebar down the left of one window, unless it has one already."""
+    held = tmux("list-panes", "-t", window, "-F", "#{@sidebar}")
+    if "1" in held.splitlines():
+        return
+    # -f so the column is the height of the window rather than of whichever pane is
+    # active, and -d so opening one does not move the cursor out of the work.
+    pane = tmux("split-window", "-t", window, "-fhbd", "-l", str(WIDTH),
+                "-P", "-F", "#{pane_id}", sys.argv[0])
+    if pane:
+        tmux("set-option", "-p", "-t", pane, "@sidebar", "1")
+        tmux("set-option", "-p", "-t", pane, "remain-on-exit", "off")
+
+
+def toggle():
+    """Off if any window has one, on everywhere if none does."""
+    if panes():
+        for pane in panes():
+            tmux("kill-pane", "-t", pane)
+        for event in HOOKS:
+            tmux("set-hook", "-gu", event)
+        return
+    # In a slot of their own, so turning the sidebar off leaves any other hook on the
+    # same event -- the tabs use several -- exactly as it was.
+    hook = f"run-shell -b '{sys.argv[0]} --attach \"#{{hook_window}}\"'"
+    for event in HOOKS:
+        tmux("set-hook", "-g", event, hook)
+    for window in tmux("list-windows", "-a", "-F", "#{session_name}:#{window_index}").splitlines():
+        attach(window)
+
+
+if __name__ == "__main__":
+    argument = sys.argv[1] if len(sys.argv) > 1 else ""
+    if argument == "--toggle":
+        toggle()
+    elif argument == "--attach":
+        attach(sys.argv[2] if len(sys.argv) > 2 else "")
+    else:
+        try:
+            curses.wrapper(sidebar)
+        except KeyboardInterrupt:
+            pass
