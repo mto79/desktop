@@ -23,6 +23,7 @@ mkdir -p "$stubs" "$sandbox/.config/hypr"
 # stands in for a desk. reload and the rest are noise here and answer with nothing.
 cat >"$stubs/hyprctl" <<'STUB'
 #!/usr/bin/env bash
+[[ "$*" == *dispatch* ]] && echo "$*" >>"$DISPATCHED"
 [[ "$*" == *monitors* ]] && cat "$MONITORS_FIXTURE"
 exit 0
 STUB
@@ -31,10 +32,11 @@ for noop in desktop-workspace-pin notify-send; do
 done
 chmod +x "$stubs"/*
 
-# A screen as hyprctl reports it. The model is what layouts match on.
+# A screen as hyprctl reports it. The model is what layouts match on; dpmsStatus says
+# whether it is awake, which matters once a layout has been applied.
 screen() {
-  printf '{"name":"%s","model":"%s","width":%s,"height":%s,"disabled":false}' \
-    "$1" "$2" "${3:-1920}" "${4:-1080}"
+  printf '{"name":"%s","model":"%s","width":%s,"height":%s,"disabled":false,"dpmsStatus":%s}' \
+    "$1" "$2" "${3:-1920}" "${4:-1080}" "${5:-true}"
 }
 desk() {
   local out="$sandbox/monitors.json" first=1 arg
@@ -97,6 +99,18 @@ MONITORS_FIXTURE="$(desk "$LAPTOP" "$PORTRAIT")" HOME="$sandbox" PATH="$stubs:$P
   bash "$SWITCH" >/dev/null
 check "applying a layout already in force rewrites nothing" \
   grep -qx "# Generated on SENTINEL" "$CONF"
+
+# Applying a layout wakes the screens it leaves on. A dock plugged in while hypridle has
+# them powered down reconfigures the outputs, and the screen the reload rebuilds can come
+# back enabled and dark -- a black laptop panel in front of an unseen lock screen.
+DISPATCHED="$sandbox/dispatched"
+: >"$DISPATCHED"
+ASLEEP=$(screen eDP-1 0x4196 1920 1080 false)
+MONITORS_FIXTURE="$(desk "$ASLEEP" "$PORTRAIT")" DISPATCHED="$DISPATCHED" HOME="$sandbox" \
+  PATH="$stubs:$PATH" bash "$SWITCH" home >/dev/null
+check "a screen left asleep is woken after the layout is applied" \
+  grep -qx "dispatch dpms on eDP-1" "$DISPATCHED"
+check "and a screen that is already awake is left alone" lacks "DP-9" "$DISPATCHED"
 
 # What the bar shows for all this. The module is a command widget, so its whole
 # contract is one line of JSON -- an unparseable line renders as literal text across the

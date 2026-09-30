@@ -124,6 +124,18 @@ apply_layout() {
   # re-pinned against the monitors the reload just brought up -- not the old ones.
   desktop-workspace-pin
 
+  # A screen that is enabled but still asleep is woken. hypridle powers the screens down
+  # after eighteen minutes, and a dock plugged in while they are off reconfigures the
+  # outputs: the wake that follows can miss the screen this reload just rebuilt, which
+  # comes back enabled and dark. That is how a laptop panel stayed black through six
+  # attempts at a lock screen nobody could see. Only outputs this layout keeps on are
+  # listed, so a screen the layout disables is left alone.
+  local asleep screen
+  asleep=$(hyprctl monitors -j 2>/dev/null | jq -r '.[] | select(.dpmsStatus == false) | .name')
+  for screen in $asleep; do
+    hyprctl dispatch dpms on "$screen" >/dev/null
+  done
+
   notify-send "Monitors" "Applied the $name layout"
 }
 
