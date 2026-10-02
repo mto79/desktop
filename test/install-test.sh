@@ -124,6 +124,55 @@ print(d["hotkey"]["key"], d["hotkey"]["mode"], d["hotkey"]["enabled"],
   rm -rf "$vox_sandbox"
 fi
 
+# Nothing kills a runaway process on this machine unless both halves are installed: the
+# daemon without systemd-oomd-defaults watches nothing, and the defaults without the
+# daemon are a policy nobody reads. A terminal at 54.9G of 62G froze the machine for good
+# while neither was there, so both are checked, and so is the machine they are meant to be
+# on -- "installed by the script" and "actually on" came apart once already, with the copr
+# pin below.
+if listed systemd-oomd-defaults; then
+  pass "the pressure policy systemd-oomd needs is in the package list"
+else
+  fail "the pressure policy systemd-oomd needs is in the package list" \
+    "systemd-oomd-defaults missing — oomd would monitor nothing"
+fi
+if grep -q 'systemctl enable --now systemd-oomd.service' "$ROOT/install/config/oom.sh" 2>/dev/null; then
+  pass "a clean install turns systemd-oomd on"
+else
+  fail "a clean install turns systemd-oomd on" "install/config/oom.sh does not enable it"
+fi
+avoid="$ROOT/config/systemd/user/wayland-wm@.service.d/10-oom-avoid.conf"
+if grep -q '^ManagedOOMPreference=avoid' "$avoid" 2>/dev/null; then
+  pass "and asks that the compositor be killed last"
+else
+  fail "and asks that the compositor be killed last" "$avoid does not set ManagedOOMPreference=avoid"
+fi
+if have systemctl; then
+  if [[ $(systemctl is-enabled systemd-oomd.service 2>/dev/null) == enabled ]]; then
+    pass "systemd-oomd is enabled on this machine"
+  else
+    fail "systemd-oomd is enabled on this machine" \
+      "nothing would kill a runaway before it takes the desktop — run the oomd migration"
+  fi
+else
+  pass "skipped, systemctl not present"
+fi
+
+# A config script nothing sources never runs either, the same way a packaging one does
+# not. The hardware ones are sourced by their subdirectory path, so match on the tail.
+config_all="$ROOT/install/config/all.sh"
+unsourced=()
+while read -r f; do
+  rel=${f#"$ROOT/install/config/"}
+  [[ $rel == all.sh ]] && continue
+  grep -q "config/$rel" "$config_all" || unsourced+=("$rel")
+done < <(find "$ROOT/install/config" -name '*.sh' | sort)
+if ((${#unsourced[@]} == 0)); then
+  pass "every config script is sourced from config/all.sh"
+else
+  fail "every config script is sourced from config/all.sh" "${unsourced[*]}"
+fi
+
 # A packaging script nothing sources never runs. These four are known-unwired; the point
 # of the list is that a fifth gets noticed.
 known_unwired=(openshiftlocal.sh openvpn.sh stack.sh zoom.sh)
