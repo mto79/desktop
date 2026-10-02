@@ -23,9 +23,11 @@ args="$*"
 case "$args" in
 *socket_path*) echo "/tmp/here" ;;
 *list-windows*window_name*)
-  printf 'alpha\t1\tfish\t\n'
-  printf 'alpha\t2\tclaude\tworking\n'
-  printf 'beta\t1\tclaude\t\n'
+  # session, index, name, agent state, and the two the tabs of an AI column carry.
+  printf 'alpha\t1\tfish\t\t\t\n'
+  printf 'alpha\t2\tclaude\tworking\t\t\n'
+  printf 'beta\t1\tclaude\t\t\t\n'
+  printf 'ai-alpha-2-claude\t1\tclaude\twaiting\talpha-2\tclaude\n'
   ;;
 *list-windows*)
   printf 'alpha:1\nalpha:2\nbeta:1\n'
@@ -39,6 +41,7 @@ case "$args" in
   echo
   ;;
 *list-clients*) echo "1790000000 /dev/pts/9" ;;
+*list-panes*ai_column*) echo "%7 alpha-2" ;;
 *split-window*) echo "%9" ;;
 esac
 echo "$args" >>"$SANDBOX/did"
@@ -54,7 +57,13 @@ cat <<'JSON'
 ]}
 JSON
 STUB
-chmod +x "$sandbox/path/tmux" "$sandbox/path/desktop-agent-sessions"
+
+# A tab of an AI column is not switched to; the column it belongs to is.
+cat >"$sandbox/path/desktop-agent-tabs" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$SANDBOX/did"
+STUB
+chmod +x "$sandbox/path/tmux" "$sandbox/path/desktop-agent-sessions" "$sandbox/path/desktop-agent-tabs"
 
 # The script is loaded rather than run: its drawing and its tmux commands are what is
 # being checked, and a curses screen needs a terminal no test has.
@@ -73,6 +82,9 @@ if sys.argv[2] == "rows":
         print(sidebar.line_of(row, 30)[0].rstrip())
 elif sys.argv[2] == "go":
     sidebar.go({"kind": "window", "session": "beta", "index": "1"}, "alpha:2")
+elif sys.argv[2] == "go-tab":
+    sidebar.go({"kind": "window", "session": "ai-alpha-2-claude", "index": "1",
+                "tabs": "alpha-2"}, "alpha:2")
 elif sys.argv[2] == "attach":
     sidebar.attach("alpha:2")
 elif sys.argv[2] == "toggle":
@@ -89,7 +101,9 @@ drive() {
 drawn=$(drive rows)
 
 check "every session is drawn with its windows under it, in order" \
-  test "$(grep -c . <<<"$drawn")" = 5
+  test "$(grep -c . <<<"$drawn")" = 7
+check "a column's tabs are drawn under the project and model, not the session's name" \
+  grep -q '^ alpha-2 · claude  ●1$' <<<"$drawn"
 check "the window you are in is marked" grep -q '^▸ *· claude$' <<<"$drawn"
 check "an agent waiting shows on its window and counts on its session" \
   grep -q '^ beta  ●1$' <<<"$drawn"
@@ -105,6 +119,13 @@ check "the window is selected before the session, so it is one jump" \
   test "$(grep -c -m1 'select-window -t beta:1' "$sandbox/did")" = 1
 check "the client is switched by name, not left to tmux to guess" \
   grep -q 'switch-client -c /dev/pts/9 -t beta' "$sandbox/did"
+
+: >"$sandbox/did"
+drive go-tab >/dev/null
+check "a tab of an AI column is reached through the column, not switched to" \
+  grep -q 'jump ai-alpha-2-claude:1 /dev/pts/9' "$sandbox/did"
+check "and no client is switched to that narrow session" \
+  lacks 'switch-client' "$sandbox/did"
 
 : >"$sandbox/did"
 drive toggle >/dev/null

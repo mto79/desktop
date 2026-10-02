@@ -6,20 +6,23 @@
 #   desktop-agent-layout %3 claude opencode
 #
 #   +--------------------+--------+
-#   |                    | agent  |
-#   |      $EDITOR       |        |
 #   |                    |        |
+#   |      $EDITOR       | agent  |
+#   |                    |        |
+#   +--------------------+        |
+#   | shell              | 1  2   |
 #   +--------------------+--------+
-#   | shell                       |
-#   +-----------------------------+
 #
 # The target is named rather than taken from $TMUX, because this runs at login against a
 # session nobody has attached to yet as much as it runs from tdl inside a pane.
 #
-# The agent pane is given its command by tmux instead of having it typed in with
-# send-keys. That is what makes the login case reliable -- send-keys races the shell
-# starting up -- and it is what lets prefix+a respawn the pane later. The editor keeps
-# its shell, so quitting the editor leaves you somewhere rather than closing the pane.
+# The agent column runs the full height on the right and holds tabs rather than one
+# agent -- see desktop-agent-tabs, which is what the pane actually runs. A second agent
+# named here is a second set of tabs, reached with prefix+a, rather than a pane stacked
+# under the first: one column cannot show two agents at once.
+#
+# The editor keeps its shell, so quitting the editor leaves you somewhere rather than
+# closing the pane.
 
 set -euo pipefail
 
@@ -31,16 +34,46 @@ SECOND="${3:-}"
 editor=$(tmux display-message -p -t "$TARGET" '#{pane_id}')
 dir=$(tmux display-message -p -t "$TARGET" '#{pane_current_path}')
 
-# The bottom strip is split off first so the agent column beside the editor stops above
-# it, rather than running the full height of the window.
-tmux split-window -v -l 15% -t "$editor" -c "$dir"
-agent_pane=$(tmux split-window -h -l 30% -t "$editor" -c "$dir" -P -F '#{pane_id}')
-desktop-agent-swap --here "$agent_pane" "$AGENT"
+# Named now rather than when the pane is filled, because the session the column attaches
+# to is named after the model and `cx` is not a name any of this would agree on.
+AGENT=$(desktop-agent-swap --normalise "$AGENT")
+window=$(tmux display-message -p -t "$TARGET" '#{window_id}')
+group=$(desktop-agent-tabs group-for "$dir" "$window")
 
+# The session behind the column, made before the pane that shows it: the pane only has to
+# attach, and a second agent can be set up in the same breath.
+desktop-agent-tabs ensure "$group" "$dir" "$AGENT"
 if [[ -n $SECOND ]]; then
-  second_pane=$(tmux split-window -v -t "$agent_pane" -c "$dir" -P -F '#{pane_id}')
-  desktop-agent-swap --here "$second_pane" "$SECOND"
+  SECOND=$(desktop-agent-swap --normalise "$SECOND")
+  desktop-agent-tabs ensure "$group" "$dir" "$SECOND"
 fi
+
+# A window in a session nobody has attached takes the size of whichever client the server
+# used last -- and every column holds one, thirty columns wide. Built at login, where no
+# real client exists yet, the second window of the day would come out that narrow and have
+# no room to be split at all. Sized up for the splits, then handed back to tmux, which
+# gives it the size of whatever client comes to look at it.
+resized=false
+if (($(tmux display-message -p -t "$TARGET" '#{window_width}') < 80)); then
+  tmux resize-window -t "$TARGET" -x 200 -y 50
+  resized=true
+fi
+
+# The agent column is split off the whole window first, so it runs the full height on the
+# right. The shell then comes off the editor alone, which leaves it under the editor
+# rather than under the agent as well: the agent is the pane you watch while the editor
+# and the shell are the two you work in, and it is worth the height.
+agent_pane=$(tmux split-window -h -l 30% -t "$editor" -c "$dir" -P -F '#{pane_id}' \
+  "$(printf 'desktop-agent-tabs attach %q %q %q' "$group" "$dir" "$AGENT")")
+# Marked here as well as by the column itself, so the keys and the collector know what
+# this pane is from the moment it exists.
+tmux set-option -p -t "$agent_pane" @ai_column "$group"
+tmux set-option -p -t "$agent_pane" @ai_dir "$dir"
+tmux set-option -p -t "$agent_pane" @ai_model "$AGENT"
+tmux set-option -p -t "$agent_pane" remain-on-exit on
+tmux split-window -v -l 15% -t "$editor" -c "$dir"
+
+$resized && tmux set-option -wu -t "$TARGET" window-size
 
 tmux send-keys -t "$editor" "${EDITOR:-nvim} ." C-m
 tmux select-pane -t "$editor"

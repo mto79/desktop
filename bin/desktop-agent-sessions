@@ -149,9 +149,11 @@ def tmux_status():
 def pick():
     """The list in fzf, from a tmux popup: Enter jumps to the session's pane.
 
-    The jump is switch-client, which moves the client that opened the popup -- to another
-    session if need be, which is the point: the tabs cannot show those. A session in a
-    different tmux server cannot be switched to from this one, and says how to reach it.
+    The jump moves the client that opened the popup -- to another session if need be,
+    which is the point: the window tabs cannot show those. An agent sitting in a column's
+    tabs is reached through its column instead, which desktop-agent-tabs works out. A
+    session in a different tmux server cannot be switched to from this one, and says how
+    to reach it.
     """
     listed = sessions()
     if not listed:
@@ -185,7 +187,10 @@ def pick():
     if s["socket"] and own and os.path.realpath(s["socket"]) != os.path.realpath(own):
         input(f"It runs in another tmux server: tmux -S {s['socket']} attach -t {s['target']}\nPress Enter. ")
         return 0
-    subprocess.run(["tmux", "switch-client", "-t", s["target"]])
+    # Not switch-client: an agent in a column's tabs is reached through the column, whose
+    # session is 30 columns wide and already has a client. desktop-agent-tabs knows which
+    # it is, and falls back to a plain switch for an agent in an ordinary window.
+    subprocess.run(["desktop-agent-tabs", "jump", s["pane"] or s["target"]])
     return 0
 
 

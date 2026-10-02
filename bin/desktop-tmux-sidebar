@@ -78,28 +78,36 @@ def agents():
 def rows(here):
     """The tree as rows to draw: a session, then its windows, then the next session."""
     states = agents()
+    # @ai_group and @ai_model are session options, so a window of an agent column's tabs
+    # carries them here: that is what tells a row apart from an ordinary window, and it is
+    # why clicking one has to go through the column rather than switch to the session.
     listing = tmux("list-windows", "-a", "-F",
-                   "#{session_name}\t#{window_index}\t#{window_name}\t#{@agent_state}")
+                   "#{session_name}\t#{window_index}\t#{window_name}\t#{@agent_state}"
+                   "\t#{@ai_group}\t#{@ai_model}")
     sessions = {}
     for line in listing.splitlines():
         parts = line.split("\t")
-        if len(parts) < 4:
+        if len(parts) < 6:
             continue
-        name, index, window, state = parts[:4]
+        name, index, window, state, group, model = parts[:6]
         agent = states.get(f"{name}:{index}", {})
         sessions.setdefault(name, []).append({
             "kind": "window", "session": name, "index": index, "text": window,
             "state": agent.get("state") or state, "for": agent.get("for", ""),
-            "current": f"{name}:{index}" == here,
+            "current": f"{name}:{index}" == here, "tabs": group, "model": model,
         })
 
     out = []
     for name in sorted(sessions):
         windows = sessions[name]
+        # A column's tabs are a session named after the window that holds them, which is
+        # not a name worth reading. "desktop-3 · claude" is.
+        group = windows[0]["tabs"]
         out.append({
-            "kind": "session", "session": name, "text": name,
+            "kind": "session", "session": name,
+            "text": f"{group} · {windows[0]['model']}" if group else name,
             "waiting": sum(1 for w in windows if w["state"] == "waiting"),
-            "current": name == here.split(":")[0],
+            "current": name == here.split(":")[0], "tabs": group,
         })
         out.extend(windows)
     return out
@@ -140,16 +148,29 @@ def draw(screen, listed, cursor, offset):
 
 def go(row, here):
     """Switch to what was picked. The window first, so it is one jump and not two."""
-    if row["kind"] == "window":
-        tmux("select-window", "-t", f"{row['session']}:{row['index']}")
     # Named, because a command run from inside a pane has no client of its own: without
     # -c tmux switches whichever client it decides is current, and the one looking at
     # this sidebar stays where it was. The busiest client of this session is the one
     # whose window the sidebar is in.
     clients = tmux("list-clients", "-t", here.split(":")[0], "-F", "#{client_activity} #{client_tty}")
     busiest = sorted(line.split(" ", 1) for line in clients.splitlines() if " " in line)
-    if busiest:
-        tmux("switch-client", "-c", busiest[-1][1], "-t", row["session"])
+    client = busiest[-1][1] if busiest else ""
+
+    # A tab of an agent column is not somewhere a client can simply be switched to: that
+    # session is as narrow as the column and already has the column's own client on it.
+    if row.get("tabs"):
+        target = f"{row['session']}:{row['index']}" if row["kind"] == "window" else f"{row['session']}:"
+        try:
+            subprocess.run(["desktop-agent-tabs", "jump", target, client],
+                           capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return
+
+    if row["kind"] == "window":
+        tmux("select-window", "-t", f"{row['session']}:{row['index']}")
+    if client:
+        tmux("switch-client", "-c", client, "-t", row["session"])
 
 
 def sidebar(screen):

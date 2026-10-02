@@ -1,0 +1,293 @@
+#!/usr/bin/env bash
+
+# desktop-agent-tabs: the AI column of an agent window, with a tab per agent.
+#
+#   desktop-agent-tabs attach <group> <dir> <model>   # the column pane's own command
+#   desktop-agent-tabs new <pane> [model]             # prefix + t, another agent
+#   desktop-agent-tabs tab <pane> next|previous       # prefix + Tab
+#   desktop-agent-tabs model <pane> <model>|next      # prefix + a and prefix + A
+#   desktop-agent-tabs gc                             # sessions whose column has gone
+#
+# A tmux pane holds one program, so there is no such thing as a tab inside one. What the
+# column holds instead is a tmux client of its own, attached to a session whose windows
+# are the tabs -- so the tab bar is a real tmux status line, clickable, and a tab that is
+# not on top is a window nobody is looking at rather than a pane squashed to one row.
+#
+# That client is on the same server as everything else, which is the whole point: each
+# agent is an ordinary tmux window, so desktop-agent-state still marks it, the count in
+# every status bar still sees it, and the sidebar still lists it. A second server would
+# have hidden all three.
+#
+# One session per model, made when that model is first asked for:
+#
+#   ai-<project>-<window>-claude     tabs 1, 2, 3 ...
+#   ai-<project>-<window>-codex      tabs of its own
+#
+# prefix + a and prefix + A move the column between them, so each model keeps the tabs it
+# had. The window id is in the name because two windows on one project are two columns,
+# and a session can only ever show one window at a time -- sharing one would make both
+# columns show the same tab.
+#
+# Keys reach the outer tmux as they always did: it sees C-a first and never forwards it,
+# so every binding below is an ordinary one on the outer side that finds the column and
+# acts on its client. Nothing here needs a second prefix.
+
+set -uo pipefail
+
+die() {
+  echo "desktop-agent-tabs: $1" >&2
+  exit 1
+}
+
+# Exact names throughout. tmux matches a target by prefix otherwise, and these names
+# share one: -t ai-x-c would find ai-x-claude.
+exact() { echo "=$1"; }
+# A session option is set through a pane target like everything else, so the session has
+# to be named as one -- "name:" -- or tmux answers "no such session" for a session that
+# is right there.
+in_session() { echo "=$1:"; }
+
+slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g;s/--*/-/g;s/^-//;s/-$//'; }
+
+session_for() { echo "ai-$1-$2"; }
+
+rotation() { desktop-agent-swap --rotation; }
+
+next_model() {
+  local models current=$1 i
+  mapfile -t models < <(rotation)
+  for i in "${!models[@]}"; do
+    [[ ${models[i]} == "$current" ]] && {
+      echo "${models[(i + 1) % ${#models[@]}]}"
+      return
+    }
+  done
+  echo "${models[0]}"
+}
+
+# --- the column ---------------------------------------------------------------------------
+
+# The column pane is marked @ai_column and the sessions behind it @ai_group -- two names
+# for the same value on purpose. A pane format falls through to the session's options when
+# the pane has none of its own, so one name would have made every agent pane inside those
+# sessions look like a column, and the collector below would never have removed anything.
+#
+# Every pane of the window is asked, because the binding hands over whichever pane has the
+# focus and that is normally the editor.
+column_of() {
+  local window
+  window=$(tmux display-message -p -t "$1" '#{window_id}' 2>/dev/null) || return 1
+  tmux list-panes -t "$window" -F '#{pane_id} #{@ai_column}' 2>/dev/null |
+    awk 'NF > 1 { print $1; exit }'
+}
+
+group_of() { tmux display-message -p -t "$1" '#{@ai_column}'; }
+dir_of() { tmux display-message -p -t "$1" '#{@ai_dir}'; }
+
+# The client in the column is the one looking at a session of this group -- there is only
+# ever one, since only the column attaches to them.
+client_of() {
+  tmux list-clients -F '#{client_tty} #{client_session}' 2>/dev/null |
+    awk -v group="ai-$1-" 'index($2, group) == 1 { print $1; exit }'
+}
+
+session_of() {
+  tmux list-clients -F '#{client_tty} #{client_session}' 2>/dev/null |
+    awk -v group="ai-$1-" 'index($2, group) == 1 { print $2; exit }'
+}
+
+# A tab is a window holding one agent, filled by desktop-agent-swap --here -- which is
+# what gives it the pane option the tabs and the bar read, the agent's own command rather
+# than keys typed at a shell, and claude's --continue when there is something to continue.
+add_tab() { # session dir model [-a]
+  local pane
+  pane=$(tmux new-window -d "${4:--a}" -t "$(exact "$1:")" -c "$2" -n "$3" -P -F '#{pane_id}') || return 1
+  desktop-agent-swap --here "$pane" "$3" >/dev/null
+  echo "$pane"
+}
+
+# The column is narrow and its status line is the tab bar, so the session gets its own:
+# bottom, nothing but the tabs. Session options, so the windows everywhere else keep the
+# bar they have.
+ensure_session() { # session group dir model [width height]
+  local session=$1 group=$2 dir=$3 model=$4 width=${5:-80} height=${6:-24} pane
+  if tmux has-session -t "$(exact "$session")" 2>/dev/null; then
+    return 0
+  fi
+  tmux new-session -d -s "$session" -c "$dir" -n "$model" -x "$width" -y "$height" || return 1
+  tmux set-option -t "$(in_session "$session")" status-position bottom
+  tmux set-option -t "$(in_session "$session")" status-left ""
+  tmux set-option -t "$(in_session "$session")" status-right ""
+  # Without this the client would fall back to another session when the last tab closes --
+  # possibly the one the column is in, which cannot display itself. Detaching instead
+  # hands the pane back to the loop in `attach`, which starts the column again.
+  tmux set-option -t "$(in_session "$session")" detach-on-destroy on
+  tmux set-option -t "$(in_session "$session")" @ai_group "$group"
+  tmux set-option -t "$(in_session "$session")" @ai_model "$model"
+  pane=$(tmux display-message -p -t "$(exact "$session:")" '#{pane_id}')
+  desktop-agent-swap --here "$pane" "$model" >/dev/null
+}
+
+# --- the pane's command -------------------------------------------------------------------
+
+attach() { # group dir model
+  local group=$1 dir=$2 model=$3 socket session width height started
+  [[ -n ${TMUX:-} ]] || die "attach is the column pane's own command, and must run inside tmux"
+  # The server by its socket, because TMUX has to go: tmux refuses to attach a client from
+  # inside one of its own panes, and without the socket an unset TMUX would send the
+  # client to whichever server owns the default one.
+  socket=${TMUX%%,*}
+
+  tmux set-option -p -t "${TMUX_PANE}" @ai_column "$group"
+  tmux set-option -p -t "${TMUX_PANE}" @ai_dir "$dir"
+  tmux set-option -p -t "${TMUX_PANE}" @ai_model "$model"
+
+  while :; do
+    model=$(tmux display-message -p -t "${TMUX_PANE}" '#{@ai_model}')
+    [[ -n $model ]] || model=$3
+    session=$(session_for "$group" "$model")
+    read -r width height < <(tmux display-message -p -t "${TMUX_PANE}" '#{pane_width} #{pane_height}')
+    ensure_session "$session" "$group" "$dir" "$model" "$width" "$height" || die "could not make $session"
+
+    started=$SECONDS
+    env -u TMUX -u TMUX_PANE tmux -S "$socket" attach -t "$(exact "$session")"
+    # Switching model keeps the client attached, so getting here means it left: the last
+    # tab closed, or it was detached by hand. Starting over puts a fresh agent in the
+    # column. A session that cannot be attached at all would spin, so it is allowed to
+    # fail fast exactly once.
+    if ((SECONDS - started < 1)); then
+      sleep 1
+      started=$SECONDS
+      env -u TMUX -u TMUX_PANE tmux -S "$socket" attach -t "$(exact "$session")"
+      ((SECONDS - started < 1)) && die "the column cannot stay attached to $session"
+    fi
+  done
+}
+
+# --- what the keys do ---------------------------------------------------------------------
+
+cmd_new() { # pane [model]
+  local column group session model
+  column=$(column_of "$1") || die "no window there"
+  [[ -n $column ]] || die "this window has no AI column"
+  group=$(group_of "$column")
+  session=$(session_of "$group")
+  [[ -n $session ]] || die "the column is not attached to anything"
+  model=${2:-$(tmux display-message -p -t "$(exact "$session:")" '#{@agent}')}
+  [[ -n $model ]] || model=$(rotation | head -1)
+  add_tab "$session" "$(dir_of "$column")" "$model" >/dev/null || die "could not add a tab"
+  tmux select-window -t "$(exact "$session"):$(tmux display-message -p -t "$(exact "$session")" '#{window_index}')" 2>/dev/null
+  # The new tab is the one you asked for, so go to it, and leave the focus in the column.
+  tmux next-window -t "$(exact "$session")"
+  tmux select-pane -t "$column"
+}
+
+cmd_tab() { # pane next|previous
+  local column group session
+  column=$(column_of "$1") || die "no window there"
+  [[ -n $column ]] || die "this window has no AI column"
+  group=$(group_of "$column")
+  session=$(session_of "$group")
+  [[ -n $session ]] || die "the column is not attached to anything"
+  case "$2" in
+  next) tmux next-window -t "$(exact "$session")" ;;
+  previous | prev) tmux previous-window -t "$(exact "$session")" ;;
+  *) die "tab takes next or previous" ;;
+  esac
+  tmux select-pane -t "$column"
+}
+
+cmd_model() { # pane model|next
+  local column group dir wanted current tty session width height
+  column=$(column_of "$1") || die "no window there"
+  [[ -n $column ]] || die "this window has no AI column"
+  group=$(group_of "$column")
+  dir=$(dir_of "$column")
+  current=$(tmux display-message -p -t "$column" '#{@ai_model}')
+  if [[ ${2:-next} == next ]]; then
+    wanted=$(next_model "$current")
+  else
+    wanted=$(desktop-agent-swap --normalise "$2") || exit 1
+  fi
+  session=$(session_for "$group" "$wanted")
+  read -r width height < <(tmux display-message -p -t "$column" '#{pane_width} #{pane_height}')
+  ensure_session "$session" "$group" "$dir" "$wanted" "$width" "$height" || die "could not make $session"
+  tmux set-option -p -t "$column" @ai_model "$wanted"
+
+  tty=$(client_of "$group")
+  if [[ -n $tty ]]; then
+    tmux switch-client -c "$tty" -t "$(exact "$session")"
+  else
+    # The column pane died with its last tab; start it again on the model just chosen.
+    tmux respawn-pane -k -t "$column" -c "$dir" \
+      "desktop-agent-tabs attach $(printf '%q %q %q' "$group" "$dir" "$wanted")"
+  fi
+  tmux display-message " $wanted"
+}
+
+# Going to an agent now means going to the tab holding it, not switching to the session it
+# lives in: that session is 30 columns wide and already has a client of its own, and
+# putting a second one on it would squeeze both. So the outer client goes to the window
+# with the column, and the column's own client goes to the tab.
+#
+# The client to move is named when the caller knows it. A command run from inside a pane
+# has no client of its own, and tmux would otherwise move one of its choosing -- which is
+# how the sidebar first came to switch the wrong window.
+cmd_jump() { # agent-pane-or-window [outer-client]
+  local target=$1 outer=${2:-} session group column tty
+  session=$(tmux display-message -p -t "$target" '#{session_name}') || die "no such pane"
+  group=$(tmux show-options -qv -t "$(in_session "$session")" @ai_group)
+
+  if [[ -z $group ]]; then
+    # An ordinary agent pane, in an ordinary window.
+    tmux select-window -t "$(tmux display-message -p -t "$target" '#{session_name}:#{window_index}')"
+    [[ -n $outer ]] && set -- -c "$outer" || set --
+    tmux switch-client "$@" -t "$(exact "$session")"
+    tmux select-pane -t "$(tmux display-message -p -t "$target" '#{pane_id}')"
+    return
+  fi
+
+  column=$(tmux list-panes -a -F '#{pane_id} #{@ai_column}' 2>/dev/null |
+    awk -v group="$group" '$2 == group { print $1; exit }')
+  [[ -n $column ]] || die "the column those tabs belong to has gone"
+
+  tty=$(client_of "$group")
+  if [[ -n $tty ]]; then
+    tmux switch-client -c "$tty" -t "$(exact "$session")"
+    tmux select-window -t "$(tmux display-message -p -t "$target" '#{session_name}:#{window_index}')"
+    tmux set-option -p -t "$column" @ai_model \
+      "$(tmux show-options -qv -t "$(in_session "$session")" @ai_model)"
+  fi
+
+  tmux select-window -t "$(tmux display-message -p -t "$column" '#{session_name}:#{window_index}')"
+  [[ -n $outer ]] && set -- -c "$outer" || set --
+  tmux switch-client "$@" -t "$(exact "$(tmux display-message -p -t "$column" '#{session_name}')")"
+  tmux select-pane -t "$column"
+}
+
+# A column's sessions outlive the window it was in -- tmux has no reason to remove them --
+# so the window closing is when they go. Run from the window-unlinked hook, and safe to
+# run at any time: a session is only taken away once no pane claims its group.
+cmd_gc() {
+  local session group
+  while read -r session group; do
+    tmux list-panes -a -F '#{@ai_column}' 2>/dev/null | grep -qxF "$group" && continue
+    tmux kill-session -t "$(exact "$session")" 2>/dev/null
+  done < <(tmux list-sessions -F '#{session_name} #{@ai_group}' 2>/dev/null | awk 'NF > 1')
+}
+
+case "${1:-}" in
+attach) shift; attach "${1:?group}" "${2:?dir}" "${3:?model}" ;;
+new) shift; cmd_new "${1:?pane}" "${2:-}" ;;
+tab) shift; cmd_tab "${1:?pane}" "${2:?next or previous}" ;;
+model) shift; cmd_model "${1:?pane}" "${2:-next}" ;;
+jump) shift; cmd_jump "${1:?pane}" "${2:-}" ;;
+gc) cmd_gc ;;
+ensure)
+  shift
+  ensure_session "$(session_for "${1:?group}" "${3:?model}")" "$1" "${2:?dir}" "$3" ||
+    die "could not make the session for $3"
+  ;;
+group-for) shift; echo "$(slug "$(basename "${1:?dir}")")-${2#@}" ;;
+*) die "usage: desktop-agent-tabs attach|new|tab|model|jump|ensure|gc ..." ;;
+esac

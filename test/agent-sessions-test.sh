@@ -36,12 +36,21 @@ case "$*" in
 switch-client*) echo "$*" >>"$SANDBOX/switched" ;;
 esac
 STUB
+# The jump is desktop-agent-tabs' job now -- an agent in an AI column is reached through
+# the column, not by switching a client to the narrow session it lives in. What this test
+# still owns is that the picker hands over the right pane, and hands over nothing at all
+# for a session on another server.
+cat >"$sandbox/path/desktop-agent-tabs" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == jump ]] && echo "$2" >>"$SANDBOX/jumped"
+STUB
+
 # fzf picks the line naming $PICK, as a person typing it and pressing Enter would.
 cat >"$sandbox/path/fzf" <<'STUB'
 #!/usr/bin/env bash
 grep -m1 "$PICK"
 STUB
-chmod +x "$sandbox/path/tmux" "$sandbox/path/fzf"
+chmod +x "$sandbox/path/tmux" "$sandbox/path/fzf" "$sandbox/path/desktop-agent-tabs"
 
 sessions() {
   env -i PATH="$sandbox/path:/usr/bin:/bin" HOME=/home/u XDG_RUNTIME_DIR="$sandbox/runtime" \
@@ -64,10 +73,11 @@ record beta working %beta "$sandbox/own-socket"
 record other waiting %other "$sandbox/another-socket"
 ARGS=(--pick)
 sessions PICK=beta </dev/null >/dev/null
-check "picking a session switches this tmux to its pane" test "$(cat "$sandbox/switched")" = "switch-client -t beta:1.2"
+check "picking a session hands its pane over to be jumped to" \
+  test "$(cat "$sandbox/jumped")" = "%beta"
 
-rm -f "$sandbox/switched"
+rm -f "$sandbox/jumped"
 sessions PICK=other </dev/null >/dev/null 2>&1
-check "a session in another tmux server is not switched to here" test ! -e "$sandbox/switched"
+check "a session in another tmux server is not switched to here" test ! -e "$sandbox/jumped"
 
 finish

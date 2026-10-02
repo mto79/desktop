@@ -92,6 +92,19 @@ agent_pane_in() {
     awk 'NF > 1 { print $1; exit }'
 }
 
+# desktop-agent-tabs needs the same rotation and the same names this walks, and one list
+# of agents is the point: a fourth one should be a line here and nowhere else.
+case "${1:-}" in
+--rotation)
+  printf '%s\n' "${AGENTS[@]}"
+  exit 0
+  ;;
+--normalise)
+  normalise "${2:?usage: desktop-agent-swap --normalise <name>}"
+  exit 0
+  ;;
+esac
+
 here=false
 if [[ ${1:-} == --here ]]; then
   here=true
@@ -103,6 +116,17 @@ wanted="${2:-}"
 [[ -n $target ]] || die "no pane given, and not inside tmux"
 if $here && [[ -z $wanted ]]; then
   die "--here needs the agent to start there"
+fi
+
+# An AI column is a tmux client with a tab per agent, so changing its agent means moving
+# that client to the model's own session -- not respawning the pane, which would take the
+# whole column with it. Both bindings land here, so both keep working either way.
+if ! $here; then
+  column=$(tmux list-panes -t "$(tmux display-message -p -t "$target" '#{window_id}')" \
+    -F '#{pane_id} #{@ai_column}' 2>/dev/null | awk 'NF > 1 { print $1; exit }')
+  if [[ -n $column ]]; then
+    exec desktop-agent-tabs model "$column" "${wanted:-next}"
+  fi
 fi
 
 pane="$target"
