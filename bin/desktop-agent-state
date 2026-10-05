@@ -210,11 +210,19 @@ duration() {
 project=${cwd%/}
 project=${project##*/}
 
+# Which agent, in the title, so that several at once can be told apart without opening any:
+# "desktop - claude - agent 2". The number is the tab it has in its AI column -- the one on
+# the bar there -- and an agent in a plain pane, which has no tabs, goes without. @ai_group
+# is the session's, which a pane's format falls through to.
+who="${project:-Claude Code} - claude"
+tab=$(tmx display-message -p -t "$pane" '#{?@ai_group,#{window_index},}')
+[[ -n $tab ]] && who+=" - agent $tab"
+
 if ! $seen; then
   if [[ $state == waiting ]]; then
-    notify normal "${project:-Claude Code} needs you" "${message:-Waiting for your answer}"
+    notify normal "$who" "Waiting: ${message:-your answer is needed}"
   elif [[ $event == Stop && $previous_state == working ]] && ((now - turn >= NOTIFY_AFTER)); then
-    notify low "${project:-Claude Code} is done" "Finished after $(duration $((now - turn)))"
+    notify low "$who" "Done after $(duration $((now - turn)))"
   fi
 fi
 

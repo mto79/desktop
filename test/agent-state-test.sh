@@ -187,7 +187,7 @@ if require tmux; then
   tab_event Notification '"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"'
   check "the tab says waiting" test "$(tab)" = waiting
   check "waiting sends a notification naming the project and what it wants" \
-    notified "archive needs you Claude needs your permission to use Bash"
+    notified "archive - claude Waiting: Claude needs your permission to use Bash"
   for ((i = 0; i < 30; i++)); do [[ -s $JUMP_LOG ]] && break; sleep 0.1; done
   check "clicking it jumps to the agent's pane, on its own server" \
     grep -qx -- "--jump work:1.0 $socket" "$JUMP_LOG"
@@ -209,7 +209,7 @@ if require tmux; then
   : >"$NOTIFY_LOG"
   tab_event Stop
   check "a long turn sends a done notification with the whole turn's length" \
-    notified "archive is done Finished after 10m"
+    notified "archive - claude Done after 10m"
 
   # Claude's idle reminder a minute later is not a second notification.
   tab_event UserPromptSubmit
@@ -275,11 +275,22 @@ while True:
   tab_event PostToolUse
   : >"$NOTIFY_LOG"
   tab_event Notification '"notification_type":"permission_prompt"'
-  check "with the terminal not focused, you are not looking" notified "archive needs you"
+  check "with the terminal not focused, you are not looking" notified "archive - claude Waiting"
   unset ACTIVE_WINDOW_PID
 
   tab_event SessionEnd
   check "a session that ends takes its mark off the tab" test -z "$(tab)"
+
+  # An agent in an AI column is one of several, and the title says which: the number its
+  # tab has on the column's bar. The session is marked the way desktop-agent-tabs marks it.
+  tmux -L "$server" new-session -d -s ai-archive-1-claude -x 40 -y 20
+  tmux -L "$server" set-option -t '=ai-archive-1-claude:' @ai_group archive-1
+  second=$(tmux -L "$server" new-window -d -t '=ai-archive-1-claude:' -P -F '#{pane_id}')
+  : >"$NOTIFY_LOG"
+  printf '%s' '{"hook_event_name":"Notification","session_id":"column","cwd":"/home/someone/archive","notification_type":"permission_prompt","message":"Pick one"}' |
+    TMUX="$socket,1,0" TMUX_PANE="$second" DESKTOP_AGENT_PID="$claude_pid" bash "$STATE"
+  check "an agent in a column is named by its tab" \
+    notified "archive - claude - agent 1 Waiting: Pick one"
 
   kill "$viewer" 2>/dev/null
   tmux -L "$server" kill-server 2>/dev/null
