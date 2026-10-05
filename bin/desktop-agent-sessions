@@ -71,6 +71,19 @@ def duration(seconds):
     return f"{seconds // 3600}h{seconds % 3600 // 60:02d}m"
 
 
+def project_of(cwd):
+    """What to call the place an agent works in: its directory, or "repository · task".
+
+    A task's worktree is named after its branch, and "fix-runner" alone does not say whose.
+    desktop-worktree puts them in <repository>.worktrees/<task>, so the path says both.
+    """
+    parts = cwd.rstrip("/").split("/")
+    for i, part in enumerate(parts[:-1]):
+        if part.endswith(".worktrees") and part != ".worktrees":
+            return f"{part[:-len('.worktrees')]} · {parts[i + 1]}"
+    return parts[-1] or cwd or "?"
+
+
 def sessions(now=None, targets=True):
     now = time.time() if now is None else now
     home = str(Path.home())
@@ -103,7 +116,7 @@ def sessions(now=None, targets=True):
             "for": duration(now - since),
             "cwd": cwd,
             "place": ("~" + cwd[len(home):]) if cwd.startswith(home) else cwd,
-            "project": os.path.basename(cwd.rstrip("/")) or cwd or "?",
+            "project": project_of(cwd),
             "pane": record.get("pane") or "",
             "socket": record.get("socket") or "",
             "target": pane_target(record.get("pane"), record.get("socket")) if targets else None,

@@ -292,6 +292,13 @@ while True:
   check "an agent in a column is named by its tab" \
     notified "archive - claude - agent 1 Waiting: Pick one"
 
+  # A task's worktree is named after its branch; the title says whose task it is as well.
+  : >"$NOTIFY_LOG"
+  printf '%s' '{"hook_event_name":"Notification","session_id":"task","cwd":"/home/someone/archive.worktrees/fix-runner","notification_type":"permission_prompt","message":"Pick one"}' |
+    TMUX="$socket,1,0" TMUX_PANE="$second" DESKTOP_AGENT_PID="$claude_pid" bash "$STATE"
+  check "an agent in a task's worktree is named by repository and task" \
+    notified "archive · fix-runner - claude - agent 1 Waiting: Pick one"
+
   kill "$viewer" 2>/dev/null
   tmux -L "$server" kill-server 2>/dev/null
   rm -f "$socket"

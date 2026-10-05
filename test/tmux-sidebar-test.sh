@@ -28,6 +28,8 @@ case "$args" in
   printf 'alpha\t2\tclaude\tworking\t\t\n'
   printf 'beta\t1\tclaude\t\t\t\n'
   printf 'ai-alpha-2-claude\t1\tclaude\twaiting\talpha-2\tclaude\n'
+  # And a seventh, for a tab working in a task's worktree.
+  printf 'ai-alpha-2-claude\t2\tclaude\t\talpha-2\tclaude\tfix-runner\n'
   ;;
 *list-windows*)
   printf 'alpha:1\nalpha:2\nbeta:1\n'
@@ -101,9 +103,11 @@ drive() {
 drawn=$(drive rows)
 
 check "every session is drawn with its windows under it, in order" \
-  test "$(grep -c . <<<"$drawn")" = 7
+  test "$(grep -c . <<<"$drawn")" = 8
 check "a column's tabs are drawn under the project and model, not the session's name" \
   grep -q '^ alpha-2 · claude  ●1$' <<<"$drawn"
+check "a tab working in a worktree is drawn as its task, not its model" \
+  grep -q '^ *fix-runner$' <<<"$drawn"
 check "the window you are in is marked" grep -q '^▸ *· claude$' <<<"$drawn"
 check "an agent waiting shows on its window and counts on its session" \
   grep -q '^ beta  ●1$' <<<"$drawn"

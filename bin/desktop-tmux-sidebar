@@ -83,13 +83,17 @@ def rows(here):
     # why clicking one has to go through the column rather than switch to the session.
     listing = tmux("list-windows", "-a", "-F",
                    "#{session_name}\t#{window_index}\t#{window_name}\t#{@agent_state}"
-                   "\t#{@ai_group}\t#{@ai_model}")
+                   "\t#{@ai_group}\t#{@ai_model}\t#{b:@worktree}")
     sessions = {}
     for line in listing.splitlines():
         parts = line.split("\t")
         if len(parts) < 6:
             continue
         name, index, window, state, group, model = parts[:6]
+        # A tab is named after its model, like every other tab of its column. One working
+        # in a worktree has something better to say: which task it is.
+        if group and len(parts) > 6 and parts[6]:
+            window = parts[6]
         agent = states.get(f"{name}:{index}", {})
         sessions.setdefault(name, []).append({
             "kind": "window", "session": name, "index": index, "text": window,

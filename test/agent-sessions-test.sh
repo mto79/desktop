@@ -76,6 +76,17 @@ sessions PICK=beta </dev/null >/dev/null
 check "picking a session hands its pane over to be jumped to" \
   test "$(cat "$sandbox/jumped")" = "%beta"
 
+# A task's worktree is named after its branch, so the list says whose task it is.
+printf '{"agent":"claude","session":"task","state":"working","since":%d,"cwd":"/home/u/repo.worktrees/fix-runner","pane":"%%task","socket":"%s","pid":%d}\n' \
+  "$(date +%s)" "$sandbox/own-socket" "$pid" >"$sandbox/runtime/desktop/agents/task.json"
+ARGS=(--json)
+check "an agent in a task's worktree is listed by repository and task" \
+  test "$(sessions | jq -r '.sessions[] | select(.session == "task") | .project')" = "repo · fix-runner"
+check "and any other by its directory" \
+  test "$(sessions | jq -r '.sessions[] | select(.session == "beta") | .project')" = "beta"
+rm "$sandbox/runtime/desktop/agents/task.json"
+ARGS=(--pick)
+
 rm -f "$sandbox/jumped"
 sessions PICK=other </dev/null >/dev/null 2>&1
 check "a session in another tmux server is not switched to here" test ! -e "$sandbox/jumped"

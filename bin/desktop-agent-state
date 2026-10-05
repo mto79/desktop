@@ -207,8 +207,15 @@ duration() {
   fi
 }
 
+# A task's worktree is named after its branch, which says nothing about the repository it
+# belongs to: "desktop · fix-runner", from where desktop-worktree puts them. Read off the
+# path rather than asked of git, which this hook cannot afford on every event.
 project=${cwd%/}
-project=${project##*/}
+if [[ $project =~ ([^/]+)\.worktrees/([^/]+) ]]; then
+  project="${BASH_REMATCH[1]} · ${BASH_REMATCH[2]}"
+else
+  project=${project##*/}
+fi
 
 # Which agent, in the title, so that several at once can be told apart without opening any:
 # "desktop - claude - agent 2". The number is the tab it has in its AI column -- the one on
