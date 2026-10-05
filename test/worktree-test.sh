@@ -240,4 +240,44 @@ TMUX_SESSIONIZER_CONFIG_FILE="$sandbox/sessionizer-dirs" bash "$ROOT/config/tmux
 check "the sessionizer offers tasks under their repository" grep -qx "$projects/repo.worktrees/listed" "$sandbox/fzf-input"
 check "and not the directory that holds them" lacks -x "$projects/repo.worktrees" "$sandbox/fzf-input"
 
+# A name typed at a prompt is typed as words, and "tmux bar" used to be refused outright.
+in_repo "$repo" new "two words" >/dev/null
+check "a name with a space becomes a branch with a dash" \
+  test "$(git -C "$projects/repo.worktrees/two-words" symbolic-ref --short HEAD 2>/dev/null)" = two-words
+# tmux shows a binding's output and not its stderr, so a refusal came back as "returned 1".
+refusal=$(cd "$repo" && TMUX="fake,1,0" DESKTOP_WORKTREE_CLIENT=nobody bash "$WT" new 'bad..name' 2>&1; echo "exit=$?")
+check "a refusal from a key binding still says why" grep -q "not a valid branch name" <<<"$refusal"
+check "and leaves the status line to its own message" grep -qx "exit=0" <<<"$refusal"
+
+# --- a task as a tab
+# Asked for from a window that has an AI column, a task is a tab in that column rather than
+# a window of its own: only the agent moves to the worktree.
+printf '#!/usr/bin/env bash\necho "$*" >>"%s/tabs.log"\n' "$sandbox" >"$stubs/desktop-agent-tabs"
+chmod +x "$stubs/desktop-agent-tabs"
+tm new-window -d -t =repo: -n columned -c "$repo"
+columned=$(tm list-panes -t =repo:columned -F '#{pane_id}')
+tm set-option -p -t "$columned" @ai_column repo-9
+windows_before=$(tm list-windows -t =repo | wc -l)
+in_repo "$repo" new --tab "$columned" tabbed >/dev/null
+check "a task asked for from a column still gets its worktree" test -d "$projects/repo.worktrees/tabbed"
+check "and is handed to the column as a tab working there" \
+  grep -qxF "new $columned  $projects/repo.worktrees/tabbed" "$sandbox/tabs.log"
+check "not given a window of its own" test "$(tm list-windows -t =repo | wc -l)" = "$windows_before"
+plainpane=$(tm list-panes -t =repo:git -F '#{pane_id}' | head -1)
+in_repo "$repo" new --tab "$plainpane" windowed >/dev/null
+check "a window with no column gets the task as a window after all" \
+  test -n "$(tm list-windows -t =repo -F '#{window_name}' | grep -x windowed)"
+rm -f "$stubs/desktop-agent-tabs"
+
+# --- starting one from tmux
+# prefix + T is how a second change gets a checkout of its own instead of a second agent in
+# the same one. The client is named because a binding has no pane to take it from, and the
+# one tmux would pick may be an AI column's.
+binding=$(grep '^bind-key T ' "$ROOT/config/tmux/tmux.conf")
+check "prefix + T starts a task from the pane's repository" \
+  grep -q "cd '#{pane_current_path}' && .*desktop-worktree new --tab '#{pane_id}' '%%'" <<<"$binding"
+check "and names the client that asked" grep -q "DESKTOP_WORKTREE_CLIENT='#{client_name}'" <<<"$binding"
+check "which is the client that is taken there" \
+  grep -q 'switch-client ${DESKTOP_WORKTREE_CLIENT:+-c "$DESKTOP_WORKTREE_CLIENT"}' "$WT"
+
 finish
