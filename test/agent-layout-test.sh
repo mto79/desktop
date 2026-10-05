@@ -86,8 +86,17 @@ check "the column holds a client of its own, looking at that session" \
   test "$(tm list-clients -F '#{client_session}' | grep -cx "$session")" = 1
 check "its status line is the tab bar, at the bottom" \
   test "$(tm show-options -qv -t "=$session:" status-position)" = bottom
-check "and carries nothing but the tabs" \
-  test -z "$(tm show-options -qv -t "=$session:" status-left)$(tm show-options -qv -t "=$session:" status-right)"
+# The model is said once, on the left, so the tabs beside it can be numbers alone. The
+# format is read from the config the way tmux will read it; the test server has none.
+check "it names the model once, on the left" \
+  test "$(tm display-message -p -t "=$session:" "$(tm show-options -qv -t "=$session:" status-left)" | sed 's/#\[[^]]*\]//g')" = " claude "
+check "and carries nothing else beside the tabs" \
+  test -z "$(tm show-options -qv -t "=$session:" status-right)"
+tabname=$(grep -oP '^set -g @agent-tab-name "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")
+check "a tab of the column is a number, without the name every one of them shares" \
+  test -z "$(tm display-message -p -t "=$session:" "$tabname")"
+check "while a tab anywhere else keeps its name" \
+  grep -q ide <<<"$(tm display-message -p -t work:ide "$tabname")"
 # Without this the client falls back to another session when the last tab closes -- which
 # can be the session the column is in, and no pane can display the window holding it.
 check "it detaches rather than wandering when the last tab closes" \
@@ -120,6 +129,29 @@ second=$(tm display-message -p -t "=$session:" '#{window_index}')
 check "prefix + Tab moves to another tab" test "$first" != "$second"
 desktop-agent-tabs tab "$editor" previous
 check "and back again" test "$(tm display-message -p -t "=$session:" '#{window_index}')" = "$first"
+
+# --- a tab working somewhere else -----------------------------------------------------------
+
+# prefix + T: the same column, but the agent in a directory of its own -- a task's worktree.
+mkdir -p "$sandbox/elsewhere"
+desktop-agent-tabs new "$editor" "" "$sandbox/elsewhere"
+elsewhere=$(tm list-windows -a -F '#{window_id} #{@worktree}' | awk -v p="$sandbox/elsewhere" '$2 == p { print $1 }')
+check "a tab can be given a directory of its own" test -n "$elsewhere"
+check "which is where its agent starts" \
+  test "$(tm display-message -p -t "$elsewhere" '#{pane_start_path}')" = "$sandbox/elsewhere"
+check "in the column that asked, not a window of its own" \
+  test "$(tm display-message -p -t "$elsewhere" '#{@ai_group}')" = "$group"
+tm kill-window -t "$elsewhere"
+tm select-window -t "=$session:$first"
+
+# prefix + [, with the focus in the column. The pane there is a client on its alternate
+# screen and has no history; the conversation to read back is in the tab.
+desktop-agent-tabs scroll "$column"
+check "scrolling back enters copy mode in the tab" \
+  test "$(tm display-message -p -t "=$session:" '#{pane_in_mode}')" = 1
+check "and not in the column pane, which has nothing to scroll" \
+  test "$(tm display-message -p -t "$column" '#{pane_in_mode}')" = 0
+tm send-keys -t "=$session:" -X cancel
 
 # --- models, each with its own tabs --------------------------------------------------------
 
@@ -182,6 +214,14 @@ printf '{"type":"user","entrypoint":"cli"}\n' >"$HOME/.claude/projects/$slug/a.j
 desktop-agent-swap --here "$agent" claude >/dev/null
 check "a conversation in that directory is continued rather than lost" \
   grep -q -- '--continue' <<<"$(tm display-message -p -t "$agent" '#{pane_start_command}')"
+# A tab is asked for to start something else. --continue there would put a second claude
+# in the conversation the first tab is still having, both writing the one transcript.
+desktop-agent-tabs new "$editor"
+newest=$(tm list-panes -s -t "=$session" -F '#{pane_id}' | sort -t% -k2 -n | tail -1)
+check "a new tab is a new conversation, even where there is one to continue" \
+  lacks -- '--continue' <<<"$(tm display-message -p -t "$newest" '#{pane_start_command}')"
+check "and the tab that was talking is left running what it was" \
+  grep -q -- '--continue' <<<"$(tm display-message -p -t "$agent" '#{pane_start_command}')"
 check "codex is not given a resume flag, which is not scoped to this directory" \
   lacks resume <<<"$(desktop-agent-swap --here "$agent" codex >/dev/null && tm display-message -p -t "$agent" '#{pane_start_command}')"
 
@@ -219,23 +259,28 @@ check "and a window with a plain agent pane still cycles in place" \
 # --- which sessions the choosers show -------------------------------------------------------
 
 # prefix + s is for the sessions you work in, and a column's tabs are not one of those.
-# The filter is read back out of the config rather than written again here: it is a format
-# string, and a format string that stops matching fails silently and shows everything.
-filter_for() { grep -oP "^bind-key $1 choose-tree [^']*-f '\K[^']+" "$ROOT/config/tmux/tmux.conf"; }
-
-plain=$(tm list-sessions -f "$(filter_for s)" -F '#{session_name}')
+# What is checked is the list each menu is built from.
+plain=$(desktop-agent-tabs sessions | cut -f4)
 check "prefix + s shows the sessions you work in" grep -qx work <<<"$plain"
 check "and leaves out the sessions behind a column" lacks '^ai-' <<<"$plain"
+check "and the binding is that menu" \
+  grep -q "^bind-key s run-shell \"desktop-agent-tabs pick .* sessions\"" "$ROOT/config/tmux/tmux.conf"
 
-tabs=$(tm list-sessions -f "$(filter_for S)" -F '#{session_name}')
-check "prefix + S shows the columns' sessions" grep -qx "ai-$group-claude" <<<"$tabs"
-check "and nothing else" lacks -v '^ai-' <<<"$tabs"
-check "every model of every column is in it" test "$(grep -c '^ai-' <<<"$tabs")" = 4
+# prefix + S is the other half, and is a menu built from this list rather than the same
+# tree with the filter turned round: since tmux 3.7 choose-tree keeps a window of several
+# panes whatever the filter says, so the inverse filter listed work beside the columns.
+tabs=$(desktop-agent-tabs tabs)
+check "prefix + S shows the columns' tabs" grep -qP "^$group\tclaude\t@" <<<"$tabs"
+check "and nothing else" lacks -vP "^[^\t]+\t[^\t]+\t@\d+\t" <<<"$tabs"
+check "every model of every column is in it" test "$(cut -f1,2 <<<"$tabs" | sort -u | wc -l)" = 4
+check "one line a tab" test "$(wc -l <<<"$tabs")" = \
+  "$(tm list-windows -a -F '#{session_name}' | grep -c '^ai-')"
 # Choosing one must go through its column: switching a client to a session as narrow as a
 # column puts a second client on it and squeezes both.
-chooser=$(grep '^bind-key S choose-tree' "$ROOT/config/tmux/tmux.conf")
-check "choosing one goes through its column" grep -q 'desktop-agent-tabs jump' <<<"$chooser"
-check "and not by switching a client to it" lacks 'switch-client' <<<"$chooser"
+check "choosing one goes through its column" \
+  grep -q "desktop-agent-tabs jump" <<<"$(sed -n '/^pick_tabs()/,/^}/p' "$ROOT/bin/desktop-agent-tabs")"
+check "and the binding is that menu" \
+  grep -q "^bind-key S run-shell \"desktop-agent-tabs pick " "$ROOT/config/tmux/tmux.conf"
 
 # --- the sessions do not outlive the window ------------------------------------------------
 

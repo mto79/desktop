@@ -4,8 +4,12 @@
 #
 #   desktop-agent-tabs attach <group> <dir> <model>   # the column pane's own command
 #   desktop-agent-tabs new <pane> [model]             # prefix + t, another agent
+#   desktop-agent-tabs new <pane> '' <dir>            # a tab working somewhere else: a task
 #   desktop-agent-tabs tab <pane> next|previous       # prefix + Tab
 #   desktop-agent-tabs model <pane> <model>|next      # prefix + a and prefix + A
+#   desktop-agent-tabs scroll <pane> [-u]             # prefix + [ and prefix + PageUp
+#   desktop-agent-tabs pick <client>                  # prefix + S, a menu of every tab
+#   desktop-agent-tabs pick <client> sessions         # prefix + s, the sessions you work in
 #   desktop-agent-tabs gc                             # sessions whose column has gone
 #
 # A tmux pane holds one program, so there is no such thing as a tab inside one. What the
@@ -97,14 +101,20 @@ session_of() {
 }
 
 # A tab is a window holding one agent, filled by desktop-agent-swap --here -- which is
-# what gives it the pane option the tabs and the bar read, the agent's own command rather
-# than keys typed at a shell, and claude's --continue when there is something to continue.
+# what gives it the pane option the tabs and the bar read, and the agent's own command
+# rather than keys typed at a shell.
+#
+# --fresh because a tab is asked for to start something else while the others carry on.
+# Only the first tab of a session, made in ensure_session, picks up where the project left
+# off; a second claude given --continue would join the conversation the first is still in.
 add_tab() { # session dir model [-a]
   local pane
   pane=$(tmux new-window -d "${4:--a}" -t "$(exact "$1:")" -c "$2" -n "$3" -P -F '#{pane_id}') || return 1
-  desktop-agent-swap --here "$pane" "$3" >/dev/null
+  desktop-agent-swap --here --fresh "$pane" "$3" >/dev/null
   echo "$pane"
 }
+
+STATUS_LEFT='#[fg=#{E:@agent-tab-colour},bold] #{@ai_model} '
 
 # The column is narrow and its status line is the tab bar, so the session gets its own:
 # bottom, nothing but the tabs. Session options, so the windows everywhere else keep the
@@ -116,7 +126,9 @@ ensure_session() { # session group dir model [width height]
   fi
   tmux new-session -d -s "$session" -c "$dir" -n "$model" -x "$width" -y "$height" || return 1
   tmux set-option -t "$(in_session "$session")" status-position bottom
-  tmux set-option -t "$(in_session "$session")" status-left ""
+  # The model, once, in its own colour; the tabs beside it are only numbers. A format
+  # rather than the name itself, so it follows the theme like the tabs do.
+  tmux set-option -t "$(in_session "$session")" status-left "$STATUS_LEFT"
   tmux set-option -t "$(in_session "$session")" status-right ""
   # Without this the client would fall back to another session when the last tab closes --
   # possibly the one the column is in, which cannot display itself. Detaching instead
@@ -166,8 +178,12 @@ attach() { # group dir model
 
 # --- what the keys do ---------------------------------------------------------------------
 
-cmd_new() { # pane [model]
-  local column group session model
+# The directory is the column's own unless one is named, which is how a task gets a tab:
+# the same column, an agent of its own, working in a worktree instead of the checkout the
+# editor is in. Such a tab is marked with the worktree it belongs to, so its name can be put
+# on the bar -- the others are only numbers -- and desktop-worktree can find it again.
+cmd_new() { # pane [model] [dir]
+  local column group session model dir=${3:-} pane
   column=$(column_of "$1") || die "no window there"
   [[ -n $column ]] || die "this window has no AI column"
   group=$(group_of "$column")
@@ -175,7 +191,8 @@ cmd_new() { # pane [model]
   [[ -n $session ]] || die "the column is not attached to anything"
   model=${2:-$(tmux display-message -p -t "$(exact "$session:")" '#{@agent}')}
   [[ -n $model ]] || model=$(rotation | head -1)
-  add_tab "$session" "$(dir_of "$column")" "$model" >/dev/null || die "could not add a tab"
+  pane=$(add_tab "$session" "${dir:-$(dir_of "$column")}" "$model") || die "could not add a tab"
+  [[ -n $dir ]] && tmux set-option -w -t "$pane" @worktree "$dir"
   tmux select-window -t "$(exact "$session"):$(tmux display-message -p -t "$(exact "$session")" '#{window_index}')" 2>/dev/null
   # The new tab is the one you asked for, so go to it, and leave the focus in the column.
   tmux next-window -t "$(exact "$session")"
@@ -195,6 +212,18 @@ cmd_tab() { # pane next|previous
   *) die "tab takes next or previous" ;;
   esac
   tmux select-pane -t "$column"
+}
+
+# Copy mode in the tab on top, not in the column pane: that pane is a client on its
+# alternate screen, with nothing to scroll back through.
+cmd_scroll() { # pane [-u]
+  local column group session
+  column=$(column_of "$1") || die "no window there"
+  [[ -n $column ]] || die "this window has no AI column"
+  group=$(group_of "$column")
+  session=$(session_of "$group")
+  [[ -n $session ]] || die "the column is not attached to anything"
+  tmux copy-mode ${2:+"$2"} -t "$(exact "$session:")"
 }
 
 cmd_model() { # pane model|next
@@ -265,6 +294,84 @@ cmd_jump() { # agent-pane-or-window [outer-client]
   tmux select-pane -t "$column"
 }
 
+# prefix + S: every column, its models and their tabs, and nothing else.
+#
+# A menu rather than choose-tree, because choose-tree cannot be made to leave the other
+# sessions out. Its filter is asked of panes, and since tmux 3.7 a window of more than one
+# pane stays in the tree even when none of them match -- so every session holding an agent
+# window, which is every session worth having, turned up beside the columns' own.
+#
+# One line per tab: group, model, window id, index, whether it is the one on top, title.
+tabs() {
+  tmux list-windows -a -f '#{!=:#{@ai_group},}' \
+    -F '#{@ai_group}	#{@ai_model}	#{window_id}	#{window_index}	#{window_active}	#{?pane_title,#{pane_title},#{window_name}}' \
+    2>/dev/null | sort -t '	' -k1,1 -k2,2 -k4,4n
+}
+
+# prefix + s is the other half, the sessions you work in: everything a column is not
+# behind. Asked of sessions rather than of panes, so nothing a tab holds can let one in.
+#
+# One line per session: id, whether a client is on it, how many windows, name.
+sessions() {
+  tmux list-sessions -f '#{==:#{@ai_group},}' \
+    -F '#{session_id}	#{?session_attached,1,0}	#{session_windows}	#{session_name}' 2>/dev/null |
+    sort -t '	' -k4,4
+}
+
+# Both menus number their lines the same way, and a title or a name is someone else's to
+# set: a # in it would be read as a format.
+KEYS=123456789abcdefghijklmnopqrstuvwxyz
+label() { echo "${1//#/##}"; }
+
+show_menu() { # client title nothing-to-show item...
+  local client=$1 title=$2 none=$3
+  shift 3
+  if (($# == 0)); then
+    tmux display-message -c "$client" " $none"
+    return
+  fi
+  tmux display-menu -c "$client" -T " $title " -x C -y C -- "$@"
+}
+
+pick_tabs() { # outer-client
+  local client=$1 group model window index active title heading="" n=0
+  local -a menu=()
+  while IFS='	' read -r group model window index active title; do
+    if [[ "$group · $model" != "$heading" ]]; then
+      [[ -n $heading ]] && menu+=("")
+      heading="$group · $model"
+      # A leading - makes a line that cannot be chosen, which is what a heading is.
+      menu+=("-$heading" "" "")
+    fi
+    [[ $active == 1 ]] && active="*" || active=" "
+    menu+=(" $index$active $(label "$title")" "${KEYS:n:1}" "run-shell \"desktop-agent-tabs jump '$window' '$client'\"")
+    n=$((n + 1))
+  done < <(tabs)
+  show_menu "$client" "AI sessions" "no AI sessions" "${menu[@]}"
+}
+
+# Going to one of these is the plain switch a column's session must never be given. By id,
+# because a name is free text and this ends up inside a tmux command.
+pick_sessions() { # client
+  local client=$1 id attached windows name current n=0
+  local -a menu=()
+  current=$(tmux display-message -p -c "$client" '#{session_id}' 2>/dev/null)
+  while IFS='	' read -r id attached windows name; do
+    [[ $id == "$current" ]] && attached="*" || attached=" "
+    menu+=("$attached $(label "$name")" "${KEYS:n:1}" "switch-client -c '$client' -t '$id'")
+    n=$((n + 1))
+  done < <(sessions)
+  show_menu "$client" "Sessions" "no sessions" "${menu[@]}"
+}
+
+cmd_pick() { # client [tabs|sessions]
+  case "${2:-tabs}" in
+  tabs) pick_tabs "$1" ;;
+  sessions) pick_sessions "$1" ;;
+  *) die "pick: tabs or sessions, not $2" ;;
+  esac
+}
+
 # A column's sessions outlive the window it was in -- tmux has no reason to remove them --
 # so the window closing is when they go. Run from the window-unlinked hook, and safe to
 # run at any time: a session is only taken away once no pane claims its group.
@@ -278,10 +385,14 @@ cmd_gc() {
 
 case "${1:-}" in
 attach) shift; attach "${1:?group}" "${2:?dir}" "${3:?model}" ;;
-new) shift; cmd_new "${1:?pane}" "${2:-}" ;;
+new) shift; cmd_new "${1:?pane}" "${2:-}" "${3:-}" ;;
 tab) shift; cmd_tab "${1:?pane}" "${2:?next or previous}" ;;
 model) shift; cmd_model "${1:?pane}" "${2:-next}" ;;
+scroll) shift; cmd_scroll "${1:?pane}" "${2:-}" ;;
 jump) shift; cmd_jump "${1:?pane}" "${2:-}" ;;
+tabs) tabs ;;
+sessions) sessions ;;
+pick) shift; cmd_pick "${1:?client}" "${2:-}" ;;
 gc) cmd_gc ;;
 ensure)
   shift
@@ -289,5 +400,5 @@ ensure)
     die "could not make the session for $3"
   ;;
 group-for) shift; echo "$(slug "$(basename "${1:?dir}")")-${2#@}" ;;
-*) die "usage: desktop-agent-tabs attach|new|tab|model|jump|ensure|gc ..." ;;
+*) die "usage: desktop-agent-tabs attach|new|tab|model|scroll|jump|pick|ensure|gc ..." ;;
 esac

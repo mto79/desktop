@@ -48,12 +48,24 @@ else
   fail "every theme fills the status line behind a tmux message" "${missing[*]}"
 fi
 
+# An AI column is a tmux client inside a pane, so copying from one of its tabs reaches the
+# outer tmux as a clipboard request from an application. Only `on` passes those through to
+# the terminal; the default drops them, and a drag selects text that never gets copied.
+if grep -qE '^set -s set-clipboard on$' "$ROOT/config/tmux/tmux.conf"; then
+  pass "tmux passes a copy made inside an AI column on to the clipboard"
+else
+  fail "tmux passes a copy made inside an AI column on to the clipboard" "set-clipboard is not on"
+fi
+
 # The agent marks on tmux tabs take their colours from the theme. A theme without them draws
 # the waiting mark in the tab's ordinary colour, which is to say not noticeably at all -- and
 # nothing reports that, so it is checked here.
 unmarked=()
 while IFS= read -r -d '' f; do
-  for option in @agent-waiting-colour @agent-done-colour; do
+  # And the three a column's tabs are told apart by: a model whose colour is missing gets
+  # an empty #[fg=], and its tabs come out in whatever the tab before them was drawn in.
+  for option in @agent-waiting-colour @agent-done-colour \
+    @agent-claude-colour @agent-opencode-colour @agent-codex-colour; do
     grep -qE "^set -g $option \"#[0-9a-fA-F]{6}\"" "$f" || unmarked+=("${f#$ROOT/}: $option")
   done
 done < <(find "$ROOT/themes" -name tmux.conf -print0 2>/dev/null)

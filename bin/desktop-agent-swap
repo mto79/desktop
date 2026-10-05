@@ -6,6 +6,7 @@
 #   desktop-agent-swap %7                # the agent pane of that pane's window, likewise
 #   desktop-agent-swap %7 codex          # that window's agent pane, to codex by name
 #   desktop-agent-swap --here %7 claude  # start claude in exactly that pane
+#   desktop-agent-swap --here --fresh %7 claude  # likewise, on a conversation of its own
 #
 # Bound to prefix+a to cycle and prefix+A to pick from a menu. The pane is respawned in
 # place rather than a second one opened, so the layout never changes shape and only one
@@ -105,11 +106,18 @@ case "${1:-}" in
   ;;
 esac
 
+# --fresh is for a tab beside one that is already talking: --continue there would open the
+# conversation the first tab is still in, and two claudes would write the one transcript.
 here=false
-if [[ ${1:-} == --here ]]; then
-  here=true
+fresh=false
+while :; do
+  case "${1:-}" in
+  --here) here=true ;;
+  --fresh) fresh=true ;;
+  *) break ;;
+  esac
   shift
-fi
+done
 
 target="${1:-${TMUX_PANE:-}}"
 wanted="${2:-}"
@@ -145,7 +153,7 @@ fi
 # otherwise -c "" would put the agent in whatever directory this script runs from.
 dir=$(tmux display-message -p -t "$pane" '#{?pane_current_path,#{pane_current_path},#{pane_start_path}}')
 cmd=$(command_for "$agent")
-if [[ $agent == claude ]] && claude_has_history "$dir"; then
+if [[ $agent == claude ]] && ! $fresh && claude_has_history "$dir"; then
   cmd+=" --continue"
 fi
 
