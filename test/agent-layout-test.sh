@@ -216,6 +216,27 @@ desktop-agent-swap "$plain" >/dev/null
 check "and a window with a plain agent pane still cycles in place" \
   test "$(tm display-message -p -t "$plain" '#{@agent}')" = opencode
 
+# --- which sessions the choosers show -------------------------------------------------------
+
+# prefix + s is for the sessions you work in, and a column's tabs are not one of those.
+# The filter is read back out of the config rather than written again here: it is a format
+# string, and a format string that stops matching fails silently and shows everything.
+filter_for() { grep -oP "^bind-key $1 choose-tree [^']*-f '\K[^']+" "$ROOT/config/tmux/tmux.conf"; }
+
+plain=$(tm list-sessions -f "$(filter_for s)" -F '#{session_name}')
+check "prefix + s shows the sessions you work in" grep -qx work <<<"$plain"
+check "and leaves out the sessions behind a column" lacks '^ai-' <<<"$plain"
+
+tabs=$(tm list-sessions -f "$(filter_for S)" -F '#{session_name}')
+check "prefix + S shows the columns' sessions" grep -qx "ai-$group-claude" <<<"$tabs"
+check "and nothing else" lacks -v '^ai-' <<<"$tabs"
+check "every model of every column is in it" test "$(grep -c '^ai-' <<<"$tabs")" = 4
+# Choosing one must go through its column: switching a client to a session as narrow as a
+# column puts a second client on it and squeezes both.
+chooser=$(grep '^bind-key S choose-tree' "$ROOT/config/tmux/tmux.conf")
+check "choosing one goes through its column" grep -q 'desktop-agent-tabs jump' <<<"$chooser"
+check "and not by switching a client to it" lacks 'switch-client' <<<"$chooser"
+
 # --- the sessions do not outlive the window ------------------------------------------------
 
 desktop-agent-tabs gc
