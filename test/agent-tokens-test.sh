@@ -156,6 +156,14 @@ report=$(XDG_RUNTIME_DIR="$sandbox/run" python3 "$ROOT/bin/desktop-status-claude
 check "the panel's token row is the deduplicated count" \
   test "$(jq -r .tokens.out <<<"$report")" = "$expected"
 
+# --- the top bar of an AI column
+# Only today's is asserted: whether the six-hour-old response above fell on today or
+# yesterday, and so whether the window differs, depends on when this runs.
+check "the column's top bar gets what the model burned today" \
+  grep -q '^2\.3k today' <<<"$(python3 "$TOKENS" --tmux-status --agent claude)"
+check "and nothing at all for an agent that has burned nothing" \
+  test -z "$(CODEX_HOME="$sandbox/none" python3 "$TOKENS" --tmux-status --agent codex)"
+
 check "the table renders" grep -q "burned" <<<"$(python3 "$TOKENS")"
 
 finish

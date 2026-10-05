@@ -86,12 +86,18 @@ check "the column holds a client of its own, looking at that session" \
   test "$(tm list-clients -F '#{client_session}' | grep -cx "$session")" = 1
 check "its status line is the tab bar, at the bottom" \
   test "$(tm show-options -qv -t "=$session:" status-position)" = bottom
-# The model is said once, on the left, so the tabs beside it can be numbers alone. The
-# format is read from the config the way tmux will read it; the test server has none.
-check "it names the model once, on the left" \
-  test "$(tm display-message -p -t "=$session:" "$(tm show-options -qv -t "=$session:" status-left)" | sed 's/#\[[^]]*\]//g')" = " claude "
-check "and carries nothing else beside the tabs" \
-  test -z "$(tm show-options -qv -t "=$session:" status-right)"
+check "and carries nothing beside the tabs" \
+  test -z "$(tm show-options -qv -t "=$session:" status-left)$(tm show-options -qv -t "=$session:" status-right)"
+# The model is said once, on a bar across the top, so the tabs can be numbers alone. The
+# format is read from the config the way tmux will read it; the test server has none. The
+# token count is a command tmux runs on its own time, so it is cut off before asking.
+topbar=$(grep -oP '^set -g pane-border-format "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")
+top() { tm display-message -p -t "$1" "${topbar%%#\[align=right\]*}" | sed 's/#\[[^]]*\]//g'; }
+check "the column has a bar across its top" \
+  test "$(tm show-options -wqv -t "=$session:" pane-border-status)" = top
+check "naming the model and where its agent works" test "$(top "=$session:")" = " claude work "
+check "with what the model has burned on the right" \
+  grep -q 'align=right\] #(desktop-agent-tokens --tmux-status --agent #{@ai_model})' <<<"$topbar"
 tabname=$(grep -oP '^set -g @agent-tab-name "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")
 check "a tab of the column is a number, without the name every one of them shares" \
   test -z "$(tm display-message -p -t "=$session:" "$tabname")"
@@ -141,6 +147,24 @@ check "which is where its agent starts" \
   test "$(tm display-message -p -t "$elsewhere" '#{pane_start_path}')" = "$sandbox/elsewhere"
 check "in the column that asked, not a window of its own" \
   test "$(tm display-message -p -t "$elsewhere" '#{@ai_group}')" = "$group"
+# The top bar of the window holding the column says which task that is: the tab is a window
+# of another session, so the window is told, and the format is read from the config.
+statusleft=$(grep -oP '^set -g status-left "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")
+check "the column's own top bar names the task instead of the directory" \
+  test "$(top "$elsewhere")" = " claude elsewhere "
+check "and a tab added later has that bar too" \
+  test "$(tm show-options -wqv -t "$elsewhere" pane-border-status)" = top
+check "the top bar names the task its column is on" \
+  test "$(tm display-message -p -t work:ide "$statusleft")" = " work · elsewhere "
+check "and the prefix + S menu names it too" \
+  grep -qP "^$group\tclaude\t$elsewhere\t.*\telsewhere · " <<<"$(desktop-agent-tabs tabs)"
+desktop-agent-tabs tab "$editor" previous
+desktop-agent-tabs task
+check "only while that tab is the one on top" \
+  test "$(tm display-message -p -t work:ide "$statusleft")" = " work "
+check "the hooks that follow a tab are in the config" test "$(grep -c \
+  "^set-hook -g \(session-window\|client-session\)-changed\[1\] 'run-shell -b \"desktop-agent-tabs task\"'" \
+  "$ROOT/config/tmux/tmux.conf")" = 2
 tm kill-window -t "$elsewhere"
 tm select-window -t "=$session:$first"
 

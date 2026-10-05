@@ -6,6 +6,7 @@
     desktop-agent-tokens --days 14
     desktop-agent-tokens --json          # what the bar and the panel read
     desktop-agent-tokens --json --agent claude --days 1 --window 5
+    desktop-agent-tokens --tmux-status --agent claude   # "374k today · 556k in 5h"
 
 "Burned" is fresh input, cache writes and output: the tokens actually processed at full
 price, which are the ones that move a bill or a limit. Cache reads are reported beside it
@@ -443,6 +444,21 @@ def table(data):
     return "\n".join(lines)
 
 
+def tmux_status(data):
+    """One agent's burn for the top bar of its AI column, and nothing when there is none.
+
+    Today, and the window a limit is counted over when that says something else -- early in
+    the day the two are the same number, and it is not worth saying twice.
+    """
+    agent = data["agents"][0] if data["agents"] else None
+    if not agent or not agent["today"]["burned"] and not agent["window"]["burned"]:
+        return ""
+    parts = [f"{compact(agent['today']['burned'])} today"]
+    if agent["window"]["burned"] != agent["today"]["burned"]:
+        parts.append(f"{compact(agent['window']['burned'])} in {data['window_hours']:g}h")
+    return " · ".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Tokens burned per day, per coding agent.")
     parser.add_argument("--days", type=int, default=7)
@@ -451,9 +467,14 @@ def main():
     parser.add_argument("--agent", action="append", choices=[a for a, _ in AGENTS],
                         help="only this agent; repeatable")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--tmux-status", action="store_true",
+                        help="one line for the top bar of an AI column; takes one --agent")
     args = parser.parse_args()
 
     agents = set(args.agent or [a for a, _ in AGENTS])
+    if args.tmux_status:
+        print(tmux_status(report(agents, 1, max(0, args.window))), end="")
+        return 0
     data = report(agents, max(1, args.days), max(0, args.window))
     print(json.dumps(data) if args.json else table(data))
     return 0
