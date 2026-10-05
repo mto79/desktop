@@ -79,7 +79,12 @@ rootsource=$(findmnt -no SOURCE / 2>/dev/null | sed 's/\[.*\]$//')
 if lsblk -no TYPE -s "$rootsource" 2>/dev/null | grep -q crypt; then
   if ! have_root; then
     verdict SKIP "that the initramfs can unlock the disk (needs sudo)"
-  elif root lsinitrd "$initramfs" 2>/dev/null | grep -q 'systemd-cryptsetup\|/cryptsetup'; then
+  # The listing is read whole before it is searched. Piped straight into grep -q, grep
+  # leaves at the first match, lsinitrd dies writing the rest, and pipefail turns an
+  # initramfs that has cryptsetup into one that does not.
+  elif ! listing=$(root lsinitrd "$initramfs") || [[ -z $listing ]]; then
+    verdict WARN "the initramfs for $newest could not be listed, so whether it unlocks the disk is unknown"
+  elif grep -q 'systemd-cryptsetup\|/cryptsetup' <<<"$listing"; then
     verdict OK "the initramfs can unlock the encrypted disk"
   else
     verdict BAD "the initramfs for $newest cannot unlock the disk -- it would stop at boot: sudo dracut -f --kver $newest"

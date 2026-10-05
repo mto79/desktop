@@ -35,7 +35,13 @@ stub sudo <<'STUB'
 case $1 in
 true) exit 0 ;;
 grubby) echo "/boot/vmlinuz-$DEFAULT" ;;
-lsinitrd) printf 'usr/lib/systemd/system-generators/systemd-cryptsetup-generator\n' | grep -v "${NOCRYPT:-^$}" ;;
+lsinitrd)
+  # A real listing is thousands of lines with the match near the top; LONG stands in for it.
+  {
+    printf 'usr/bin/bash\nusr/lib/systemd/system-generators/systemd-cryptsetup-generator\n'
+    [[ -z ${LONG:-} ]] || printf 'usr/lib/firmware/%s\n' {1..200000}
+  } | grep -v "${NOCRYPT:-^$}"
+  ;;
 esac
 STUB
 stub findmnt <<'STUB'
@@ -79,6 +85,9 @@ check "which is a warning about a slow first boot" says WARN "akmods builds it a
 
 reboot_check NOCRYPT=cryptsetup
 check "an initramfs that cannot unlock the disk fails it" says BAD "cannot unlock the disk"
+
+reboot_check LONG=1
+check "a listing longer than a pipe holds is still read to the end" says OK "the initramfs can unlock"
 
 reboot_check ROOT=
 check "without root, the root checks say they did not run" test "$(grep -c '^SKIP' "$sandbox/out")" = 2
