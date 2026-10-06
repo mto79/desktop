@@ -6,6 +6,8 @@
 #   desktop-worktree new --tab <pane> <branch>   as a tab of that pane's AI column, not a window
 #   desktop-worktree open <path|branch>    back to a task's window, making it if it has gone
 #   desktop-worktree list
+#   desktop-worktree here <pane>           the task that pane's window is on, if any
+#   desktop-worktree finish <pane> [client]   prefix + D: "done" for that task, asked first
 #   desktop-worktree done [--dry-run]      from inside a task: push, open the review, close it
 #   desktop-worktree prune                 forget tasks whose review has been merged
 #
@@ -363,8 +365,9 @@ review_url() { # <forge> <dir> <branch>
 }
 
 cmd_done() {
-  local dry=false path main branch base ahead forge url session window
+  local dry=false ask=false answer path main branch base ahead forge url session window
   [[ ${1:-} == --dry-run ]] && dry=true
+  [[ ${1:-} == --ask ]] && ask=true
 
   path=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repository"
   main=$(main_of "$path")
@@ -380,6 +383,21 @@ cmd_done() {
 
   forge=$(forge_of "$main")
   [[ $forge == none ]] && die "the repository has no origin to push to"
+
+  # Asked from a key rather than typed, so it says what it is about to do and waits: a push
+  # and a review are not what a mistyped prefix should cost.
+  if $ask; then
+    echo "$branch: $ahead commit(s) beyond $base"
+    echo "  push it to origin"
+    echo "  open a $([[ $forge == gh ]] && echo "pull request" || echo "merge request") into $base"
+    echo "  close the task and remove $path"
+    echo
+    read -r -p "Go ahead? [y/N] " answer
+    [[ $answer == [yY]* ]] || {
+      echo "left as it was"
+      return
+    }
+  fi
 
   if $dry; then
     echo "would push $branch ($ahead commit(s)) to origin"
@@ -426,6 +444,36 @@ close_task() { # <worktree path> [window]
   parent=$(dirname "$path")
   rmdir "$parent" 2>/dev/null
   echo "removed $path"
+}
+
+# The task a pane's window is on: the window's own, when the task has a window, and
+# otherwise the one in the tab on top of the window's AI column. What the terminal reads to
+# open beside the task, and what prefix + D finishes.
+cmd_here() { # <pane>
+  local pane=$1 path window group session
+  path=$(tmux display-message -p -t "$pane" '#{@worktree}' 2>/dev/null)
+  if [[ -z $path ]]; then
+    window=$(tmux display-message -p -t "$pane" '#{window_id}' 2>/dev/null) || return 1
+    group=$(tmux list-panes -t "$window" -F '#{@ai_column}' 2>/dev/null | grep -m1 .)
+    [[ -n $group ]] || return 1
+    session=$(tmux list-clients -F '#{client_session}' 2>/dev/null |
+      awk -v group="ai-$group-" 'index($0, group) == 1 { print; exit }')
+    [[ -n $session ]] || return 1
+    path=$(tmux display-message -p -t "=$session:" '#{@worktree}' 2>/dev/null)
+  fi
+  [[ -n $path && -d $path ]] || return 1
+  echo "$path"
+}
+
+# In a popup, because "done" has things to say and a question to ask, and a status line
+# holds neither. It stays until a key is pressed: the address of the review is the part
+# worth reading, and it is printed last.
+cmd_finish() { # <pane> [client]
+  local path client=${2:-}
+  export DESKTOP_WORKTREE_CLIENT=$client
+  path=$(cmd_here "${1:?pane}") || die "no task here -- prefix + T starts one"
+  tmux display-popup ${client:+-c "$client"} -E -d "$path" -w 80% -h 50% -T " Finish $(basename "$path") " \
+    "'$SELF' done --ask; echo; read -r -n 1 -s -p 'press a key'"
 }
 
 cmd_close() { # internal: <window id>, run by the tmux server
@@ -479,11 +527,13 @@ case "${1:-}" in
 new) shift; cmd_new "$@" ;;
 open) shift; cmd_open "$@" ;;
 list) cmd_list ;;
+here) shift; cmd_here "${1:?pane}" ;;
+finish) shift; cmd_finish "$@" ;;
 done) shift; cmd_done "$@" ;;
 prune) cmd_prune ;;
 _close) shift; cmd_close "$@" ;;
 *)
-  echo "usage: desktop-worktree <new BRANCH | open PATH|BRANCH | list | done [--dry-run] | prune>" >&2
+  echo "usage: desktop-worktree <new BRANCH | open PATH|BRANCH | list | here PANE | finish PANE | done [--dry-run|--ask] | prune>" >&2
   exit 1
   ;;
 esac

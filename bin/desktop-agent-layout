@@ -10,7 +10,7 @@
 #   |      $EDITOR       | agent  |
 #   |                    |        |
 #   +--------------------+        |
-#   | shell              | 1  2   |
+#   | shell  1 2         | 1  2   |
 #   +--------------------+--------+
 #
 # The target is named rather than taken from $TMUX, because this runs at login against a
@@ -71,7 +71,10 @@ tmux set-option -p -t "$agent_pane" @ai_column "$group"
 tmux set-option -p -t "$agent_pane" @ai_dir "$dir"
 tmux set-option -p -t "$agent_pane" @ai_model "$AGENT"
 tmux set-option -p -t "$agent_pane" remain-on-exit on
-tmux split-window -v -l 15% -t "$editor" -c "$dir"
+# The shell is marked as the window's terminal, so prefix + t with the focus there means
+# another terminal even while something is running in it -- see desktop-terminal-tabs.
+shell_pane=$(tmux split-window -v -l 15% -t "$editor" -c "$dir" -P -F '#{pane_id}')
+tmux set-option -p -t "$shell_pane" @term_pane 1
 
 $resized && tmux set-option -wu -t "$TARGET" window-size
 

@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+
+# desktop-tmux-keys: the tmux keys this desktop adds, on one screen.
+#
+#   desktop-tmux-keys          # prefix + ?, in a popup: the list, then any key to close
+#   desktop-tmux-keys --list   # "key<TAB>shown as<TAB>what it does", for the test
+#
+# Agents, tabs and tasks put fifteen keys on the prefix, and the place they were explained
+# was the comments of tmux.conf. Only those: tmux's own are in `tmux list-keys`.
+#
+# One line per key, the name tmux.conf binds it by first. That column is what the test
+# reads, so a key that is listed here and no longer bound -- or bound and renamed -- fails
+# there rather than on the screen.
+
+set -uo pipefail
+
+keys() {
+  cat <<'KEYS'
+# Tabs -- a terminal's from a terminal, the AI column's from anywhere else
+t	t	another tab: a terminal, or an agent on the same files
+Tab	Tab	next tab
+BTab	Shift+Tab	previous tab
+x	x	close the tab on top (a plain pane: the pane)
+[	[	scroll back in the tab on top
+# Agents
+a	a	next model: claude, opencode, codex
+A	A	pick a model from a menu
+g	g	every agent on this machine; Enter goes to it
+S	S	every AI tab, by column and model
+# Tasks -- a change in a worktree of its own
+T	T	new task: a branch name, and a tab whose agent works there
+D	D	finish the task on show: push, open the review, remove it
+# Terminal
+Z	Z	the window's terminal full size, and back
+# Getting around
+s	s	the sessions you work in
+f	f	sessionizer: a repository or a task, laid out
+e	e	sidebar of sessions, windows and agents, on or off
+Space	Space	the window you were in before
+r	r	reload tmux.conf
+?	?	this list
+KEYS
+}
+
+if [[ ${1:-} == --list ]]; then
+  keys | grep -v '^#'
+  exit 0
+fi
+
+bold=$(tput bold 2>/dev/null) dim=$(tput dim 2>/dev/null) plain=$(tput sgr0 2>/dev/null)
+echo
+while IFS=$'\t' read -r bound shown what; do
+  if [[ $bound == '#'* ]]; then
+    printf '\n %s%s%s\n' "$dim" "${bound#\# }" "$plain"
+  else
+    printf '   %sprefix %-10s%s %s\n' "$bold" "$shown" "$plain" "$what"
+  fi
+done < <(keys)
+
+# In the popup the list would be gone the moment it was drawn.
+[[ -t 1 ]] && read -r -n 1 -s
+exit 0

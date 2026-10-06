@@ -269,6 +269,23 @@ check "a window with no column gets the task as a window after all" \
   test -n "$(tm list-windows -t =repo -F '#{window_name}' | grep -x windowed)"
 rm -f "$stubs/desktop-agent-tabs"
 
+# --- finishing one from a key
+# prefix + D asks before it pushes: a review is not what a mistyped prefix should cost.
+in_repo "$repo" new asked >/dev/null
+asked="$projects/repo.worktrees/asked"
+git -C "$asked" commit -q --allow-empty -m "work"
+: >"$forge/calls"
+answer=$(cd "$asked" && bash "$WT" done --ask <<<"n" 2>&1)
+check "done --ask says what it is about to do" grep -q "push it to origin" <<<"$answer"
+check "and does none of it when the answer is no" test -d "$asked"
+check "not even the push" test -z "$(git -C "$asked" ls-remote --heads origin asked 2>/dev/null)"
+check "nor a word to the forge" test ! -s "$forge/calls"
+asked_window=$(tm list-windows -t =repo -F '#{window_id} #{window_name}' | awk '$2 == "asked" { print $1 }')
+check "the task a window is on is its own" \
+  test "$(bash "$WT" here "$(tm list-panes -t "$asked_window" -F '#{pane_id}' | head -1)")" = "$asked"
+check "and a window on no task has none" \
+  lacks . <<<"$(bash "$WT" here "$(tm list-panes -t =repo:git -F '#{pane_id}' | head -1)" 2>/dev/null)"
+
 # --- starting one from tmux
 # prefix + T is how a second change gets a checkout of its own instead of a second agent in
 # the same one. The client is named because a binding has no pane to take it from, and the

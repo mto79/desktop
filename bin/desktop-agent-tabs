@@ -279,9 +279,24 @@ cmd_model() { # pane model|next
 # has no client of its own, and tmux would otherwise move one of its choosing -- which is
 # how the sidebar first came to switch the wrong window.
 cmd_jump() { # agent-pane-or-window [outer-client]
-  local target=$1 outer=${2:-} session group column tty
+  local target=$1 outer=${2:-} session group column tty holder
   session=$(tmux display-message -p -t "$target" '#{session_name}') || die "no such pane"
   group=$(tmux show-options -qv -t "$(in_session "$session")" @ai_group)
+
+  # An agent started by hand in a terminal's tab is behind a client as well, and is reached
+  # the same way: the tab comes to the top, and the outer client goes to the pane showing it.
+  holder=$(tmux show-options -qv -t "$(in_session "$session")" @term_group)
+  if [[ -n $holder ]]; then
+    holder=$(tmux list-panes -a -F '#{pane_id} #{@term_tabs}' 2>/dev/null |
+      awk -v group="$holder" '$2 == group { print $1; exit }')
+    [[ -n $holder ]] || die "the terminal those tabs belong to has gone"
+    tmux select-window -t "$(tmux display-message -p -t "$target" '#{session_name}:#{window_index}')"
+    tmux select-window -t "$(tmux display-message -p -t "$holder" '#{session_name}:#{window_index}')"
+    [[ -n $outer ]] && set -- -c "$outer" || set --
+    tmux switch-client "$@" -t "$(exact "$(tmux display-message -p -t "$holder" '#{session_name}')")"
+    tmux select-pane -t "$holder"
+    return
+  fi
 
   if [[ -z $group ]]; then
     # An ordinary agent pane, in an ordinary window.
@@ -330,7 +345,7 @@ tabs() {
 #
 # One line per session: id, whether a client is on it, how many windows, name.
 sessions() {
-  tmux list-sessions -f '#{==:#{@ai_group},}' \
+  tmux list-sessions -f '#{&&:#{==:#{@ai_group},},#{==:#{@term_group},}}' \
     -F '#{session_id}	#{?session_attached,1,0}	#{session_windows}	#{session_name}' 2>/dev/null |
     sort -t '	' -k4,4
 }

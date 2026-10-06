@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+
+# desktop-terminal-tabs: more than one terminal in a pane, as tabs.
+#
+#   desktop-terminal-tabs new <pane>                # prefix + t, another terminal
+#   desktop-terminal-tabs tab <pane> next|previous  # prefix + Tab
+#   desktop-terminal-tabs close <pane>              # prefix + x, the tab on top
+#   desktop-terminal-tabs scroll <pane> [-u]        # prefix + [
+#   desktop-terminal-tabs zoom <pane>               # prefix + Z, the terminal full size and back
+#   desktop-terminal-tabs finished <pane> <status>  # from the shell, when a long command ends
+#   desktop-terminal-tabs attach <group>            # the pane's own command, once it has tabs
+#   desktop-terminal-tabs gc                        # sessions whose pane has gone
+#
+# The shell strip under the editor is one terminal, and the second thing to run there used
+# to mean a split of a pane seven rows tall. Tabs are made the way the AI column makes
+# them -- see desktop-agent-tabs -- because a pane holds one program: the pane becomes a
+# tmux client of its own, attached to a session whose windows are the tabs.
+#
+# Only once a second terminal is asked for. Until then the pane is the plain shell it
+# always was, with its own scrollback and no row given up to a bar. Asking moves that shell
+# into the new session as the first tab, still running and with everything it had printed,
+# and puts the client in its place.
+#
+# The keys are the AI column's, and go to whichever of the two the focus is in. That is
+# decided here rather than in tmux.conf: from a terminal they mean a terminal, and from
+# anywhere else -- the editor, the column itself -- they are handed to desktop-agent-tabs
+# and mean what they always did.
+
+set -uo pipefail
+
+die() {
+  echo "desktop-terminal-tabs: $1" >&2
+  exit 1
+}
+
+# Exact names, as in desktop-agent-tabs: tmux matches a target by prefix otherwise.
+exact() { echo "=$1"; }
+in_session() { echo "=$1:"; }
+
+slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g;s/--*/-/g;s/^-//;s/-$//'; }
+
+session_for() { echo "term-$1"; }
+
+option() { tmux display-message -p -t "$1" "#{$2}" 2>/dev/null; }
+
+# A terminal is a pane the layout made to be one, or any pane that was started as a shell
+# and is sitting at it. The mark is what makes the strip under the editor count while
+# something is running there. For the rest, what is running is not enough to go on: a pane
+# started with a command of its own -- lazygit, the sidebar, the AI column -- is run by the
+# shell and reports the shell as its command, and taking one of those for a terminal would
+# put tabs around lazygit.
+is_terminal() { # pane
+  local started
+  [[ -n $(option "$1" @term_pane) ]] && return 0
+  started=$(option "$1" pane_start_command)
+  [[ -z $started || $started == "$(tmux show-options -gqv default-command)" ||
+    $started == "$(tmux show-options -gqv default-shell)" ]] || return 1
+  case "$(option "$1" pane_current_command)" in
+  fish | bash | zsh | sh) return 0 ;;
+  esac
+  return 1
+}
+
+# Where the keys go: this pane's own tabs, a terminal that could have some, or the agents.
+kind_of() { # pane
+  if [[ -n $(option "$1" @term_tabs) ]]; then
+    echo tabs
+  elif [[ -z $(option "$1" @ai_column) ]] && is_terminal "$1"; then
+    echo terminal
+  else
+    echo agents
+  fi
+}
+
+# A tab says what is in it: the command while one runs, and where the shell is otherwise.
+# Left to tmux every one of them is called "fish".
+NAME='#{?#{m/r:^(fish|bash|zsh|sh)$,#{pane_current_command}},#{b:pane_current_path},#{pane_current_command}}'
+name_tab() { tmux set-option -w -t "$1" automatic-rename-format "$NAME" 2>/dev/null; }
+
+# The bar is only worth its row when there is something to choose between.
+bar() { # session
+  local on=off
+  (($(tmux list-windows -t "$(exact "$1")" 2>/dev/null | wc -l) > 1)) && on=on
+  tmux set-option -t "$(in_session "$1")" status "$on" 2>/dev/null
+}
+
+# The first tab is the shell that was already there. swap-pane trades it for a placeholder
+# in the new session, so it keeps running, keeps its history, and the layout keeps the
+# pane it had -- which the client is then started in.
+make_tabs() { # pane -> session
+  local pane=$1 dir group session placeholder width height
+  dir=$(option "$pane" pane_current_path)
+  group="$(slug "$(basename "${dir:-term}")")-${pane#%}"
+  session=$(session_for "$group")
+  read -r width height < <(tmux display-message -p -t "$pane" '#{pane_width} #{pane_height}')
+
+  placeholder=$(tmux new-session -d -s "$session" -c "$dir" -x "$width" -y "$height" \
+    -P -F '#{pane_id}' "sleep 86400") || die "could not make $session"
+  tmux set-option -t "$(in_session "$session")" status-position bottom
+  tmux set-option -t "$(in_session "$session")" status-left ""
+  tmux set-option -t "$(in_session "$session")" status-right ""
+  # Without this the client would fall back to another session when the last tab closes --
+  # possibly the one this pane is in, which cannot display itself. Detaching instead ends
+  # the pane's command, and the pane closes like any terminal whose shell has exited.
+  tmux set-option -t "$(in_session "$session")" detach-on-destroy on
+  tmux set-option -t "$(in_session "$session")" @term_group "$group"
+  # The window, which stays when the pane in it is traded for the shell below.
+  name_tab "$(exact "$session:")"
+
+  tmux swap-pane -d -s "$pane" -t "$placeholder" || die "could not move the terminal into $session"
+  tmux set-option -p -t "$placeholder" @term_tabs "$group"
+  tmux set-option -p -t "$placeholder" @term_pane 1
+  tmux set-option -pu -t "$pane" @term_pane 2>/dev/null
+  tmux respawn-pane -k -t "$placeholder" -c "$dir" \
+    "$(printf 'desktop-terminal-tabs attach %q' "$group")"
+  tmux select-pane -t "$placeholder"
+  echo "$session"
+}
+
+# --- the pane's command -------------------------------------------------------------------
+
+attach() { # group
+  local socket
+  [[ -n ${TMUX:-} ]] || die "attach is the pane's own command, and must run inside tmux"
+  # The server by its socket, because TMUX has to go: tmux refuses to attach a client from
+  # inside one of its own panes, and an unset TMUX would otherwise send the client to
+  # whichever server owns the default socket.
+  socket=${TMUX%%,*}
+  env -u TMUX -u TMUX_PANE tmux -S "$socket" attach -t "$(exact "$(session_for "$1")")"
+}
+
+# --- what the keys do ---------------------------------------------------------------------
+
+cmd_new() { # pane
+  local pane=$1 session dir window kind
+  kind=$(kind_of "$pane")
+  [[ $kind == agents ]] && exec desktop-agent-tabs new "$pane"
+  # Beside the work in hand. With a task's tab on top of the AI column that is the task's
+  # worktree -- its agent is there and the editor is not, so this is where its tests are
+  # run. Asked before the pane is traded away, while it is still in the window to ask about.
+  dir=$(desktop-worktree here "$pane" 2>/dev/null)
+  case "$kind" in
+  terminal) session=$(make_tabs "$pane") || exit 1 ;;
+  tabs) session=$(session_for "$(option "$pane" @term_tabs)") ;;
+  esac
+  # Otherwise where the terminal on top is, not where the pane began.
+  [[ -n $dir ]] || dir=$(option "$(exact "$session:")" pane_current_path)
+  window=$(tmux new-window -a -t "$(exact "$session:")" ${dir:+-c "$dir"} -P -F '#{window_id}') ||
+    die "could not add a tab"
+  name_tab "$window"
+  bar "$session"
+}
+
+cmd_tab() { # pane next|previous
+  local session
+  [[ $(kind_of "$1") == tabs ]] || exec desktop-agent-tabs tab "$1" "$2"
+  session=$(session_for "$(option "$1" @term_tabs)")
+  case "$2" in
+  next) tmux next-window -t "$(exact "$session")" ;;
+  previous | prev) tmux previous-window -t "$(exact "$session")" ;;
+  *) die "tab takes next or previous" ;;
+  esac
+}
+
+cmd_close() { # pane
+  local session
+  [[ $(kind_of "$1") == tabs ]] || die "this pane has no tabs"
+  session=$(session_for "$(option "$1" @term_tabs)")
+  tmux kill-window -t "$(exact "$session:")"
+  bar "$session"
+}
+
+# Copy mode in the tab on top, not in the pane: the pane is a client on its alternate
+# screen, with nothing to scroll back through.
+cmd_scroll() { # pane [-u]
+  [[ $(kind_of "$1") == tabs ]] || die "this pane has no tabs"
+  tmux copy-mode ${2:+"$2"} -t "$(exact "$(session_for "$(option "$1" @term_tabs)"):")"
+}
+
+# Seven rows is enough to type in and not enough to read a build in. This gives the
+# window's terminal the whole window, from wherever the focus is, and the same key gives it
+# back and returns to the pane it was pressed in.
+cmd_zoom() { # pane
+  local window terminal
+  window=$(option "$1" window_id)
+  if [[ $(option "$1" window_zoomed_flag) == 1 ]]; then
+    tmux resize-pane -Z -t "$window"
+    tmux last-pane -t "$window" 2>/dev/null
+    return 0
+  fi
+  terminal=$(tmux list-panes -t "$window" -F '#{pane_id} #{@term_pane}' 2>/dev/null |
+    awk 'NF > 1 { print $1; exit }')
+  # A window no layout made has no pane marked; the one in hand is zoomed, as prefix + z would.
+  [[ -n $terminal ]] || terminal=$1
+  tmux select-pane -t "$terminal"
+  tmux resize-pane -Z -t "$terminal"
+}
+
+visible() { [[ $(option "$1" '&&:#{window_active},#{session_attached}') == 1 ]]; }
+
+# A command that ran for a while has ended somewhere nobody is looking: its tab gets the
+# mark an agent's does -- done, or failed. A tab is not being looked at when another is on
+# top, and neither is the one on top when the window its pane is in is not on screen; that
+# window is marked then, unless an agent's state is already there to be read.
+cmd_finished() { # pane status
+  local pane=$1 state=done group holder
+  [[ ${2:-0} == 0 ]] || state=failed
+  visible "$pane" || tmux set-option -w -t "$pane" @agent_state "$state"
+  group=$(option "$pane" @term_group)
+  [[ -n $group ]] || return 0
+  holder=$(tmux list-panes -a -F '#{pane_id} #{@term_tabs}' 2>/dev/null |
+    awk -v group="$group" '$2 == group { print $1; exit }')
+  [[ -n $holder ]] || return 0
+  if ! visible "$holder" && [[ -z $(option "$holder" @agent_state) ]]; then
+    tmux set-option -w -t "$holder" @agent_state "$state"
+  fi
+}
+
+# The sessions outlive the pane that showed them -- closing a window kills the client, not
+# the shells behind it -- so that is when they go. Safe at any time: a session is only
+# taken away once no pane claims its group. A session left with one tab loses its bar here
+# too, which is how a tab closed by its own shell exiting gets noticed.
+cmd_gc() {
+  local session group
+  while read -r session group; do
+    if tmux list-panes -a -F '#{@term_tabs}' 2>/dev/null | grep -qxF "$group"; then
+      bar "$session"
+    else
+      tmux kill-session -t "$(exact "$session")" 2>/dev/null
+    fi
+  done < <(tmux list-sessions -F '#{session_name} #{@term_group}' 2>/dev/null | awk 'NF > 1')
+}
+
+case "${1:-}" in
+new) shift; cmd_new "${1:?pane}" ;;
+tab) shift; cmd_tab "${1:?pane}" "${2:?next or previous}" ;;
+close) shift; cmd_close "${1:?pane}" ;;
+scroll) shift; cmd_scroll "${1:?pane}" "${2:-}" ;;
+zoom) shift; cmd_zoom "${1:?pane}" ;;
+finished) shift; cmd_finished "${1:?pane}" "${2:-0}" ;;
+attach) shift; attach "${1:?group}" ;;
+gc) cmd_gc ;;
+kind) shift; kind_of "${1:?pane}" ;;
+*) die "usage: desktop-terminal-tabs new|tab|close|scroll|zoom|finished|attach|gc ..." ;;
+esac
