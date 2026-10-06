@@ -10,7 +10,7 @@
 #   desktop-agent-tabs scroll <pane> [-u]             # prefix + [ and prefix + PageUp
 #   desktop-agent-tabs pick <client>                  # prefix + S, a menu of every tab
 #   desktop-agent-tabs pick <client> sessions         # prefix + s, the sessions you work in
-#   desktop-agent-tabs task                           # tell each window its column's task
+#   desktop-agent-tabs close <pane>                   # prefix + x in the column, the tab on top
 #   desktop-agent-tabs gc                             # sessions whose column has gone
 #
 # A tmux pane holds one program, so there is no such thing as a tab inside one. What the
@@ -201,7 +201,6 @@ cmd_new() { # pane [model] [dir]
   # The new tab is the one you asked for, so go to it, and leave the focus in the column.
   tmux next-window -t "$(exact "$session")"
   tmux select-pane -t "$column"
-  cmd_task
 }
 
 cmd_tab() { # pane next|previous
@@ -217,6 +216,18 @@ cmd_tab() { # pane next|previous
   *) die "tab takes next or previous" ;;
   esac
   tmux select-pane -t "$column"
+}
+
+# The tab on top, and the agent in it. A task's worktree is left where it is: closing the
+# tab is not finishing the task, which is desktop-worktree done.
+cmd_close() { # pane
+  local column group session
+  column=$(column_of "$1") || die "no window there"
+  [[ -n $column ]] || die "this window has no AI column"
+  group=$(group_of "$column")
+  session=$(session_of "$group")
+  [[ -n $session ]] || die "the column is not attached to anything"
+  tmux kill-window -t "$(exact "$session:")"
 }
 
 # Copy mode in the tab on top, not in the column pane: that pane is a client on its
@@ -378,34 +389,6 @@ cmd_pick() { # client [tabs|sessions]
   esac
 }
 
-# The task a column is on, written on the window holding it as @task: the worktree of the
-# tab on top, or nothing. The top bar reads it there, because the tab is a window of another
-# session and a format in this one cannot reach it.
-#
-# Every column at once, from tmux.conf's hooks whenever a tab may have changed, and only
-# written when it has: the same hooks fire for every window you move between.
-cmd_task() {
-  local window group current session task
-  local -A showing=() tasks=()
-  while read -r session; do
-    [[ $session == ai-* ]] && showing[$session]=1
-  done < <(tmux list-clients -F '#{client_session}' 2>/dev/null)
-  while IFS='	' read -r session group task; do
-    [[ -n ${showing[$session]:-} ]] && tasks[$group]=$task
-  done < <(tmux list-windows -a -f '#{&&:#{!=:#{@ai_group},},#{window_active}}' \
-    -F '#{session_name}	#{@ai_group}	#{@worktree}' 2>/dev/null)
-  while IFS='	' read -r window group current; do
-    [[ -n $group ]] || continue
-    task=${tasks[$group]:-}
-    [[ $task == "$current" ]] && continue
-    if [[ -n $task ]]; then
-      tmux set-option -w -t "$window" @task "$task"
-    else
-      tmux set-option -wu -t "$window" @task
-    fi
-  done < <(tmux list-panes -a -F '#{window_id}	#{@ai_column}	#{@task}' 2>/dev/null)
-}
-
 # A column's sessions outlive the window it was in -- tmux has no reason to remove them --
 # so the window closing is when they go. Run from the window-unlinked hook, and safe to
 # run at any time: a session is only taken away once no pane claims its group.
@@ -427,7 +410,7 @@ jump) shift; cmd_jump "${1:?pane}" "${2:-}" ;;
 tabs) tabs ;;
 sessions) sessions ;;
 pick) shift; cmd_pick "${1:?client}" "${2:-}" ;;
-task) cmd_task ;;
+close) shift; cmd_close "${1:?pane}" ;;
 gc) cmd_gc ;;
 ensure)
   shift
@@ -435,5 +418,5 @@ ensure)
     die "could not make the session for $3"
   ;;
 group-for) shift; echo "$(slug "$(basename "${1:?dir}")")-${2#@}" ;;
-*) die "usage: desktop-agent-tabs attach|new|tab|model|scroll|jump|pick|task|ensure|gc ..." ;;
+*) die "usage: desktop-agent-tabs attach|new|tab|model|scroll|close|jump|pick|ensure|gc ..." ;;
 esac

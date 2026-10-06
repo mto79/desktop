@@ -36,7 +36,11 @@ chmod +x "$stubs"/*
 # HOME in the sandbox keeps the user's tmux.conf out of it, and keeps claude_has_history
 # answering no until this test says otherwise. EDITOR too: the editor pane is the one
 # thing still started with send-keys, and it must not open anything real.
-export HOME="$sandbox" PATH="$stubs:$ROOT/bin:$PATH" EDITOR=true
+#
+# XDG_CONFIG_HOME as well, because tmux looks there before it looks in HOME. Without it the
+# server loaded the tmux.conf that is deployed on this machine, hooks and all, and a hook
+# naming a command this checkout no longer had left every tab in view mode on its error.
+export HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/config" PATH="$stubs:$ROOT/bin:$PATH" EDITOR=true
 tm() { "$TMUX_BIN" -L "$SOCKET" "$@"; }
 
 # The column attaches its client on its own time, so anything that asks about it waits.
@@ -50,6 +54,8 @@ settle() {
 }
 
 tm new-session -d -s work -n ide -c "$sandbox/work" -x 120 -y 40
+# The one setting of tmux.conf the checks below count by: panes are numbered from one.
+tm set-option -g pane-base-index 1
 desktop-agent-layout work:ide claude
 
 # --- the shape ----------------------------------------------------------------------------
@@ -97,7 +103,11 @@ check "the column has a bar across its top" \
   test "$(tm show-options -wqv -t "=$session:" pane-border-status)" = top
 check "naming the model and where its agent works" test "$(top "=$session:")" = " claude work "
 check "with what the model has burned on the right" \
-  grep -q 'align=right\] #(desktop-agent-tokens --tmux-status --agent #{@ai_model})' <<<"$topbar"
+  grep -q 'align=right\] .*#(desktop-agent-tokens --tmux-status --agent #{@ai_model})' <<<"$topbar"
+check "led, for claude alone, by how full its limits are" \
+  grep -qF '#{?#{==:#{@ai_model},claude},#(desktop-status-claude --tmux-status),}' <<<"$topbar"
+check "the bar above the windows is left the session's name" \
+  grep -qx 'set -g status-left " #S "' "$ROOT/config/tmux/tmux.conf"
 tabname=$(grep -oP '^set -g @agent-tab-name "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")
 check "a tab of the column is a number, without the name every one of them shares" \
   test -z "$(tm display-message -p -t "=$session:" "$tabname")"
@@ -147,25 +157,20 @@ check "which is where its agent starts" \
   test "$(tm display-message -p -t "$elsewhere" '#{pane_start_path}')" = "$sandbox/elsewhere"
 check "in the column that asked, not a window of its own" \
   test "$(tm display-message -p -t "$elsewhere" '#{@ai_group}')" = "$group"
-# The top bar of the window holding the column says which task that is: the tab is a window
-# of another session, so the window is told, and the format is read from the config.
-statusleft=$(grep -oP '^set -g status-left "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")
-check "the column's own top bar names the task instead of the directory" \
+check "the column's top bar names the task instead of the directory" \
   test "$(top "$elsewhere")" = " claude elsewhere "
 check "and a tab added later has that bar too" \
   test "$(tm show-options -wqv -t "$elsewhere" pane-border-status)" = top
-check "the top bar names the task its column is on" \
-  test "$(tm display-message -p -t work:ide "$statusleft")" = " work · elsewhere "
 check "and the prefix + S menu names it too" \
   grep -qP "^$group\tclaude\t$elsewhere\t.*\telsewhere · " <<<"$(desktop-agent-tabs tabs)"
-desktop-agent-tabs tab "$editor" previous
-desktop-agent-tabs task
-check "only while that tab is the one on top" \
-  test "$(tm display-message -p -t work:ide "$statusleft")" = " work "
-check "the hooks that follow a tab are in the config" test "$(grep -c \
-  "^set-hook -g \(session-window\|client-session\)-changed\[1\] 'run-shell -b \"desktop-agent-tabs task\"'" \
-  "$ROOT/config/tmux/tmux.conf")" = 2
-tm kill-window -t "$elsewhere"
+# prefix + x with the focus in the column: the tab on top goes, not the column.
+desktop-agent-tabs close "$column"
+check "closing a tab takes the one on top" \
+  lacks -x "$elsewhere" <<<"$(tm list-windows -a -F '#{window_id}')"
+check "and leaves the column and its other tabs" \
+  test "$(tm list-panes -t work:ide | wc -l) $(tm list-windows -t "=$session" | wc -l)" = "3 2"
+check "the key for it only does so in the column" \
+  grep -q "^bind-key -r x if-shell -F \"#{@ai_column}\" { run-shell \"desktop-agent-tabs close " "$ROOT/config/tmux/tmux.conf"
 tm select-window -t "=$session:$first"
 
 # prefix + [, with the focus in the column. The pane there is a client on its alternate

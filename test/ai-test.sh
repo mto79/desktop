@@ -50,6 +50,12 @@ check "the spending cap colours the module" \
 check "the spending cap explains itself in the tooltip" \
   grep -q "Extra usage 94% (€56.42 of €60.00)" <<<"$(jq -r .tooltip <<<"$reported")"
 
+# The top bar of Claude's AI column: every limit, each followed by the separator that
+# joins it to the token counts after it.
+check "the column's top bar gets every limit, fullest first" \
+  test "$(XDG_RUNTIME_DIR="$sandbox/run" CLAUDE_CONFIG_DIR="$sandbox/config" XDG_CACHE_HOME="$sandbox/cache" \
+    python3 "$ROOT/bin/desktop-status-claude" --tmux-status)" = "weekly 70% · session 26% · "
+
 check "every limit says when it resets" \
   grep -q "Session 26% -- resets " <<<"$(jq -r .tooltip <<<"$reported")"
 

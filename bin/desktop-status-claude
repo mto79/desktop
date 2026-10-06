@@ -305,8 +305,20 @@ def bar_line(data):
     return {"text": f"{data['limits'][0]['percent']}%", "class": state, "tooltip": "\n".join(lines)}
 
 
+def tmux_status(data):
+    """Every plan limit for the top bar of Claude's AI column: "session 26% · weekly 20% · ".
+
+    The separator is this script's to print, so that with no limits to show -- offline, or
+    the token expired -- the token counts that follow it stand on their own.
+    """
+    return "".join(f"{limit['name'].lower()} {limit['percent']}% · " for limit in data["limits"])
+
+
 def main():
     data = build()
+    if "--tmux-status" in sys.argv[1:]:
+        print(tmux_status(data), end="")
+        return 0
     # --report is what the panel reads: the same numbers, before they are flattened
     # into one line and a tooltip.
     print(json.dumps(data if "--report" in sys.argv[1:] else bar_line(data)))
