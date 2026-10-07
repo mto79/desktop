@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+
+# desktop-update-oc: keep the OpenShift client on the newest release of one minor version.
+#
+#   desktop-update-oc            # install or update oc to the newest 4.22.z
+#   desktop-update-oc --check    # say what is installed and what is current, change nothing
+#
+# oc is not in Fedora, so it comes from Red Hat's mirror as a tarball -- and used to be
+# fetched once, from "latest", by an install script that did nothing when an oc was already
+# there. So the client stayed at whatever "latest" meant on the day of the install: 4.20.12
+# for nine months, with a 4.22 cluster on the same machine.
+#
+# The minor version is pinned here and the patch release follows it: "stable-4.22" is the
+# mirror's own pointer to the newest 4.22.z, so every desktop-update picks up fixes and
+# none of them moves to 4.23 without this line being changed. The client is chosen for the
+# newest cluster it talks to. An oc is expected to work one minor version either side of
+# its own; against a cluster two behind it does in practice, and is the side to err on --
+# an old client meeting a newer API is the one that fails.
+#
+# The archive carries a kubectl too. It is left in it: kubectl has its own script and its
+# own version, and the one in the tarball is OpenShift's build of an older one.
+
+set -euo pipefail
+
+CHANNEL="${DESKTOP_OC_CHANNEL:-stable-4.22}"
+MIRROR="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$CHANNEL"
+ARCHIVE="openshift-client-linux.tar.gz"
+TARGET="${DESKTOP_OC_TARGET:-/usr/local/bin/oc}"
+
+installed() {
+  [[ -x $TARGET ]] || return 0
+  "$TARGET" version --client 2>/dev/null | sed -n 's/^Client Version: //p'
+}
+
+# release.txt is the mirror's description of what the channel points at right now.
+current() {
+  curl -fsSL --max-time 30 "$MIRROR/release.txt" | sed -n 's/^Name:[[:space:]]*//p' | head -1
+}
+
+echo -e "\e[32m\nUpdate oc ($CHANNEL)\e[0m"
+
+have=$(installed)
+want=$(current) || want=""
+if [[ -z $want ]]; then
+  # No network, or the mirror is away: not a reason to fail the whole update.
+  echo "could not ask the mirror what $CHANNEL is; oc left at ${have:-nothing}"
+  exit 0
+fi
+
+if [[ ${1:-} == --check ]]; then
+  echo "installed: ${have:-none}"
+  echo "current:   $want"
+  exit 0
+fi
+
+if [[ $have == "$want" ]]; then
+  echo "oc $have is current"
+  exit 0
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+echo "oc ${have:-not installed} -> $want"
+curl -fSL --max-time 600 --progress-bar -o "$work/$ARCHIVE" "$MIRROR/$ARCHIVE"
+
+# Checked against the mirror's own list before anything is unpacked, let alone installed:
+# this is a binary that will hold cluster-admin tokens.
+sum=$(curl -fsSL --max-time 30 "$MIRROR/sha256sum.txt" | awk -v name="$ARCHIVE" '$2 == name { print $1 }')
+[[ -n $sum ]] || {
+  echo "desktop-update-oc: the mirror lists no checksum for $ARCHIVE; nothing installed" >&2
+  exit 1
+}
+echo "$sum  $work/$ARCHIVE" | sha256sum --check --quiet || {
+  echo "desktop-update-oc: checksum mismatch; nothing installed" >&2
+  exit 1
+}
+
+tar -xzf "$work/$ARCHIVE" -C "$work" oc
+got=$("$work/oc" version --client | sed -n 's/^Client Version: //p')
+[[ $got == "$want" ]] || {
+  echo "desktop-update-oc: the archive holds oc $got, not $want; nothing installed" >&2
+  exit 1
+}
+
+# Without sudo where that is enough: an oc put there by hand may be the user's own file.
+if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
+  install -m 0755 "$work/oc" "$TARGET.new" 2>/dev/null && mv -f "$TARGET.new" "$TARGET" ||
+    cp -f "$work/oc" "$TARGET"
+else
+  sudo install -m 0755 "$work/oc" "$TARGET"
+fi
+
+now=$("$TARGET" version --client | sed -n 's/^Client Version: //p')
+echo "oc $now installed"
+
+# Said on the desktop as well, and only when something changed: this runs in the middle of
+# desktop-update, where a line scrolls past, and a client that moved under you is worth
+# knowing about the next time a command behaves differently. Never a reason to fail.
+notify-send -a "Updates" -i software-update-available "oc updated" \
+  "OpenShift client ${have:-not installed} → $now ($CHANNEL)" 2>/dev/null || true

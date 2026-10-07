@@ -15,6 +15,7 @@ done 2>/dev/null &
 desktop-update-git
 desktop-migrate
 desktop-update-cargo
+desktop-update-oc
 desktop-update-flatpak
 desktop-update-system-pkgs
 desktop-update-firmware
