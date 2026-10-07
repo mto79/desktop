@@ -10,6 +10,7 @@ COPR_REPOS=(
   "scottames/ghostty"          # COPR for Ghostty
   "kylegospo/grub-btrfs"       # COPR for grub-btrfs
   "errornointernet/quickshell" # COPR for Quickshell (not in Fedora repos)
+  "tmichett/RHTLC"             # COPR for the Red Hat Training Lab Connector (rhtlc)
 )
 
 # Loop through array and enable each repo

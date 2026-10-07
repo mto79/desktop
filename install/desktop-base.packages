@@ -86,6 +86,7 @@ plymouth
 plymouth-plugin-*
 power-profiles-daemon
 remmina
+rhtlc
 ruby
 ruby-devel
 ripgrep
