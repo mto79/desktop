@@ -2,7 +2,7 @@
 
 # desktop-status-ai: running agents and token usage, as one bar module.
 #
-#   {"text":"5 · 1.9M","class":"busy","tooltip":"..."}
+#   {"text":"5","gauges":[{"text":"60%","level":0.6},{"text":"3%","level":0.03}],"class":"busy",...}
 #
 # Two widgets sat side by side saying related things about the same subject, and each
 # one paid the bar's full padding for the privilege. Merging them costs a separator and
@@ -25,7 +25,10 @@ echo "$claude" | jq -e . >/dev/null 2>&1 || claude='{"text":"","class":"idle","t
 
 jq -c -n --argjson a "$agents" --argjson c "$claude" '
   ($a.text // "") as $agentText
-  | ($c.text // "") as $tokenText
+  | ($c.gauges // []) as $gauges
+  # With gauges the limits are drawn from those, each in its own colour, and the headline
+  # percentage would only say one of them twice.
+  | (if ($gauges | length) > 0 then "" else ($c.text // "") end) as $tokenText
   | {
       text: (
         if $agentText != "" and $tokenText != "" then $agentText + " · " + $tokenText
@@ -41,6 +44,7 @@ jq -c -n --argjson a "$agents" --argjson c "$claude" '
       ),
       # The waiting count stays visible whichever half wins the colour; see CommandWidget.
       badge: ($a.badge // ""),
+      gauges: $gauges,
       tooltip: (
         [($a.tooltip // ""), ($c.tooltip // "")]
         | map(select(. != ""))
