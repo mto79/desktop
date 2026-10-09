@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+
+"""Emoji and their names, one per line, for the launcher's ":" mode.
+
+    desktop-emoji-list        # "😀<TAB>grinning face"
+
+Unicode's own list of emoji (emoji-test.txt) is not on a Fedora install unless a package
+nobody otherwise needs is added, and Python already carries every character's name. So
+the list is made from that: the blocks that hold emoji, each character that has a name.
+
+What that leaves out is everything that is more than one character -- flags, skin tones,
+families and the other joined sequences. Those are in emoji-test.txt and not in here.
+
+The two older blocks, Miscellaneous Symbols and Dingbats, are text symbols first and are
+drawn in monochrome unless asked otherwise, so theirs carry the variation selector that
+asks for the emoji form.
+"""
+
+import unicodedata
+
+# (first, last, needs the emoji variation selector)
+BLOCKS = (
+    (0x1F600, 0x1F64F, False),  # emoticons first: the ones looked for most
+    (0x1F900, 0x1F9FF, False),
+    (0x1F300, 0x1F5FF, False),
+    (0x1F680, 0x1F6FF, False),
+    (0x1FA70, 0x1FAFF, False),
+    (0x2600, 0x26FF, True),
+    (0x2700, 0x27BF, True),
+)
+# Skin-tone modifiers are not emoji on their own.
+SKIP = range(0x1F3FB, 0x1F400)
+
+
+def main():
+    for first, last, selector in BLOCKS:
+        for point in range(first, last + 1):
+            if point in SKIP:
+                continue
+            name = unicodedata.name(chr(point), "")
+            if not name:
+                continue
+            print(f"{chr(point)}{chr(0xFE0F) if selector else ''}\t{name.lower()}")
+
+
+if __name__ == "__main__":
+    main()

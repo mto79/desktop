@@ -1,9 +1,11 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
+import "../Commons/calc.js" as Calc
 
 // Application launcher, in place of `desktop-menu apps` shelling out to wofi.
 //
@@ -105,7 +107,235 @@ Item {
     return out;
   }
 
-  readonly property var results: selecting ? itemResults : appResults
+  readonly property var results: selecting ? itemResults : (mode === "apps" ? appResults : modeResults)
+
+  // --- modes ---------------------------------------------------------------------------
+  //
+  // The launcher opens applications. A first character turns it into something else for
+  // as long as it is there, so the other things worth one keystroke do not each need a
+  // key of their own:
+  //
+  //   =  work something out      = 1920 / 1.6
+  //   >  run a command           > systemctl --user restart pipewire
+  //   /  go to a window          / firefox
+  //   :  find an emoji           : rocket
+  //   ?  list these
+  //
+  // Symbols on purpose: no application's name begins with one, so nothing typed to find
+  // an application can land in a mode by accident.
+  readonly property var modes: [
+    {
+      prefix: "=",
+      name: "calc",
+      glyph: "\u{f00ec}",
+      label: "Calculate",
+      sub: "= 1920 / 1.6  ·  Enter copies the answer"
+    },
+    {
+      prefix: ">",
+      name: "run",
+      glyph: "\u{f018d}",
+      label: "Run a command",
+      sub: "> systemctl --user restart pipewire"
+    },
+    {
+      prefix: "/",
+      name: "windows",
+      glyph: "\u{f05af}",
+      label: "Go to a window",
+      sub: "/ firefox  ·  every window on every workspace"
+    },
+    {
+      prefix: ":",
+      name: "emoji",
+      glyph: "\u{f01f5}",
+      label: "Find an emoji",
+      sub: ": rocket  ·  Enter copies it"
+    }
+  ]
+
+  readonly property string mode: {
+    if (selecting || query === "")
+      return "apps";
+    var first = query.charAt(0);
+    if (first === "?")
+      return "help";
+    for (var i = 0; i < modes.length; i++)
+      if (modes[i].prefix === first)
+        return modes[i].name;
+    return "apps";
+  }
+  // What was typed after the prefix.
+  readonly property string modeQuery: mode === "apps" ? "" : query.slice(1).trim()
+  // Rows in a mode are the same shape as a menu's -- glyph, label, subtext -- with what
+  // choosing one does added to it.
+  readonly property bool listing: selecting || mode !== "apps"
+
+  // Emoji, loaded the first time they are asked for and kept: 1800 lines are not worth
+  // reading at every login for a mode that may not be used that day.
+  property var emoji: []
+
+  Process {
+    id: emojiLoader
+
+    command: ["desktop-emoji-list"]
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var out = [];
+        var lines = text.split("\n");
+        for (var i = 0; i < lines.length; i++) {
+          var tab = lines[i].indexOf("\t");
+          if (tab > 0)
+            out.push({
+              symbol: lines[i].slice(0, tab),
+              name: lines[i].slice(tab + 1)
+            });
+        }
+        root.emoji = out;
+      }
+    }
+  }
+
+  onModeChanged: {
+    if (mode === "emoji" && emoji.length === 0 && !emojiLoader.running)
+      emojiLoader.running = true;
+    // Where a window is comes from Hyprland's last answer about it.
+    if (mode === "windows")
+      Hyprland.refreshToplevels();
+  }
+
+  // The sum itself is worked out in calc.js, which is kept free of QML so that the one
+  // rule that matters about it -- arithmetic and nothing else -- can be tested.
+  function calculate(text) {
+    return Calc.calculate(text);
+  }
+
+  // Every word typed has to be in the text, in any order: "face tears" finds "face with
+  // tears of joy".
+  function matchesAll(text, needle) {
+    var words = needle.toLowerCase().split(/\s+/);
+    for (var i = 0; i < words.length; i++)
+      if (words[i] !== "" && text.indexOf(words[i]) === -1)
+        return false;
+    return true;
+  }
+
+  readonly property var modeResults: {
+    var out = [];
+    var needle = modeQuery;
+
+    if (mode === "help") {
+      for (var m = 0; m < modes.length; m++)
+        out.push({
+          glyph: modes[m].glyph,
+          label: modes[m].prefix + "  " + modes[m].label,
+          sub: modes[m].sub,
+          kind: "prefix",
+          payload: modes[m].prefix + " "
+        });
+      return out;
+    }
+
+    if (mode === "calc") {
+      var answer = calculate(needle);
+      if (answer !== null)
+        out.push({
+          glyph: "\u{f00ec}",
+          label: answer,
+          sub: needle + "  ·  Enter copies the answer",
+          kind: "copy",
+          payload: answer
+        });
+      return out;
+    }
+
+    if (mode === "run") {
+      if (needle === "")
+        return out;
+      out.push({
+        glyph: "\u{f018d}",
+        label: needle,
+        sub: "Run it",
+        kind: "run",
+        payload: needle
+      });
+      out.push({
+        glyph: "\u{f018d}",
+        label: needle,
+        sub: "Run it in a terminal, and keep the window to read what it said",
+        kind: "terminal",
+        payload: needle
+      });
+      return out;
+    }
+
+    if (mode === "windows") {
+      var tops = Hyprland.toplevels ? Hyprland.toplevels.values : [];
+      for (var t = 0; t < tops.length && out.length < maxResults; t++) {
+        var ipc = tops[t].lastIpcObject;
+        if (!ipc || !ipc.address)
+          continue;
+        var title = tops[t].title || ipc.title || "";
+        var appClass = ipc["class"] || "";
+        var where = ipc.workspace ? ipc.workspace.name : "";
+        if (!matchesAll((title + " " + appClass).toLowerCase(), needle))
+          continue;
+        out.push({
+          glyph: "\u{f05af}",
+          label: title !== "" ? title : appClass,
+          sub: appClass + (where !== "" ? "  ·  workspace " + where : ""),
+          kind: "window",
+          payload: ipc.address
+        });
+      }
+      return out;
+    }
+
+    if (mode === "emoji") {
+      for (var e = 0; e < emoji.length && out.length < maxResults; e++) {
+        if (!matchesAll(emoji[e].name, needle))
+          continue;
+        out.push({
+          glyph: emoji[e].symbol,
+          label: emoji[e].name,
+          sub: "",
+          kind: "copy",
+          payload: emoji[e].symbol
+        });
+      }
+      return out;
+    }
+
+    return out;
+  }
+
+  function act(item) {
+    if (!item)
+      return;
+    if (item.kind === "prefix") {
+      // Not a choice but a start: the mode's prefix goes in the field, and the launcher
+      // stays for what comes after it.
+      if (root.field)
+        root.field.begin(item.payload);
+      return;
+    }
+    hide();
+    if (item.kind === "copy")
+      Quickshell.execDetached(["wl-copy", "--", item.payload]);
+    else if (item.kind === "window")
+      Hyprland.dispatch("focuswindow address:" + item.payload);
+    else if (item.kind === "run")
+      Quickshell.execDetached({
+        command: ["uwsm", "app", "--", "bash", "-c", item.payload],
+        workingDirectory: Quickshell.env("HOME")
+      });
+    else if (item.kind === "terminal")
+      Quickshell.execDetached({
+        command: ["uwsm", "app", "--", "ghostty", "--title=Run", "-e", "bash", "-c", item.payload + "; echo; read -r -n 1 -s -p 'press a key'"],
+        workingDirectory: Quickshell.env("HOME")
+      });
+  }
 
   readonly property var appResults: {
     var needle = query.trim().toLowerCase();
@@ -299,6 +529,8 @@ Item {
   function activate(item) {
     if (root.selecting)
       choose(item);
+    else if (root.mode !== "apps")
+      act(item);
     else
       launch(item);
   }
@@ -410,7 +642,7 @@ Item {
           id: input
 
           width: parent.width
-          placeholder: root.selecting ? root.prompt : "Search applications"
+          placeholder: root.selecting ? root.prompt : "Search applications  ·  ? for more"
 
           Component.onCompleted: root.field = input
 
@@ -452,10 +684,10 @@ Item {
               required property var modelData
               required property int index
 
-              iconSource: (!root.selecting && modelData.icon) ? Quickshell.iconPath(modelData.icon, true) : ""
-              icon: root.selecting ? modelData.glyph : ""
-              label: root.selecting ? modelData.label : (modelData.name || "")
-              sublabel: root.selecting ? modelData.sub : (modelData.genericName || modelData.comment || "")
+              iconSource: (!root.listing && modelData.icon) ? Quickshell.iconPath(modelData.icon, true) : ""
+              icon: root.listing ? modelData.glyph : ""
+              label: root.listing ? modelData.label : (modelData.name || "")
+              sublabel: root.listing ? modelData.sub : (modelData.genericName || modelData.comment || "")
               cursor: root.cursor === index
               onClicked: root.activate(modelData)
             }
@@ -465,7 +697,8 @@ Item {
         Text {
           width: parent.width
           visible: root.results.length === 0 && !root.inputMode
-          text: "No match"
+          // In a mode an empty list is usually a sentence half typed, not a failed search.
+          text: root.mode === "calc" ? (root.modeQuery === "" ? "Type a sum" : "Not a sum yet") : root.mode === "run" ? "Type a command" : root.mode === "emoji" && root.emoji.length === 0 ? "Loading…" : "No match"
           color: Color.popupMuted
           font.family: Style.fontFamily
           font.pixelSize: Style.fontSize

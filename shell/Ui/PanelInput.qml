@@ -19,6 +19,15 @@ Rectangle {
     input.selectAll();
   }
 
+  // Put text in the field to be typed after, rather than typed over: take() selects what
+  // is there, which is right for a search to replace and wrong for a start to add to.
+  function begin(text) {
+    input.text = text;
+    input.forceActiveFocus();
+    input.deselect();
+    input.cursorPosition = input.text.length;
+  }
+
   // Giving focus back to the panel is not enough on its own: the enclosing FocusScope
   // remembers this field as its focused child and hands it straight back. Dropping the
   // field's own focus flag first is what actually releases the keyboard.
