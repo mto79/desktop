@@ -72,6 +72,9 @@
         },
         {
           "id": "update"
+        },
+        {
+          "id": "notifications"
         }
       ],
       "right": [

@@ -28,7 +28,8 @@ QtObject {
       "memory": memory,
       "cpu": cpu,
       "battery": battery,
-      "security": security
+      "security": security,
+      "notifications": notificationBell
     })
 
   // A layout entry names either a built-in widget by id, or a generic module by type:
@@ -60,6 +61,9 @@ QtObject {
 
   property Component security: Component {
     Security {}
+  }
+  property Component notificationBell: Component {
+    NotificationBell {}
   }
   property Component spacer: Component {
     Spacer {}

@@ -94,6 +94,9 @@ hl.define_submap("panels", function()
   hl.bind("M", hl.dsp.submap("reset"))
   hl.bind("N", hl.dsp.exec_cmd("desktop-shell shell togglePanel network"), { description = "Network panel" })
   hl.bind("N", hl.dsp.submap("reset"))
+  -- O for notifications: N is the network.
+  hl.bind("O", hl.dsp.exec_cmd("desktop-shell shell togglePanel notifications"), { description = "Notification centre" })
+  hl.bind("O", hl.dsp.submap("reset"))
   hl.bind("P", hl.dsp.exec_cmd("desktop-shell shell togglePanel media"), { description = "Media panel" })
   hl.bind("P", hl.dsp.submap("reset"))
   -- R for record: M is the memory panel.

@@ -79,7 +79,84 @@ Item {
     onNotification: notification => {
       // Untracked notifications are dropped the moment this handler returns.
       notification.tracked = true;
+      Inbox.noteArrival(notification.id);
+      root.trim();
     }
+  }
+
+  // The list the bell and the notification centre read. See Inbox.
+  Binding {
+    target: Inbox
+    property: "all"
+    value: server.trackedNotifications ? server.trackedNotifications.values : []
+  }
+
+  // A toast that has had its time is put away, not thrown away: it leaves the screen and
+  // stays in the notification centre, still the live notification, until it is dealt
+  // with there. Reassigned rather than changed in place, so the stack below notices.
+  property var retired: ({})
+
+  // Asked for by a toast's own timer, and done a moment later from out here. Retiring
+  // changes the list the stack is drawn from, which destroys the toast that asked: doing
+  // that from inside that toast's handler crashed the shell the first time several timed
+  // out in the same instant. So a toast only says it is done, and this works through
+  // everything that said so, in one change.
+  property var retiring: []
+
+  function retire(notification) {
+    retiring.push(notification);
+    sweep.restart();
+  }
+
+  Timer {
+    id: sweep
+
+    interval: 20
+    onTriggered: {
+      var due = root.retiring;
+      root.retiring = [];
+      var next = {};
+      var all = server.trackedNotifications ? server.trackedNotifications.values : [];
+      for (var i = 0; i < all.length; i++)
+        if (root.retired[all[i].id])
+          next[all[i].id] = true;
+      var forget = [];
+      for (var d = 0; d < due.length; d++) {
+        if (!due[d])
+          continue;
+        // Asked to be forgotten by its own sender -- a volume step, a progress tick.
+        // Keeping those would fill the centre with things never meant to be read twice.
+        if (due[d].transient)
+          forget.push(due[d]);
+        else
+          next[due[d].id] = true;
+      }
+      root.retired = next;
+      for (var f = 0; f < forget.length; f++)
+        forget[f].expire();
+    }
+  }
+
+  // What was held back while do-not-disturb was on does not all arrive at once when it
+  // goes off: that would be the interruption it was turned on to avoid, only later and
+  // all together. It is in the notification centre, where the bell counts it.
+  onDoNotDisturbChanged: if (!doNotDisturb) {
+    var next = {};
+    var all = server.trackedNotifications ? server.trackedNotifications.values : [];
+    for (var i = 0; i < all.length; i++)
+      next[all[i].id] = true;
+    retired = next;
+  }
+
+  // Kept is not kept for ever. Past this many the oldest that has left the screen goes,
+  // so a chatty application over a long day cannot grow the list without end.
+  readonly property int keep: (config && config.keep) ? config.keep : 50
+
+  function trim() {
+    var all = server.trackedNotifications ? server.trackedNotifications.values.slice() : [];
+    for (var i = 0; i < all.length && all.length - i > keep; i++)
+      if (retired[all[i].id])
+        all[i].expire();
   }
 
   // Likewise not `visible`.
@@ -90,13 +167,15 @@ Item {
     // Newest first, and never more than the stack is allowed to show.
     var out = [];
     for (var i = all.length - 1; i >= 0 && out.length < root.maxVisible; i--)
-      out.push(all[i]);
+      if (!retired[all[i].id])
+        out.push(all[i]);
     return out;
   }
 
   // Silenced notifications are still received and tracked -- nothing is lost, it just
-  // does not interrupt.
-  property bool doNotDisturb: false
+  // does not interrupt. The switch itself is Inbox's, where the bell and the panel can
+  // reach it and where it can end by itself.
+  readonly property bool doNotDisturb: Inbox.doNotDisturb
 
   // Which notifications have already been drawn once. The stack is rebuilt from scratch
   // whenever the list changes -- its model is an array -- so every toast in it is a new
@@ -113,8 +192,7 @@ Item {
   }
 
   function toggleDnd() {
-    doNotDisturb = !doNotDisturb;
-    return doNotDisturb;
+    return Inbox.toggleQuiet();
   }
 
   // Reached over IPC, since the toasts are dismissed with the mouse otherwise.
@@ -267,15 +345,33 @@ Item {
       }
     }
 
-    Component.onCompleted: if (root.arriving(notification))
-      arrival.start()
+    Component.onCompleted: {
+      remainingMs = timeLeft();
+      if (root.arriving(notification))
+        arrival.start();
+    }
 
     // Critical notifications get no timer at all, so a zero timeout cannot be read as
     // "expire immediately".
+    // How much of its time is left, worked out once when the toast is drawn. From when
+    // the notification arrived, not from now: the stack is rebuilt whenever another toast
+    // comes or goes, and counting from the rebuild gave every toast still on screen its
+    // whole timeout again -- four that arrived together took four timeouts to clear.
+    property int remainingMs: 0
+
+    function timeLeft() {
+      if (toast.timeout <= 0)
+        return 0;
+      var at = Inbox.arrivedAt[notification.id];
+      if (at === undefined)
+        return toast.timeout;
+      return Math.max(1, Math.min(toast.timeout, at + toast.timeout - Date.now()));
+    }
+
     Timer {
-      interval: Math.max(1, toast.timeout)
-      running: toast.timeout > 0
-      onTriggered: toast.notification.expire()
+      interval: Math.max(1, toast.remainingMs)
+      running: toast.timeout > 0 && toast.remainingMs > 0
+      onTriggered: root.retire(toast.notification)
     }
 
     // How long it has left, as a line along the bottom that runs out. It shares the
@@ -293,10 +389,10 @@ Item {
       z: 1
 
       NumberAnimation on width {
-        running: toast.timeout > 0
-        from: toast.width - Style.radius * 2
+        running: toast.timeout > 0 && toast.remainingMs > 0
+        from: (toast.width - Style.radius * 2) * toast.remainingMs / Math.max(1, toast.timeout)
         to: 0
-        duration: Math.max(1, toast.timeout)
+        duration: Math.max(1, toast.remainingMs)
       }
     }
 
