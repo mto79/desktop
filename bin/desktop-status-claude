@@ -227,6 +227,7 @@ def build():
             continue
         severity = entry.get("severity") or "normal"
         limits.append({
+            "kind": entry.get("kind") or "",
             "name": LIMIT_NAMES.get(entry.get("kind"), entry.get("kind") or "Limit"),
             "percent": int(percent),
             "resets": until(entry.get("resets_at")),
@@ -302,7 +303,27 @@ def bar_line(data):
         return {"text": tokens["total"], "class": "active", "tooltip": "\n".join(lines)}
 
     state = {"critical": "critical", "warning": "warning"}.get(data["severity"], "active")
-    return {"text": f"{data['limits'][0]['percent']}%", "class": state, "tooltip": "\n".join(lines)}
+    return {
+        "text": f"{data['limits'][0]['percent']}%",
+        "gauges": gauges(data["limits"]),
+        "class": state,
+        "tooltip": "\n".join(lines),
+    }
+
+
+# The two limits everyone on a plan has, in an order that does not move: the bar has no
+# room for a name beside each figure, so position is the only thing saying which is which.
+GAUGE_KINDS = ("session", "weekly_all")
+
+
+def gauges(limits):
+    """The session and the week for the bar to colour, each by how much of it is gone."""
+    by_kind = {limit["kind"]: limit for limit in limits}
+    return [
+        {"text": f"{by_kind[kind]['percent']}%", "level": min(by_kind[kind]["percent"], 100) / 100}
+        for kind in GAUGE_KINDS
+        if kind in by_kind
+    ]
 
 
 def tmux_status(data):

@@ -17,6 +17,11 @@ import qs.Ui
 // urgent colour, whatever the class says. The class colours the whole module, and one module can
 // have two things to say at once -- the AI module's usage limit going critical and a
 // session waiting on you -- where colouring for one would hide the other.
+//
+// And "gauges", for figures that run out: [{"text": "60%", "level": 0.6}, ...], each drawn
+// after the text in its own colour from Color.gauge -- green at 0, red at 1. A class is one
+// colour for the whole module, which cannot say that the session is nearly gone while the
+// week has barely been touched.
 BarItem {
   id: root
 
@@ -43,6 +48,7 @@ BarItem {
 
   property string label: ""
   property string badge: ""
+  property var gauges: []
   property string state: ""
 
   function shell(value) {
@@ -68,7 +74,7 @@ BarItem {
 
   // The icon is decoration for the label, so it does not on its own keep an otherwise
   // empty module on the bar.
-  visible: !hideWhenEmpty || label !== "" || badge !== ""
+  visible: !hideWhenEmpty || label !== "" || badge !== "" || gauges.length > 0
   implicitWidth: visible ? content.implicitWidth + Style.itemPaddingH * 2 : 0
 
   readonly property color textColor: {
@@ -89,6 +95,7 @@ BarItem {
     if (trimmed === "") {
       label = "";
       badge = "";
+      gauges = [];
       state = "";
       tooltip = "";
       return;
@@ -101,6 +108,7 @@ BarItem {
         var parsed = JSON.parse(trimmed);
         label = parsed.text !== undefined ? String(parsed.text) : "";
         badge = parsed.badge !== undefined ? String(parsed.badge) : "";
+        gauges = Array.isArray(parsed.gauges) ? parsed.gauges : [];
         tooltip = parsed.tooltip !== undefined ? String(parsed.tooltip) : "";
         state = parsed.class !== undefined ? String(parsed.class) : "";
         return;
@@ -111,6 +119,7 @@ BarItem {
 
     label = trimmed.split("\n")[0];
     badge = "";
+    gauges = [];
     state = "";
   }
 
@@ -200,6 +209,29 @@ BarItem {
       icon: root.icon
       text: root.label
       color: root.textColor
+    }
+
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: root.label !== "" && root.gauges.length > 0
+      text: "·"
+      color: Color.barMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize
+    }
+
+    Repeater {
+      model: root.gauges
+
+      delegate: Text {
+        required property var modelData
+
+        anchors.verticalCenter: parent.verticalCenter
+        text: modelData.text !== undefined ? String(modelData.text) : ""
+        color: Color.gauge(Number(modelData.level) || 0)
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize
+      }
     }
 
     // A filled pill rather than coloured text. Coloured text is exactly what disappears when

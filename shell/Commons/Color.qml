@@ -27,6 +27,9 @@ QtObject {
   property color urgent: "#f7768e"
   // The opposite of urgent: something went well and is there to be picked up.
   property color good: "#9ece6a"
+  // The two steps between good and urgent, for something that runs out by degrees.
+  property color caution: "#e0af68"
+  property color warning: "#ff9e64"
 
   // Per-surface roles. Default to the foundational palette so a theme only has to
   // override what it actually cares about.
@@ -60,6 +63,24 @@ QtObject {
   property color tooltipText: popupText
   property color tooltipBorder: popupBorder
 
+  // How far gone something is, as a colour: good while there is plenty left, through
+  // caution and warning, to urgent when it is spent. Blended between the stops rather than
+  // stepped, so 60% and 70% are told apart without anyone learning where a threshold sits.
+  function gauge(fraction) {
+    var stops = [[0, good], [0.5, caution], [0.75, warning], [1, urgent]];
+    var at = Math.max(0, Math.min(1, fraction));
+    for (var i = 1; i < stops.length; i++) {
+      if (at <= stops[i][0]) {
+        var from = stops[i - 1], to = stops[i];
+        var t = (at - from[0]) / (to[0] - from[0]);
+        return Qt.rgba(from[1].r + (to[1].r - from[1].r) * t,
+                       from[1].g + (to[1].g - from[1].g) * t,
+                       from[1].b + (to[1].b - from[1].b) * t, 1);
+      }
+    }
+    return urgent;
+  }
+
   // Reassigning the whole object is what makes bindings re-evaluate; mutating it in
   // place would not.
   property var values: ({})
@@ -88,6 +109,8 @@ QtObject {
     accent = pick(parsed, "accent", "#7aa2f7");
     urgent = pick(parsed, "urgent", "#f7768e");
     good = pick(parsed, "good", "#9ece6a");
+    caution = pick(parsed, "caution", "#e0af68");
+    warning = pick(parsed, "warning", "#ff9e64");
 
     var bar = parsed.bar || {};
     barBackground = pick(bar, "background", background);

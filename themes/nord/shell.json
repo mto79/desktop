@@ -5,6 +5,8 @@
   "accent": "#81a1c1",
   "urgent": "#bf616a",
   "good": "#a3be8c",
+  "caution": "#ebcb8b",
+  "warning": "#d08770",
   "bar": {
     "background": "#2e3440",
     "text": "#d8dee9",

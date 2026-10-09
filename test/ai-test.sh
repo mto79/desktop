@@ -43,6 +43,11 @@ fi
 check "the headline is the fullest plan limit" \
   test "$(jq -r .text <<<"$reported")" = "70%"
 
+# The bar draws the session and the week side by side with no room to name either, so the
+# order is the label: fullest-first, as the tooltip has it, would swap them under the eye.
+check "the bar gets the session and the week, in that order whichever is fuller" \
+  test "$(jq -c .gauges <<<"$reported")" = '[{"text":"26%","level":0.26},{"text":"70%","level":0.7}]'
+
 # 94% of a spending cap is worth a red module and a line in the tooltip. It is not worth
 # the headline: "94%" on the bar would be read as tokens, because everything else is.
 check "the spending cap colours the module" \
@@ -150,6 +155,8 @@ chmod +x "$sandbox/bin"/*
 
 composed=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-ai")
 check "both halves reach the bar" test "$(jq -r .text <<<"$composed")" = "2 · 95%"
+check "a module without gauges composes as it always did" \
+  test "$(jq -c .gauges <<<"$composed")" = "[]"
 check "a critical limit outranks a running agent" \
   test "$(jq -r .class <<<"$composed")" = "critical"
 
@@ -174,4 +181,14 @@ STUB
 composed=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-ai")
 check "an ordinary reading leaves the agent colour alone" \
   test "$(jq -r .class <<<"$composed")" = "busy"
+
+# Gauges carry the limits in their own colours, so the headline percentage steps aside --
+# left in, the bar would read "2 · 60% · 60% 3%".
+cat >"$sandbox/bin/desktop-status-claude" <<'STUB'
+#!/usr/bin/env bash
+echo '{"text":"60%","gauges":[{"text":"60%","level":0.6},{"text":"3%","level":0.03}],"class":"active","tooltip":"Session 60%"}'
+STUB
+composed=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-ai")
+check "gauges reach the bar in place of the headline percentage" \
+  test "$(jq -c '[.text, (.gauges | map(.text))]' <<<"$composed")" = '["2",["60%","3%"]]'
 finish

@@ -74,10 +74,11 @@ Popup {
     return most;
   }
 
-  // Two tones, the same two the bar uses: a limit is either worth noticing or it is
-  // not. A third colour would be a distinction nobody reads at a glance.
+  // Green with plenty left, red when it is gone, the same scale the bar draws its two
+  // figures in. This was two tones once, noticed or not, and that said nothing about the
+  // long stretch in between -- which is where the decision to slow down gets made.
   function tone(severity, percent) {
-    return (severity === "critical" || percent >= 90) ? Color.popupUrgent : Color.popupAccent;
+    return severity === "critical" ? Color.popupUrgent : Color.gauge(percent / 100);
   }
 
   // The same thresholds desktop-agent-tokens and desktop-status-claude print with, so a
@@ -275,7 +276,7 @@ Popup {
       }
       statusColor: root.waitingCount > 0 ? Color.popupUrgent : Color.popupMuted
       value: fullest ? fullest.percent + "%" : "—"
-      valueColor: fullest ? root.tone(fullest.severity, fullest.percent) === Color.popupUrgent ? Color.popupUrgent : Color.popupText : Color.popupMuted
+      valueColor: fullest ? root.tone(fullest.severity, fullest.percent) : Color.popupMuted
     }
 
     Repeater {
@@ -344,7 +345,7 @@ Popup {
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
         value: root.spend ? root.spend.percent / 100 : 0
-        fillColor: root.spend ? root.tone(root.spend.severity, root.spend.percent) : Color.popupAccent
+        fillColor: root.spend ? root.tone(root.spend.severity, root.spend.percent) : Color.good
       }
     }
 
