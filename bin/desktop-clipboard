@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+
+# desktop-clipboard: what was copied before the last thing that was copied.
+#
+#   desktop-clipboard pick     # SUPER + V: choose from the history, and it is on the clipboard
+#   desktop-clipboard clear    # forget all of it
+#   desktop-clipboard watch    # the watcher, started at login
+#   desktop-clipboard store    # what the watcher runs for each copy; reads it on stdin
+#
+# A Wayland clipboard holds one thing, and holds it only while the program that offered it
+# is running: copy a second thing and the first is gone, close the terminal and so is what
+# came out of it. cliphist keeps what passes through -- text and images -- and this is the
+# part around it: what must never be kept, and choosing from what was.
+#
+# Never kept: anything a password manager copied. KeePassXC marks what it puts on the
+# clipboard with the x-kde-passwordManagerHint type, precisely so that a history like this
+# one can leave it alone, and clears the clipboard itself a few seconds later. A history
+# that kept it would be a plain-text list of every password used since login.
+#
+# Choosing is done in the launcher's own list, so it looks and searches like everything
+# else there. The chosen entry is put on the clipboard, not typed: what Ctrl+V means
+# differs between a terminal and everything else, and guessing wrong pastes into the wrong
+# place.
+
+set -uo pipefail
+
+SECRET_HINT="x-kde-passwordManagerHint"
+
+die() {
+  echo "desktop-clipboard: $1" >&2
+  exit 1
+}
+
+need() { command -v "$1" >/dev/null 2>&1 || die "$1 is not installed"; }
+
+# Asked of the clipboard as it is now, which is the copy this was started for: wl-paste
+# runs this the moment an offer arrives. Anything that cannot be established counts as
+# secret -- the worse mistake is the one that keeps a password.
+secret() {
+  local types
+  types=$(wl-paste --list-types 2>/dev/null) || return 0
+  grep -qxF "$SECRET_HINT" <<<"$types"
+}
+
+cmd_store() {
+  if secret; then
+    cat >/dev/null
+    return 0
+  fi
+  need cliphist
+  cliphist store
+}
+
+# One watcher for text and one for images: asked for both at once, wl-paste hands over
+# whichever type the source lists first, and a browser lists text/html before the image.
+cmd_watch() {
+  need cliphist
+  need wl-paste
+  wl-paste --type text --watch "$0" store &
+  wl-paste --type image --watch "$0" store &
+  wait
+}
+
+# cliphist's list is "id<TAB>preview". The id is what it decodes by and means nothing to
+# anyone, so it is kept here and the preview is what is shown; an image's preview is
+# cliphist's own description of it, "[[ binary data 14 KiB png 640x480 ]]", turned into
+# something that reads like a line of a menu.
+menu_lines() { # stdin: cliphist list -> "id<TAB>line for desktop-menu-select"
+  local id preview kind size
+  while IFS=$'\t' read -r id preview; do
+    [[ -n $id ]] || continue
+    if [[ $preview =~ ^\[\[\ binary\ data\ (.+)\ ([a-z0-9]+)\ ([0-9]+x[0-9]+)\ \]\]$ ]]; then
+      size=${BASH_REMATCH[1]} kind=${BASH_REMATCH[2]}
+      printf '%s\t󰋩\tImage %s\t%s · %s\n' "$id" "${BASH_REMATCH[3]}" "$kind" "$size"
+    else
+      # A tab in the text would be read as the end of the label.
+      printf '%s\t󰅍\t%s\n' "$id" "${preview//$'\t'/ }"
+    fi
+  done
+}
+
+cmd_pick() {
+  local listing chosen id
+  need cliphist
+  listing=$(cliphist list 2>/dev/null | menu_lines)
+  if [[ -z $listing ]]; then
+    notify-send -a "Clipboard" "Clipboard history is empty" "Nothing has been copied since it was started." 2>/dev/null
+    return 0
+  fi
+  chosen=$(cut -f2- <<<"$listing" | desktop-menu-select --prompt "Clipboard" --width 720 --rows 12) || return 0
+  # What comes back is the line without its glyph. Two entries can read the same -- long
+  # texts that begin alike -- and then it is the more recent one, which is listed first.
+  id=$(awk -F '\t' -v want="$chosen" '{ line = $3; if (NF > 3) line = line "\t" $4 } line == want { print $1; exit }' <<<"$listing")
+  [[ -n $id ]] || return 1
+  cliphist decode "$id" | wl-copy
+}
+
+cmd_clear() {
+  need cliphist
+  cliphist wipe
+}
+
+case "${1:-}" in
+pick) cmd_pick ;;
+clear) cmd_clear ;;
+watch) cmd_watch ;;
+store) cmd_store ;;
+menu-lines) menu_lines ;;
+*) die "usage: desktop-clipboard pick|clear|watch|store" ;;
+esac

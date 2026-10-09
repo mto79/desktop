@@ -16,4 +16,8 @@ hl.on("hyprland.start", function()
   -- follow them without being asked. SUPER+M stays the way to overrule the choice, not the
   -- way to make it. Applies the matching layout once at login too.
   hl.exec_cmd("uwsm app -- desktop-monitors-watch")
+
+  -- Clipboard history: keeps what is copied, text and images, so SUPER+V can offer it
+  -- again. Leaves alone whatever a password manager copies -- see desktop-clipboard.
+  hl.exec_cmd("uwsm app -- desktop-clipboard watch")
 end)
