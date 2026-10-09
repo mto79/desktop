@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+
+# desktop-power: lock, sleep, leave, restart or switch off.
+#
+#   desktop-power lock | screensaver | suspend | exit | reboot | shutdown
+#
+# What each of those means on this desktop, in one place. The power menu in the shell and
+# the System menu in desktop-menu both offer them, and two copies of "what reboot does"
+# are two things to keep the same: clearing the restart-required marks first is easy to
+# have in one and forget in the other, and then the bar goes on asking for a reboot that
+# has just happened.
+
+set -uo pipefail
+
+case "${1:-}" in
+lock) exec desktop-lock-screen ;;
+screensaver) exec desktop-launch-screensaver force ;;
+suspend) exec systemctl suspend ;;
+# Leaving the session: uwsm stops the compositor and everything started under it.
+exit) desktop-state clear relaunch-required && exec uwsm stop ;;
+reboot) desktop-state clear 're*-required' && exec systemctl reboot ;;
+shutdown) desktop-state clear 're*-required' && exec systemctl poweroff ;;
+*)
+  echo "usage: desktop-power lock|screensaver|suspend|exit|reboot|shutdown" >&2
+  exit 1
+  ;;
+esac

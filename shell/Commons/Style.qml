@@ -92,6 +92,12 @@ QtObject {
   property int overviewMargin: 64
   property int overviewSpacing: 28
   property int overviewLabelHeight: 30
+
+  // The power menu's tiles, and the glyph in the middle of each.
+  property int powerTileSize: 136
+  property int powerGlyphSize: 36
+  // How long the power menu ignores the keyboard after it opens. See PowerMenu.
+  property int powerKeyDelay: 400
   property int rowHeight: 34
   property int rowSpacing: 2
 

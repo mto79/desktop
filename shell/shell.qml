@@ -7,6 +7,7 @@ import qs.Commons
 import "Bar"
 import "Launcher"
 import "Overview"
+import "Power"
 import "Notifications"
 import "Osd"
 
@@ -191,6 +192,11 @@ ShellRoot {
       return overview.toggle() ? "open" : "closed";
     }
 
+    // Lock, sleep, leave, restart, switch off. SUPER + ESCAPE.
+    function togglePowerMenu(): string {
+      return powerMenu.toggle() ? "open" : "closed";
+    }
+
     function openLauncher(): void {
       launcher.show();
     }
@@ -233,6 +239,10 @@ ShellRoot {
 
   Overview {
     id: overview
+  }
+
+  PowerMenu {
+    id: powerMenu
   }
 
   Notifications {

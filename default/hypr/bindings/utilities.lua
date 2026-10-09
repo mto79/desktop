@@ -4,7 +4,7 @@ hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("desktop-shell shell toggleLauncher >/d
 hl.bind("SUPER + O", hl.dsp.exec_cmd("desktop-shell shell toggleOverview"), { description = "Workspace overview" })
 -- hl.bind("SUPER + CTRL + E", hl.dsp.exec_cmd("walker -m Emojis"), { description = "Emoji picker" })
 hl.bind("SUPER + ALT + SPACE", hl.dsp.exec_cmd("desktop-menu"), { description = "desktop menu" })
-hl.bind("SUPER + ESCAPE", hl.dsp.exec_cmd("desktop-menu system"), { description = "Power menu" })
+hl.bind("SUPER + ESCAPE", hl.dsp.exec_cmd("desktop-shell shell togglePowerMenu >/dev/null 2>&1 || desktop-menu system"), { description = "Power menu" })
 hl.bind("XF86PowerOff", hl.dsp.exec_cmd("desktop-menu system"), { locked = true, description = "Power menu" })
 hl.bind("SUPER + K", hl.dsp.exec_cmd("desktop-menu-keybindings"), { description = "Show key bindings" })
 hl.bind("SUPER + M", hl.dsp.exec_cmd("desktop-shell shell togglePanel monitors >/dev/null 2>&1 || desktop-menu monitors"), { description = "Monitor layout" })

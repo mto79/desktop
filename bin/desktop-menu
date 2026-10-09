@@ -315,12 +315,13 @@ show_update_password_menu() {
 
 show_system_menu() {
   case $(menu "System" "  Lock\n󱄄  Screensaver\n󰤄  Suspend\n  Exit\n󰜉  Reboot\n󰐥  Shutdown") in
-  *Lock*) desktop-lock-screen ;;
-  *Screensaver*) desktop-launch-screensaver force ;;
-  *Suspend*) systemctl suspend ;;
-  *Exit*) desktop-state clear relaunch-required && uwsm stop ;;
-  *Reboot*) desktop-state clear re*-required && systemctl reboot ;;
-  *Shutdown*) desktop-state clear re*-required && systemctl poweroff ;;
+  # What each of these does is desktop-power's, which the shell's power menu calls too.
+  *Lock*) desktop-power lock ;;
+  *Screensaver*) desktop-power screensaver ;;
+  *Suspend*) desktop-power suspend ;;
+  *Exit*) desktop-power exit ;;
+  *Reboot*) desktop-power reboot ;;
+  *Shutdown*) desktop-power shutdown ;;
   *) back_to show_main_menu ;;
   esac
 }
