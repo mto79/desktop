@@ -15,6 +15,39 @@ BarWidget {
 
   implicitWidth: layout.implicitWidth
 
+  // The delegate of the focused workspace, when it is on this bar. Set by the delegates,
+  // since a Repeater's children cannot be bound to from outside it; it goes back to null
+  // by itself when that workspace is closed and its delegate destroyed.
+  property Item focusedItem: null
+
+  // Which workspace you are on, as a line that slides to the next one rather than a
+  // colour that jumps: the direction it moves is the direction you went.
+  Rectangle {
+    readonly property bool shown: root.focusedItem !== null && root.focusedItem.visible
+
+    visible: shown
+    x: shown ? root.focusedItem.x + Style.barWorkspacePaddingH : 0
+    width: shown ? Math.max(0, root.focusedItem.width - Style.barWorkspacePaddingH * 2) : 0
+    y: root.height - Style.barWorkspaceInsetV - height
+    height: Style.barWorkspaceIndicatorHeight
+    radius: height / 2
+    color: Color.barActiveWorkspace
+    z: 1
+
+    Behavior on x {
+      NumberAnimation {
+        duration: Style.motionQuick
+        easing.type: Easing.OutCubic
+      }
+    }
+    Behavior on width {
+      NumberAnimation {
+        duration: Style.motionQuick
+        easing.type: Easing.OutCubic
+      }
+    }
+  }
+
   RowLayout {
     id: layout
 
@@ -33,6 +66,11 @@ BarWidget {
         // dropping it would make the bar flicker as Hyprland fills the field in.
         readonly property bool onThisMonitor: !root.monitor || !modelData.monitor || modelData.monitor.id === root.monitor.id
         readonly property bool focused: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === modelData.id
+
+        onFocusedChanged: if (focused)
+          root.focusedItem = workspace
+        Component.onCompleted: if (focused)
+          root.focusedItem = workspace
 
         visible: onThisMonitor
         Layout.fillHeight: true

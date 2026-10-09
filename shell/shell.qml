@@ -124,6 +124,13 @@ ShellRoot {
       Bus.updatesChanged();
     }
 
+    // The same for any command module, by its id in shell.json:
+    //
+    //   desktop-shell shell refreshWidget ai
+    function refreshWidget(id: string): void {
+      Bus.widgetRefresh(id);
+    }
+
     // Re-read the active theme's shell.json. desktop-theme-set calls this instead of
     // restarting the shell: Color deliberately does not watch that path, because it is
     // a symlink and swapping its target does not fire an inotify watch.

@@ -124,6 +124,9 @@
             "waiting": "urgent",
             "active": "muted"
           },
+          "pulse": [
+            "waiting"
+          ],
           "panel": "ai",
           "onRightClick": "desktop-menu agents"
         },

@@ -36,6 +36,10 @@ BarItem {
   // A module with nothing to say takes no space, which is what makes this usable for
   // indicators that are absent most of the time.
   readonly property bool hideWhenEmpty: !(widgetConfig && widgetConfig.hideWhenEmpty === false)
+  // States in which the module breathes: "pulse": ["waiting"]. For the few that mean
+  // somebody is being kept waiting -- colour alone says so only to an eye already on it.
+  readonly property var pulse: (widgetConfig && widgetConfig.pulse) ? widgetConfig.pulse : []
+  readonly property bool pulsing: state !== "" && pulse.indexOf(state) !== -1
 
   property string label: ""
   property string badge: ""
@@ -119,6 +123,16 @@ BarItem {
     }
   }
 
+  // Asked for over IPC, between two polls. See Bus.widgetRefresh.
+  Connections {
+    target: Bus
+
+    function onWidgetRefresh(id) {
+      if (root.widgetConfig && id === root.widgetConfig.id && root.exec !== "" && !root.follow && !probe.running)
+        probe.running = true;
+    }
+  }
+
   Timer {
     interval: root.interval
     running: root.exec !== "" && !root.follow
@@ -157,6 +171,27 @@ BarItem {
     id: content
 
     spacing: 6
+
+    // Down and back up, for as long as the state lasts. Stopping puts it back to full: an
+    // animation stopped halfway would leave the module dimmed for no reason anyone could see.
+    SequentialAnimation on opacity {
+      running: root.pulsing && root.visible
+      loops: Animation.Infinite
+      alwaysRunToEnd: false
+      onRunningChanged: if (!running)
+        content.opacity = 1
+
+      NumberAnimation {
+        to: 0.35
+        duration: Style.motionBreath
+        easing.type: Easing.InOutSine
+      }
+      NumberAnimation {
+        to: 1
+        duration: Style.motionBreath
+        easing.type: Easing.InOutSine
+      }
+    }
 
     IconLabel {
       anchors.verticalCenter: parent.verticalCenter

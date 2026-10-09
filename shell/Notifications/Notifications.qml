@@ -98,6 +98,20 @@ Item {
   // does not interrupt.
   property bool doNotDisturb: false
 
+  // Which notifications have already been drawn once. The stack is rebuilt from scratch
+  // whenever the list changes -- its model is an array -- so every toast in it is a new
+  // object each time, and without this each arrival would make all of them arrive again.
+  // A plain object on purpose: nothing may bind to it, or noting an arrival would itself
+  // be a change.
+  readonly property var arrived: ({})
+
+  function arriving(notification) {
+    if (arrived[notification.id])
+      return false;
+    arrived[notification.id] = true;
+    return true;
+  }
+
   function toggleDnd() {
     doNotDisturb = !doNotDisturb;
     return doNotDisturb;
@@ -224,12 +238,66 @@ Item {
     border.width: 1
     border.color: hover.containsMouse ? toast.accentColor : Color.popupBorder
 
+    // In from the edge of the screen it sits against, the first time it is drawn. A
+    // transform rather than x: the column owns where its children are.
+    readonly property int travelFrom: (root.position.indexOf("left") !== -1 ? -1 : 1) * Style.motionTravel
+
+    transform: Translate {
+      id: travel
+    }
+
+    ParallelAnimation {
+      id: arrival
+
+      NumberAnimation {
+        target: travel
+        property: "x"
+        from: toast.travelFrom
+        to: 0
+        duration: Style.motionEnter
+        easing.type: Easing.OutCubic
+      }
+      NumberAnimation {
+        target: toast
+        property: "opacity"
+        from: 0
+        to: 1
+        duration: Style.motionEnter
+        easing.type: Easing.OutCubic
+      }
+    }
+
+    Component.onCompleted: if (root.arriving(notification))
+      arrival.start()
+
     // Critical notifications get no timer at all, so a zero timeout cannot be read as
     // "expire immediately".
     Timer {
       interval: Math.max(1, toast.timeout)
       running: toast.timeout > 0
       onTriggered: toast.notification.expire()
+    }
+
+    // How long it has left, as a line along the bottom that runs out. It shares the
+    // timer's lifetime -- both start when the toast is drawn -- so the two cannot disagree.
+    Rectangle {
+      visible: toast.timeout > 0
+      anchors.left: parent.left
+      anchors.leftMargin: Style.radius
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: toast.border.width
+      height: Style.barWorkspaceIndicatorHeight
+      radius: height / 2
+      color: toast.accentColor
+      opacity: 0.6
+      z: 1
+
+      NumberAnimation on width {
+        running: toast.timeout > 0
+        from: toast.width - Style.radius * 2
+        to: 0
+        duration: Math.max(1, toast.timeout)
+      }
     }
 
     // A stripe rather than a tinted background: the urgency has to be legible without

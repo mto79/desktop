@@ -52,6 +52,8 @@ QtObject {
   property int barWorkspacePaddingH: 10
   property int barWorkspaceInsetV: 6
   property int barWorkspaceSpacing: 4
+  // The line under the workspace you are on, which slides to the next one.
+  property int barWorkspaceIndicatorHeight: 2
 
   // The tray drawer. Opening is delayed so that crossing the bar on the way somewhere
   // else does not unfold it -- the same trick tooltipDelay plays, and for the same
@@ -70,6 +72,18 @@ QtObject {
   // How long a panel takes to grow out of the bar. Short enough that a panel opened to
   // glance at a number is not slower to read than it was before it moved.
   property int panelRevealDuration: 180
+
+  // Motion elsewhere. Three lengths rather than a number per animation, so that things
+  // which move for the same reason move alike: quick for something following the pointer
+  // or the keyboard, enter for a surface arriving, and breath for the one thing here that
+  // repeats -- slow, because anything that keeps moving in the corner of the eye has to be
+  // easy to stop looking at.
+  property int motionQuick: 140
+  property int motionEnter: 220
+  property int motionBreath: 1100
+  // How far a surface travels as it arrives. Enough to say where it came from, not enough
+  // to be watched.
+  property int motionTravel: 24
   property int rowHeight: 34
   property int rowSpacing: 2
 

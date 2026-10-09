@@ -88,6 +88,14 @@ tmx() {
   tmux -S "$socket" "$@" 2>/dev/null
 }
 
+# The bar's AI module polls, and an agent that has just started waiting should not take a
+# polling interval to say so. Only ever reached when the state has changed, so this is a
+# few times a turn and not once a tool call. Detached and silent: the shell may not be
+# running, and a hook must not wait on it either way.
+nudge_bar() {
+  setsid -f desktop-shell shell refreshWidget ai </dev/null >/dev/null 2>&1 || true
+}
+
 case "$event" in
 SessionStart) state=ready ;;
 UserPromptSubmit | PostToolUse) state=working ;;
@@ -105,6 +113,7 @@ Notification)
 SessionEnd)
   rm -f "$file"
   tmx set-option -wu -t "$pane" @agent_state
+  nudge_bar
   exit 0
   ;;
 *) exit 0 ;;
@@ -159,6 +168,7 @@ jq -cn \
     pane: $pane, socket: $socket, pid: ($pid | tonumber? // null)}' >"$tmp" 2>/dev/null &&
   mv -f "$tmp" "$file" 2>/dev/null
 rm -f "$tmp" 2>/dev/null
+nudge_bar
 
 # Whether you are looking at this pane right now: it is the active pane of its window, that
 # window is the one showing, and a terminal attached to its session is the focused window.

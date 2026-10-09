@@ -46,8 +46,16 @@ cat >"$stubs/jump" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$JUMP_LOG"
 STUB
+# The bar is told when a state changes. Stubbed, so that is recorded here rather than sent
+# to the shell running on the machine the suite is run on.
+cat >"$stubs/desktop-shell" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$SHELL_LOG"
+STUB
 chmod +x "$stubs"/*
 export PATH="$stubs:$PATH" NOTIFY_LOG="$sandbox/notify.log" JUMP_LOG="$sandbox/jump.log"
+export SHELL_LOG="$sandbox/shell.log"
+: >"$SHELL_LOG"
 export DESKTOP_AGENT_JUMP="$stubs/jump"
 : >"$NOTIFY_LOG"; : >"$JUMP_LOG"
 
@@ -72,6 +80,13 @@ event UserPromptSubmit
 check "a prompt makes it working" test "$(state)" = working
 event Notification '"notification_type":"permission_prompt"'
 check "a permission prompt makes it waiting" test "$(state)" = waiting
+# The nudge is detached, so it lands a moment after the hook has returned.
+nudged() { local i; for i in $(seq 30); do [[ $(wc -l <"$SHELL_LOG") -ge $1 ]] && break; sleep 0.1; done; wc -l <"$SHELL_LOG"; }
+check "each change of state tells the bar at once, not at its next poll" test "$(nudged 3)" = 3
+check "by asking the AI module to look again" grep -qx 'shell refreshWidget ai' "$SHELL_LOG"
+event Notification '"notification_type":"permission_prompt"'
+sleep 0.3
+check "a state that has not changed tells it nothing" test "$(wc -l <"$SHELL_LOG")" = 3
 check "the project survives a payload with an empty field in the middle" \
   test "$(jq -r .cwd "$records/s1.json")" = /home/someone/proj
 check "the pane and the pid are recorded" \

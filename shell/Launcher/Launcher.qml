@@ -379,6 +379,26 @@ Item {
       border.width: 1
       border.color: Color.popupBorder
 
+      // Arrives rather than appears. Only on the way in: closing has to be instant, since
+      // what was chosen is already starting and a launcher fading over it is in the way.
+      opacity: root.open ? 1 : 0
+      scale: root.open ? 1 : 0.97
+
+      Behavior on opacity {
+        enabled: root.open
+        NumberAnimation {
+          duration: Style.motionEnter
+          easing.type: Easing.OutCubic
+        }
+      }
+      Behavior on scale {
+        enabled: root.open
+        NumberAnimation {
+          duration: Style.motionEnter
+          easing.type: Easing.OutCubic
+        }
+      }
+
       Column {
         id: layout
 

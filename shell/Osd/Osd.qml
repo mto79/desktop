@@ -164,6 +164,17 @@ Item {
           border.width: 1
           border.color: Color.popupBorder
 
+          // Fades in; a second press while it is up changes the reading, not this.
+          opacity: root.active ? 1 : 0
+
+          Behavior on opacity {
+            enabled: root.active
+            NumberAnimation {
+              duration: Style.motionQuick
+              easing.type: Easing.OutCubic
+            }
+          }
+
           Text {
             id: glyph
 
