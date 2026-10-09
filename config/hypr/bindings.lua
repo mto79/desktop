@@ -30,6 +30,7 @@ hl.bind("SUPER + S", hl.dsp.layout("togglesplit"), { description = "Toggle split
 hl.unbind("SUPER + V")
 hl.bind("SUPER + F", hl.dsp.window.float({ action = "toggle" }), { description = "Toggle floating" })
 hl.bind("SUPER + V", hl.dsp.exec_cmd("desktop-clipboard pick"), { description = "Clipboard history" })
+hl.bind("SUPER + SHIFT + V", hl.dsp.exec_cmd("desktop-clipboard delete"), { description = "Forget a clipboard entry" })
 hl.unbind("SUPER + K")
 hl.bind("SUPER + CTRL + K", hl.dsp.exec_cmd("~/.local/share/desktop/bin/desktop-menu-keybindings"), { description = "Show key bindings" })
 hl.bind("SUPER + CTRL + R", hl.dsp.exec_cmd("desktop-restart-shell"), { description = "Reload desktop shell" })

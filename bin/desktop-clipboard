@@ -3,6 +3,7 @@
 # desktop-clipboard: what was copied before the last thing that was copied.
 #
 #   desktop-clipboard pick     # SUPER + V: choose from the history, and it is on the clipboard
+#   desktop-clipboard delete   # SUPER + SHIFT + V: choose one entry, and it is forgotten
 #   desktop-clipboard clear    # forget all of it
 #   desktop-clipboard watch    # the watcher, started at login
 #   desktop-clipboard store    # what the watcher runs for each copy; reads it on stdin
@@ -61,17 +62,41 @@ cmd_watch() {
   wait
 }
 
+# A small copy of each image, so the list can show the picture rather than say that there
+# is one: "Image 1920x1080" names six screenshots the same. Made once and kept for the
+# session, in a directory nobody else can read -- a screenshot is as private as the text.
+THUMBS="${XDG_RUNTIME_DIR:-/tmp}/desktop/clipboard"
+
+thumbnail() { # id -> path, or nothing when one cannot be made
+  local path="$THUMBS/$1.png"
+  if [[ ! -s $path ]]; then
+    (umask 077 && mkdir -p "$THUMBS") || return 1
+    cliphist decode "$1" 2>/dev/null | magick - -thumbnail 96x96 "png:$path" 2>/dev/null
+    [[ -s $path ]] || {
+      rm -f "$path"
+      return 1
+    }
+  fi
+  echo "$path"
+}
+
 # cliphist's list is "id<TAB>preview". The id is what it decodes by and means nothing to
 # anyone, so it is kept here and the preview is what is shown; an image's preview is
 # cliphist's own description of it, "[[ binary data 14 KiB png 640x480 ]]", turned into
 # something that reads like a line of a menu.
 menu_lines() { # stdin: cliphist list -> "id<TAB>line for desktop-menu-select"
-  local id preview kind size
+  local id preview kind size shape picture pictures=0
   while IFS=$'\t' read -r id preview; do
     [[ -n $id ]] || continue
     if [[ $preview =~ ^\[\[\ binary\ data\ (.+)\ ([a-z0-9]+)\ ([0-9]+x[0-9]+)\ \]\]$ ]]; then
-      size=${BASH_REMATCH[1]} kind=${BASH_REMATCH[2]}
-      printf '%s\t󰋩\tImage %s\t%s · %s\n' "$id" "${BASH_REMATCH[3]}" "$kind" "$size"
+      size=${BASH_REMATCH[1]} kind=${BASH_REMATCH[2]} shape=${BASH_REMATCH[3]}
+      # A path where the glyph goes is a picture to the launcher. The most recent ones
+      # only: every one is a decode, and the list is waited for.
+      picture=""
+      if ((pictures < 24)); then
+        picture=$(thumbnail "$id") && pictures=$((pictures + 1))
+      fi
+      printf '%s\t%s\tImage %s\t%s · %s\n' "$id" "${picture:-󰋩}" "$shape" "$kind" "$size"
     else
       # A tab in the text would be read as the end of the label.
       printf '%s\t󰅍\t%s\n' "$id" "${preview//$'\t'/ }"
@@ -79,32 +104,59 @@ menu_lines() { # stdin: cliphist list -> "id<TAB>line for desktop-menu-select"
   done
 }
 
-cmd_pick() {
+# The id of the entry chosen in the launcher's list, or nothing.
+choose() { # prompt
   local listing chosen id
   need cliphist
   listing=$(cliphist list 2>/dev/null | menu_lines)
   if [[ -z $listing ]]; then
     notify-send -a "Clipboard" "Clipboard history is empty" "Nothing has been copied since it was started." 2>/dev/null
-    return 0
+    return 1
   fi
-  chosen=$(cut -f2- <<<"$listing" | desktop-menu-select --prompt "Clipboard" --width 720 --rows 12) || return 0
+  # Pictures of entries that are no longer in the history go with them.
+  if [[ -d $THUMBS ]]; then
+    for chosen in "$THUMBS"/*.png; do
+      [[ -e $chosen ]] || continue
+      id=$(basename "$chosen" .png)
+      grep -q "^$id	" <<<"$listing" || rm -f "$chosen"
+    done
+  fi
+  chosen=$(cut -f2- <<<"$listing" | desktop-menu-select --prompt "$1" --width 720 --rows 12) || return 1
   # What comes back is the line without its glyph. Two entries can read the same -- long
   # texts that begin alike -- and then it is the more recent one, which is listed first.
   id=$(awk -F '\t' -v want="$chosen" '{ line = $3; if (NF > 3) line = line "\t" $4 } line == want { print $1; exit }' <<<"$listing")
   [[ -n $id ]] || return 1
+  echo "$id"
+}
+
+cmd_pick() {
+  local id
+  id=$(choose "Clipboard") || return 0
   cliphist decode "$id" | wl-copy
+}
+
+# One entry, for the copy that should not have been kept: a token pasted through the
+# clipboard by a program that does not mark it secret. cliphist deletes by the line it
+# listed, so that line is handed back to it.
+cmd_delete() {
+  local id
+  id=$(choose "Forget from clipboard history") || return 0
+  cliphist list 2>/dev/null | awk -F '\t' -v id="$id" '$1 == id' | cliphist delete
+  rm -f "$THUMBS/$id.png"
 }
 
 cmd_clear() {
   need cliphist
   cliphist wipe
+  rm -rf "$THUMBS"
 }
 
 case "${1:-}" in
 pick) cmd_pick ;;
+delete) cmd_delete ;;
 clear) cmd_clear ;;
 watch) cmd_watch ;;
 store) cmd_store ;;
 menu-lines) menu_lines ;;
-*) die "usage: desktop-clipboard pick|clear|watch|store" ;;
+*) die "usage: desktop-clipboard pick|delete|clear|watch|store" ;;
 esac

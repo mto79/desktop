@@ -57,7 +57,10 @@ Item {
         value: line
       };
     return {
-      glyph: fields[0],
+      // A path where the glyph goes is a picture: desktop-clipboard sends a thumbnail of
+      // an image that way, since a glyph can only say that there is one.
+      glyph: fields[0].charAt(0) === "/" ? "" : fields[0],
+      image: fields[0].charAt(0) === "/" ? "file://" + fields[0] : "",
       label: fields[1] || "",
       sub: fields[2] || "",
       value: fields.length > 2 ? fields[1] + "\t" + fields[2] : (fields[1] || "")
@@ -684,7 +687,10 @@ Item {
               required property var modelData
               required property int index
 
-              iconSource: (!root.listing && modelData.icon) ? Quickshell.iconPath(modelData.icon, true) : ""
+              iconSource: root.listing ? (modelData.image || "") : (modelData.icon ? Quickshell.iconPath(modelData.icon, true) : "")
+              // A picture is given the height of the row; an application's icon stays the
+              // size of the glyphs it sits among.
+              pictureSize: (root.listing && modelData.image) ? Style.rowHeight - 6 : Style.iconSize + 5
               icon: root.listing ? modelData.glyph : ""
               label: root.listing ? modelData.label : (modelData.name || "")
               sublabel: root.listing ? modelData.sub : (modelData.genericName || modelData.comment || "")

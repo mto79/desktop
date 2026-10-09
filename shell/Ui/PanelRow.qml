@@ -13,6 +13,7 @@ Item {
   // An image path, for rows whose icon is a file rather than a font glyph. Takes the
   // same slot; whichever one is set wins.
   property string iconSource: ""
+  property int pictureSize: Style.iconSize + 5
   property string label: ""
   property string sublabel: ""
   // Marks the row as the current one (active sink, connected network). Distinct from
@@ -56,7 +57,7 @@ Item {
     anchors.left: parent.left
     anchors.leftMargin: 6
     anchors.verticalCenter: parent.verticalCenter
-    width: Style.iconSize + 5
+    width: root.pictureSize
     height: width
     source: root.iconSource
     sourceSize.width: width * 2

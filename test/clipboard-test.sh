@@ -25,7 +25,8 @@ cat >"$stubs/cliphist" <<STUB
 case "\$1" in
 store) cat >>"$sandbox/stored"; echo >>"$sandbox/stored" ;;
 list) cat "$sandbox/list" 2>/dev/null ;;
-decode) echo "decoded-\$2" ;;
+decode) if [[ \$2 == 7 && -f "$sandbox/picture.png" ]]; then cat "$sandbox/picture.png"; else echo "decoded-\$2"; fi ;;
+delete) cat >"$sandbox/deleted" ;;
 wipe) : >"$sandbox/wiped" ;;
 esac
 STUB
@@ -39,7 +40,8 @@ printf '%s\n' "\$CHOICE"
 STUB
 printf '#!/usr/bin/env bash\necho "$*" >>"%s/notified"\n' "$sandbox" >"$stubs/notify-send"
 chmod +x "$stubs"/*
-run() { PATH="$stubs:$PATH" bash "$CLIP" "$@"; }
+# A runtime directory of its own: thumbnails are kept there, and must not land in the real one.
+run() { PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" bash "$CLIP" "$@"; }
 
 # --- what is kept
 printf 'text/plain\nUTF8_STRING\n' >"$sandbox/types"
@@ -73,8 +75,47 @@ check "choosing nothing copies nothing" test ! -e "$sandbox/copied"
 run pick
 check "an empty history says so instead of opening an empty list" grep -q 'empty' "$sandbox/notified"
 
+# --- pictures
+# "Image 640x480" names six screenshots the same; the list shows the picture instead.
+printf '7\t[[ binary data 14 KiB png 640x480 ]]\n6\tkubectl get pods -A\n' >"$sandbox/list"
+if have magick; then
+  magick -size 64x48 xc:red "png:$sandbox/picture.png"
+  CHOICE='kubectl get pods -A' run pick
+  thumb="$sandbox/run/desktop/clipboard/7.png"
+  check "an image is offered as a picture of itself" grep -q "^$thumb	Image 640x480" "$sandbox/offered"
+  check "which is a small copy, made once" test -s "$thumb"
+  check "in a directory nobody else can read" test "$(stat -c %a "$sandbox/run/desktop/clipboard")" = 700
+  CHOICE='Image 640x480	png · 14 KiB' run pick
+  check "and choosing it still copies the image, not the small copy" \
+    cmp -s "$sandbox/copied" "$sandbox/picture.png"
+  printf '6\tkubectl get pods -A\n' >"$sandbox/list"
+  CHOICE='kubectl get pods -A' run pick
+  check "a picture goes when its entry has left the history" test ! -e "$thumb"
+  rm -f "$sandbox/picture.png"
+else
+  pass "skipped the picture checks, magick not installed"
+fi
+printf '7\t[[ binary data 14 KiB png 640x480 ]]\n' >"$sandbox/list"
+CHOICE='Image 640x480	png · 14 KiB' run pick
+check "an image that cannot be drawn small is still listed, with a glyph" \
+  grep -q '^󰋩	Image 640x480' "$sandbox/offered"
+
+# --- forgetting one
+printf '7\t[[ binary data 14 KiB png 640x480 ]]\n6\tkubectl get pods -A\n5\ta token that should not be here\n' >"$sandbox/list"
+rm -f "$sandbox/copied"
+CHOICE='a token that should not be here' run delete
+check "delete hands cliphist the entry that was chosen" \
+  test "$(cat "$sandbox/deleted")" = "5	a token that should not be here"
+check "and puts nothing on the clipboard" test ! -e "$sandbox/copied"
+rm -f "$sandbox/deleted"
+run delete
+check "choosing nothing forgets nothing" test ! -e "$sandbox/deleted"
+check "SUPER + SHIFT + V is the key for it" \
+  grep -qx 'bindd = SUPER SHIFT, V, Forget a clipboard entry, exec, desktop-clipboard delete' "$ROOT/config/hypr/bindings.conf"
+
 run clear
 check "clear forgets all of it" test -e "$sandbox/wiped"
+check "pictures included" test ! -d "$sandbox/run/desktop/clipboard"
 
 # --- wired in
 check "the watcher starts at login" \
