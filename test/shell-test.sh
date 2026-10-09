@@ -143,4 +143,23 @@ else
   fail "an idle media player is not shown in the bar" \
     "Media.qml offers every registered player, stopped ones included"
 fi
+
+# --- the workspace overview
+# A component that nothing instantiates does nothing, an IPC function that nothing calls is
+# a key that does nothing, and the two Hyprland configs have to agree on the key.
+shellqml="$ROOT/shell/shell.qml"
+overview="$ROOT/shell/Overview/Overview.qml"
+check "the overview is part of the shell" grep -q '^  Overview {' "$shellqml"
+check "and can be opened over IPC" grep -q 'function toggleOverview(): string' "$shellqml"
+check "SUPER + O opens it" \
+  grep -qx 'bindd = SUPER, O, Workspace overview, exec, desktop-shell shell toggleOverview' "$ROOT/default/hypr/bindings/utilities.conf"
+check "in the Lua bindings as well" \
+  grep -q 'hl.bind("SUPER + O", hl.dsp.exec_cmd("desktop-shell shell toggleOverview")' "$ROOT/default/hypr/bindings/utilities.lua"
+# Live captures of every window are not free. They may only exist while it is open.
+check "windows are only captured while the overview is open" \
+  grep -q 'captureSource: root.open ? win.modelData.toplevel.wayland : null' "$overview"
+check "and Hyprland is only asked again while it is open" \
+  test -n "$(grep -A3 'interval: 400' "$overview" | grep 'running: root.open')"
+# The scratchpad has a negative id and no place among the screens.
+check "special workspaces are left out" grep -q 'if (space.id <= 0)' "$overview"
 finish

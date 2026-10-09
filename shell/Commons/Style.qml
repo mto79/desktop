@@ -84,6 +84,14 @@ QtObject {
   // How far a surface travels as it arrives. Enough to say where it came from, not enough
   // to be watched.
   property int motionTravel: 24
+
+  // The workspace overview: how much of what is behind it shows through, the space kept
+  // clear of the screen's edges, the gap between two workspaces, and the strip above each
+  // that names it.
+  property real overviewDim: 0.88
+  property int overviewMargin: 64
+  property int overviewSpacing: 28
+  property int overviewLabelHeight: 30
   property int rowHeight: 34
   property int rowSpacing: 2
 

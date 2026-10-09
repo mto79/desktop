@@ -6,6 +6,7 @@ import qs.Commons
 
 import "Bar"
 import "Launcher"
+import "Overview"
 import "Notifications"
 import "Osd"
 
@@ -185,6 +186,11 @@ ShellRoot {
 
     // Always opens. The desktop menu's Apps row means "show me the launcher", where a
     // toggle would close one that is already up.
+    // Every workspace and what is on it. SUPER + O.
+    function toggleOverview(): string {
+      return overview.toggle() ? "open" : "closed";
+    }
+
     function openLauncher(): void {
       launcher.show();
     }
@@ -223,6 +229,10 @@ ShellRoot {
     id: launcher
 
     config: (shell.config && shell.config.launcher) ? shell.config.launcher : ({})
+  }
+
+  Overview {
+    id: overview
   }
 
   Notifications {

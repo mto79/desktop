@@ -1,6 +1,7 @@
 -- Menus
 -- hl.bind("SUPER + SPACE", hl.dsp.exec_cmd('walker -p "Start…"'), { description = "Launch apps" })
 hl.bind("SUPER + SPACE", hl.dsp.exec_cmd("desktop-shell shell toggleLauncher >/dev/null 2>&1 || desktop-menu apps"), { description = "Launch apps" })
+hl.bind("SUPER + O", hl.dsp.exec_cmd("desktop-shell shell toggleOverview"), { description = "Workspace overview" })
 -- hl.bind("SUPER + CTRL + E", hl.dsp.exec_cmd("walker -m Emojis"), { description = "Emoji picker" })
 hl.bind("SUPER + ALT + SPACE", hl.dsp.exec_cmd("desktop-menu"), { description = "desktop menu" })
 hl.bind("SUPER + ESCAPE", hl.dsp.exec_cmd("desktop-menu system"), { description = "Power menu" })
