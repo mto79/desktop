@@ -37,3 +37,24 @@ else
   printf '\n[terminal]\n%s\n' "$RHTLC_TERMINAL" >>"$RHTLC_SETTINGS"
   echo "rhtlc: SSH sessions will open in Ghostty"
 fi
+
+# And where Firefox keeps its profiles. rhtlc's Firefox button writes the lab's SOCKS proxy
+# into a profile's user.js, and looks for profiles in ~/.mozilla/firefox -- or a Flatpak's
+# or a Snap's -- and nowhere else. Fedora's Firefox has moved to ~/.config/mozilla, which
+# rhtlc does not know, so the button answered "no Firefox profile found" on a machine with
+# two of them.
+#
+# ~/.mozilla is made a link to the new place rather than the profiles moved back: Firefox
+# uses ~/.mozilla whenever it exists, so it follows the link to the same files and sees no
+# difference, and rhtlc finds what it is looking for. Only where there is no ~/.mozilla at
+# all -- one that exists is somebody's data, or the old layout still in use, and is left.
+RHTLC_MOZILLA="${RHTLC_MOZILLA:-$HOME/.mozilla}"
+RHTLC_MOZILLA_XDG="${RHTLC_MOZILLA_XDG:-${XDG_CONFIG_HOME:-$HOME/.config}/mozilla}"
+
+if [[ ! -e $RHTLC_MOZILLA && ! -L $RHTLC_MOZILLA ]]; then
+  # Made if Firefox has not run yet, so the link never dangles and Firefox's first profile
+  # lands where it would have anyway.
+  mkdir -p "$RHTLC_MOZILLA_XDG"
+  ln -s "$RHTLC_MOZILLA_XDG" "$RHTLC_MOZILLA"
+  echo "rhtlc: Firefox profiles are reachable at $RHTLC_MOZILLA"
+fi
