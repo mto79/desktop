@@ -111,6 +111,9 @@ hl.define_submap("panels", function()
   hl.bind("U", hl.dsp.submap("reset"))
   hl.bind("V", hl.dsp.exec_cmd("desktop-shell shell togglePanel vpn"), { description = "VPN panel" })
   hl.bind("V", hl.dsp.submap("reset"))
+  -- W for worktrees: T is dictation, and K has no better claim.
+  hl.bind("W", hl.dsp.exec_cmd("desktop-shell shell togglePanel tasks"), { description = "Tasks panel" })
+  hl.bind("W", hl.dsp.submap("reset"))
   -- Y, since S is the backup panel and every letter of "security" is taken but Y.
   hl.bind("Y", hl.dsp.exec_cmd("desktop-shell shell togglePanel security"), { description = "Security panel" })
   hl.bind("Y", hl.dsp.submap("reset"))

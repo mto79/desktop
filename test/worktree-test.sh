@@ -249,6 +249,42 @@ refusal=$(cd "$repo" && TMUX="fake,1,0" DESKTOP_WORKTREE_CLIENT=nobody bash "$WT
 check "a refusal from a key binding still says why" grep -q "not a valid branch name" <<<"$refusal"
 check "and leaves the status line to its own message" grep -qx "exit=0" <<<"$refusal"
 
+# --- every task, for the bar
+# `list` answers for the repository you are standing in. The bar's panel is not standing
+# anywhere, so tasks are found where the sessionizer finds repositories.
+export TMUX_SESSIONIZER_CONFIG_FILE="$sandbox/sessionizer-dirs"
+everything=$(cd / && bash "$WT" tasks --json)
+check "tasks are found from anywhere, not only from inside their repository" \
+  test "$(jq '.tasks | length' <<<"$everything")" -ge 1
+some=$(jq -c '[.tasks[] | select(.repo == "repo")][0]' <<<"$everything")
+check "each says which repository it belongs to" test "$(jq -r .repo <<<"$some")" = repo
+check "and how far it has got" jq -e '(.ahead | type) == "number" and (.dirty | type) == "number"' <<<"$some" >/dev/null
+check "the repository itself is not one of its tasks" \
+  test "$(jq --arg main "$repo" '[.tasks[] | select(.path == $main)] | length' <<<"$everything")" = 0
+listed_window=$(tm list-windows -t =repo -F '#{window_id} #{@worktree}' | awk 'NF > 1 { print $1; exit }')
+if [[ -n $listed_window ]]; then
+  tm set-option -w -t "$listed_window" @agent_state waiting
+  open_path=$(tm show-options -wqv -t "$listed_window" @worktree)
+  check "a task with a window says what its agent is doing and where to go" \
+    test "$(cd / && bash "$WT" tasks --json | jq -r --arg p "$open_path" '.tasks[] | select(.path == $p) | "\(.state) \(.open) \(.target | test("^repo:"))"')" = "waiting true true"
+  check "and the bar takes the colour of the one that needs you" \
+    test "$(cd / && bash "$WT" tasks --bar | jq -r .class)" = waiting
+  tm set-option -wu -t "$listed_window" @agent_state
+fi
+check "the bar counts them" \
+  test "$(cd / && bash "$WT" tasks --bar | jq -r .text)" = "$(jq '.tasks | length' <<<"$everything")"
+empty=$(mktemp -d)
+printf '%s\n' "$empty" >"$sandbox/no-repos"
+# And no tmux to name any either: a task it has open is found through it.
+mkdir -p "$sandbox/notmux"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$sandbox/notmux/tmux"
+chmod +x "$sandbox/notmux/tmux"
+check "with no tasks the bar module has no text, and so is not drawn" \
+  test "$(cd / && TMUX_SESSIONIZER_CONFIG_FILE="$sandbox/no-repos" PATH="$sandbox/notmux:$PATH" bash "$WT" tasks --bar | jq -r .text)" = ""
+rmdir "$empty"
+check "the tasks module is on the bar" \
+  test "$(jq -r '[.bar.layout[][] | select(.id == "tasks")][0].exec' "$ROOT/config/desktop/shell.json")" = "desktop-worktree tasks --bar"
+
 # --- a task as a tab
 # Asked for from a window that has an AI column, a task is a tab in that column rather than
 # a window of its own: only the agent moves to the worktree.

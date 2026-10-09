@@ -6,6 +6,7 @@
 #   desktop-worktree new --tab <pane> <branch>   as a tab of that pane's AI column, not a window
 #   desktop-worktree open <path|branch>    back to a task's window, making it if it has gone
 #   desktop-worktree list
+#   desktop-worktree tasks [--json|--bar]   every task in every repository, for the bar's panel
 #   desktop-worktree here <pane>           the task that pane's window is on, if any
 #   desktop-worktree finish <pane> [client]   prefix + D: "done" for that task, asked first
 #   desktop-worktree done [--dry-run]      from inside a task: push, open the review, close it
@@ -446,6 +447,73 @@ close_task() { # <worktree path> [window]
   echo "removed $path"
 }
 
+# Every task there is, whichever repository it belongs to. `list` answers for the
+# repository you are standing in; the bar is not standing anywhere. Repositories are found
+# where the sessionizer looks for them -- the directories in its config file -- by the
+# <name>.worktrees directory a task leaves beside its repository, and through any task
+# tmux has open, which covers a repository kept somewhere else.
+task_paths() {
+  local config="${TMUX_SESSIONIZER_CONFIG_FILE:-$HOME/.config/tmux/configs/tmux-sessionizer}" root
+  {
+    if [[ -r $config ]]; then
+      while read -r root; do
+        root=${root/#\~/$HOME}
+        [[ -d $root ]] || continue
+        find "$root" -mindepth 2 -maxdepth 2 -type d -path '*.worktrees/*' 2>/dev/null
+      done <"$config"
+    fi
+    tmux list-windows -a -F '#{@worktree}' 2>/dev/null
+  } | grep . | sort -u
+}
+
+# One JSON object per task: where it is, how far it has got, what its agent is doing and
+# where to go to look at it.
+tasks_json() {
+  local path main branch base ahead dirty window state target
+  while read -r path; do
+    [[ -d $path ]] || continue
+    main=$(main_of "$path") || continue
+    [[ $path == "$main" ]] && continue
+    branch=$(git -C "$path" symbolic-ref --short HEAD 2>/dev/null) || branch=""
+    base=$(base_ref "$main")
+    ahead=$(git -C "$path" rev-list --count "$base..HEAD" 2>/dev/null) || ahead=0
+    dirty=$(git -C "$path" status --porcelain --untracked-files=all 2>/dev/null | wc -l)
+    window=$(place_of "$(session_of "$main")" "$path")
+    state="" target=""
+    if [[ -n $window ]]; then
+      state=$(tmux show-options -wqv -t "$window" @agent_state 2>/dev/null)
+      target=$(tmux display-message -p -t "$window" '#{session_name}:#{window_index}.#{pane_index}' 2>/dev/null)
+    fi
+    jq -cn --arg path "$path" --arg repo "$(basename "$main")" --arg branch "$branch" \
+      --arg state "$state" --arg target "$target" --argjson ahead "${ahead:-0}" --argjson dirty "${dirty:-0}" \
+      '{path: $path, repo: $repo, branch: $branch, name: ($path | split("/") | last), ahead: $ahead,
+        dirty: $dirty, state: $state, target: $target, open: ($target != "")}'
+  done < <(task_paths) | jq -cs '{tasks: sort_by(.repo, .name)}'
+}
+
+cmd_tasks() {
+  case "${1:-}" in
+  --json | "") tasks_json ;;
+  # For a command module: how many there are, coloured by whichever needs you most. No
+  # tasks is no text, and a module with no text is not drawn.
+  --bar)
+    tasks_json | jq -c '
+      .tasks as $t
+      | if ($t | length) == 0 then {text: "", class: "idle", tooltip: "No tasks"}
+        else {
+          text: ($t | length | tostring),
+          class: (if any($t[]; .state == "waiting") then "waiting"
+                  elif any($t[]; .state == "done") then "done"
+                  elif any($t[]; .state == "working") then "working" else "idle" end),
+          tooltip: (["Tasks"] + [$t[] | "\(.repo) · \(.name)  \(.ahead) ahead"
+                     + (if .dirty > 0 then ", \(.dirty) changed" else "" end)
+                     + (if .state != "" then "  (\(.state))" else "" end)] | join("\n"))
+        } end'
+    ;;
+  *) die "tasks takes --json or --bar" ;;
+  esac
+}
+
 # The task a pane's window is on: the window's own, when the task has a window, and
 # otherwise the one in the tab on top of the window's AI column. What the terminal reads to
 # open beside the task, and what prefix + D finishes.
@@ -527,6 +595,7 @@ case "${1:-}" in
 new) shift; cmd_new "$@" ;;
 open) shift; cmd_open "$@" ;;
 list) cmd_list ;;
+tasks) shift; cmd_tasks "$@" ;;
 here) shift; cmd_here "${1:?pane}" ;;
 finish) shift; cmd_finish "$@" ;;
 done) shift; cmd_done "$@" ;;

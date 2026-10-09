@@ -123,6 +123,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  TasksPanel {
+    id: tasksPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   NotificationsPanel {
     id: notificationsPanel
 
