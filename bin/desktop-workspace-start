@@ -61,6 +61,12 @@ if ! tmux has-session -t "=llm-wiki" 2>/dev/null; then
   desktop-agent-layout llm-wiki:ide claude
 fi
 
+# Then whatever else was open before the machine went down: the other repositories'
+# sessions, the tabs in each AI column, the tasks they were on. Only what is missing is
+# built, so the two sessions above are left as they are. Not waited for -- it takes a few
+# seconds a window, and the terminal below should not open late for it.
+desktop-tmux-restore restore >/dev/null 2>&1 &
+
 # Every launch here has a class of its own bar the Brave ones, which share a browser
 # process, so those go in turn and the rest start together.
 {

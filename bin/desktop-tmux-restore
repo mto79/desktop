@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+
+"""Remember what tmux looked like, and build it again after a reboot.
+
+    desktop-tmux-restore save            # write down what is open now
+    desktop-tmux-restore save --settle   # the same, a few seconds from now; what the hooks run
+    desktop-tmux-restore restore         # at login: build whatever is written down and missing
+    desktop-tmux-restore show            # what would be restored
+
+A tmux server does not outlive the machine. Everything in it -- the sessions, each
+window's editor, shell and AI column, the tabs in that column, the tasks they were on --
+was gone after a reboot, and the first quarter of an hour of the day went on opening it
+all again.
+
+What is written down is what things *are*, not how they are drawn: "this window is laid
+out for an agent, in this directory, with two claude tabs and one on the task fix-runner".
+Restoring runs the same commands that made them the first time -- desktop-agent-layout,
+desktop-agent-tabs, desktop-worktree -- so a restored window is an ordinary one, and a
+change to how any of those work needs no change here.
+
+What comes back is the place, not the conversation in full. The first claude tab of a
+directory picks up where that directory's last conversation left off, because that is
+what --continue does; further tabs start fresh, as a new tab always does. Nothing that was
+running in a terminal is run again: a shell is a shell, and what was typed into it is not
+this script's to repeat. lazygit is the one exception, since a window that held it is of
+no use without it.
+
+Saving is asked for by tmux's own hooks, whenever a window or a session comes or goes, and
+done a few seconds later. That delay is what keeps a shutdown from saving nothing: as the
+server goes down it closes every session in turn and each of those is a hook, but by the
+time any of them gets to look, the server is gone and there is nothing to ask -- so the
+last picture written is the one from before it started going down.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+SETTLE_SECONDS = 5
+# A terminal window is restored as a shell. These are the commands a window is restored
+# *with*, because the window is that program.
+RERUN = {"lazygit"}
+
+
+def state_dir():
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local/state")
+    return Path(base) / "desktop" / "tmux"
+
+
+def snapshot_file():
+    return state_dir() / "last.json"
+
+
+def tmux(*args, check=False):
+    """Output of a tmux command, or None when it failed -- which is how a server that
+    is not there, or is on its way out, answers everything."""
+    try:
+        done = subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if done.returncode != 0:
+        if check:
+            print(f"desktop-tmux-restore: tmux {' '.join(args)}: {done.stderr.strip()}", file=sys.stderr)
+        return None
+    return done.stdout.rstrip("\n")
+
+
+def rows(output):
+    return [line.split("\t") for line in (output or "").splitlines() if line]
+
+
+# --- what is open now ---------------------------------------------------------------------
+
+
+def column_tabs(group):
+    """The models of an AI column and the tabs of each, from the sessions behind it."""
+    models = {}
+    listing = tmux("list-windows", "-a", "-f", f"#{{==:#{{@ai_group}},{group}}}",
+                   "-F", "#{@ai_model}\t#{window_index}\t#{pane_start_path}\t#{@worktree}")
+    for model, index, path, worktree in rows(listing):
+        models.setdefault(model, []).append((int(index), {"dir": path, "worktree": worktree}))
+    return {model: [tab for _, tab in sorted(tabs, key=lambda t: t[0])] for model, tabs in models.items()}
+
+
+def terminal_tabs(group):
+    listing = tmux("list-windows", "-a", "-f", f"#{{==:#{{@term_group}},{group}}}", "-F", "#{window_index}")
+    return max(1, len(rows(listing)))
+
+
+def window_record(session, index, name, worktree, layout):
+    panes = rows(tmux("list-panes", "-t", f"={session}:{index}", "-F",
+                      "#{@ai_column}\t#{@ai_dir}\t#{@ai_model}\t#{@term_tabs}\t#{pane_start_path}"
+                      "\t#{pane_start_command}"))
+    record = {"name": name}
+    column = next((pane for pane in panes if pane[0]), None)
+
+    if worktree:
+        # A task with a window of its own. desktop-worktree knows how to make one.
+        record.update(kind="task", path=worktree)
+    elif column:
+        group, directory, model = column[0], column[1], column[2]
+        terminal = next((pane[3] for pane in panes if pane[3]), "")
+        record.update(kind="agent", dir=directory, model=model, tabs=column_tabs(group),
+                      terminals=terminal_tabs(terminal) if terminal else 1)
+    else:
+        record.update(kind="plain", layout=layout, panes=[
+            {"dir": pane[4], "command": pane[5].strip('"') if pane[5].strip('"') in RERUN else ""}
+            for pane in panes])
+    return record
+
+
+def snapshot():
+    """Every session worth going back to, or None if tmux could not be asked."""
+    listing = tmux("list-sessions", "-F", "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{session_path}")
+    if listing is None:
+        return None
+    sessions = []
+    for name, ai_group, term_group, path in rows(listing):
+        # The sessions behind a column or a terminal are not places of their own: they come
+        # back with the window they belong to.
+        if ai_group or term_group:
+            continue
+        windows = []
+        active = ""
+        for index, window, worktree, layout, is_active in rows(tmux(
+                "list-windows", "-t", f"={name}", "-F",
+                "#{window_index}\t#{window_name}\t#{@worktree}\t#{window_layout}\t#{window_active}")):
+            windows.append(window_record(name, index, window, worktree, layout))
+            if is_active == "1":
+                active = window
+        sessions.append({"name": name, "dir": path, "active": active, "windows": windows})
+    return {"saved": int(time.time()), "sessions": sessions}
+
+
+def save(settle=False):
+    directory = state_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    if (directory / "restoring").exists():
+        # Half of what is being rebuilt is not a picture worth keeping over the whole.
+        return 0
+
+    if settle:
+        # Every hook that fires asks for a save. Only the last to ask does one: each notes
+        # when it asked, sleeps, and gives way if somebody asked after it.
+        mark = directory / "asked"
+        asked = f"{time.time()} {os.getpid()}"
+        mark.write_text(asked)
+        time.sleep(SETTLE_SECONDS)
+        try:
+            if mark.read_text() != asked:
+                return 0
+        except OSError:
+            return 0
+
+    data = snapshot()
+    # No answer, or an answer with nothing in it: the server is gone or going. What was
+    # written before is the better record, and stays.
+    if not data or not data["sessions"]:
+        return 0
+    temporary = snapshot_file().with_suffix(".part")
+    temporary.write_text(json.dumps(data, indent=1))
+    temporary.replace(snapshot_file())
+    return 0
+
+
+# --- building it again --------------------------------------------------------------------
+
+
+def wait_for(test, seconds=8):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if test():
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def column_of(window):
+    for pane, group in rows(tmux("list-panes", "-t", window, "-F", "#{pane_id}\t#{@ai_column}")):
+        if group:
+            return pane, group
+    return None, None
+
+
+def column_on(group, model):
+    """Whether the column's own client has arrived at that model's tabs."""
+    clients = tmux("list-clients", "-F", "#{client_session}") or ""
+    return f"ai-{group}-{model}" in clients.splitlines()
+
+
+def run(*command, **environment):
+    try:
+        subprocess.run(command, env={**os.environ, **environment}, timeout=60,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def build_agent(session, record):
+    directory = record.get("dir") or ""
+    if not os.path.isdir(directory):
+        return False
+    window = tmux("new-window", "-d", "-t", f"={session}:", "-n", record["name"], "-c", directory,
+                  "-P", "-F", "#{window_id}", check=True)
+    if not window:
+        return False
+    tabs = record.get("tabs") or {}
+    current = record.get("model") or next(iter(tabs), "claude")
+    run("desktop-agent-layout", window, current)
+    pane, group = column_of(window)
+    if not pane:
+        return True
+
+    # The model that was on show last, so that it is the one left on show: each model is
+    # visited in turn to give it back its tabs, and the column stays where it finishes.
+    for model in [m for m in tabs if m != current] + [current]:
+        if model != current or len(tabs) > 1:
+            run("desktop-agent-tabs", "model", pane, model)
+        if not wait_for(lambda: column_on(group, model)):
+            continue
+        # The first tab came with the session. The rest are added -- in their worktree,
+        # for the ones that were on a task that is still there.
+        for tab in (tabs.get(model) or [])[1:]:
+            worktree = tab.get("worktree") or ""
+            run("desktop-agent-tabs", "new", pane, model, worktree if os.path.isdir(worktree) else "")
+
+    terminal = next((p for p, mark in rows(tmux("list-panes", "-t", window, "-F", "#{pane_id}\t#{@term_pane}"))
+                     if mark), None)
+    for _ in range(max(0, int(record.get("terminals") or 1) - 1)):
+        # The pane is traded for a client the first time, so it is looked up again each time.
+        holder = next((p for p, mark in rows(tmux("list-panes", "-t", window, "-F",
+                                                  "#{pane_id}\t#{@term_pane}")) if mark), terminal)
+        if holder:
+            run("desktop-terminal-tabs", "new", holder)
+    tmux("select-pane", "-t", window + ".{top-left}")
+    return True
+
+
+def build_plain(session, record):
+    panes = record.get("panes") or [{"dir": "", "command": ""}]
+
+    def place(pane):
+        directory = pane.get("dir") or ""
+        return ["-c", directory] if os.path.isdir(directory) else []
+
+    first = panes[0]
+    window = tmux("new-window", "-d", "-t", f"={session}:", "-n", record["name"], *place(first),
+                  "-P", "-F", "#{window_id}", *([first["command"]] if first.get("command") else []), check=True)
+    if not window:
+        return False
+    for pane in panes[1:]:
+        tmux("split-window", "-d", "-t", window, *place(pane), *([pane["command"]] if pane.get("command") else []))
+        # Evened out as they go, or the third split has no room left to be made in.
+        tmux("select-layout", "-t", window, "tiled")
+    if record.get("layout"):
+        tmux("select-layout", "-t", window, record["layout"])
+    return True
+
+
+def build_task(record):
+    path = record.get("path") or ""
+    if not os.path.isdir(path):
+        # Finished and removed since. Not something to put back.
+        return False
+    run("desktop-worktree", "open", path, DESKTOP_WORKTREE_NO_SWITCH="1")
+    return True
+
+
+def restore():
+    try:
+        data = json.loads(snapshot_file().read_text())
+    except (OSError, ValueError):
+        return 0
+    if tmux("start-server") is None:
+        return 1
+
+    flag = state_dir() / "restoring"
+    flag.write_text(str(os.getpid()))
+    built = 0
+    try:
+        for session in data.get("sessions", []):
+            name = session["name"]
+            placeholder = None
+            if tmux("has-session", "-t", f"={name}") is None:
+                directory = session.get("dir") or ""
+                # A session cannot be made without a window. This one holds it open while
+                # the real ones are built, and goes when they have been.
+                placeholder = tmux("new-session", "-d", "-s", name, "-n", "restoring",
+                                   *(["-c", directory] if os.path.isdir(directory) else []),
+                                   "-P", "-F", "#{window_id}", check=True)
+                if not placeholder:
+                    continue
+            # Only what is not there. The login script lays a session or two out itself,
+            # and a restore run twice must not double everything.
+            have = {window[0] for window in rows(tmux("list-windows", "-t", f"={name}", "-F", "#{window_name}"))}
+            made = 0
+            for record in session.get("windows", []):
+                if record["name"] in have and not (placeholder and record["name"] == "restoring"):
+                    continue
+                kind = record.get("kind")
+                ok = (build_agent(name, record) if kind == "agent" else
+                      build_task(record) if kind == "task" else
+                      build_plain(name, record))
+                made += 1 if ok else 0
+            built += made
+            if placeholder:
+                if made:
+                    tmux("kill-window", "-t", placeholder)
+                else:
+                    # Nothing of it could be rebuilt -- its directories are gone. A shell
+                    # where it was is still more use than nothing.
+                    tmux("rename-window", "-t", placeholder, "fish")
+            if session.get("active"):
+                tmux("select-window", "-t", f"={name}:{session['active']}")
+    finally:
+        try:
+            flag.unlink()
+        except OSError:
+            pass
+    print(f"desktop-tmux-restore: {built} window(s) put back")
+    save()
+    return 0
+
+
+def show():
+    try:
+        data = json.loads(snapshot_file().read_text())
+    except (OSError, ValueError):
+        print("nothing saved")
+        return 0
+    print(f"saved {time.strftime('%a %d %b %H:%M', time.localtime(data.get('saved', 0)))}")
+    for session in data.get("sessions", []):
+        print(session["name"])
+        for record in session.get("windows", []):
+            kind = record.get("kind")
+            if kind == "agent":
+                tabs = ", ".join(f"{model} x{len(entries)}" for model, entries in (record.get("tabs") or {}).items())
+                tasks = [Path(t["worktree"]).name for entries in (record.get("tabs") or {}).values()
+                         for t in entries if t.get("worktree")]
+                detail = f"agent window  {tabs}" + (f"  tasks: {', '.join(tasks)}" if tasks else "")
+                if int(record.get("terminals") or 1) > 1:
+                    detail += f"  terminals x{record['terminals']}"
+            elif kind == "task":
+                detail = f"task  {record.get('path', '')}"
+            else:
+                detail = f"{len(record.get('panes') or [])} pane(s)"
+            print(f"  {record['name']:<24} {detail}")
+    return 0
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    if command == "save":
+        return save(settle="--settle" in sys.argv[2:])
+    if command == "restore":
+        return restore()
+    if command == "show":
+        return show()
+    print("usage: desktop-tmux-restore save [--settle] | restore | show", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
