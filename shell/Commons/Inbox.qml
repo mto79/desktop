@@ -15,6 +15,26 @@ QtObject {
   // the live objects, so an action on one is still an action the sender hears about.
   property var all: []
 
+  // What was still waiting when the shell last stopped -- a restart, or the machine going
+  // down. Text and a time, nothing more: the notification itself ended with the process
+  // that was holding it, so these can be read and put away but no longer answered. Loaded
+  // and written by Notifications.qml.
+  property var past: []
+
+  readonly property int count: all.length + past.length
+
+  function forget(entry) {
+    var next = [];
+    for (var i = 0; i < past.length; i++)
+      if (past[i] !== entry)
+        next.push(past[i]);
+    past = next;
+  }
+
+  function forgetAll() {
+    past = [];
+  }
+
   // When each arrived, by id, in milliseconds. The notification itself does not say.
   // Reassigned on every arrival so that what is bound to it notices.
   property var arrivedAt: ({})

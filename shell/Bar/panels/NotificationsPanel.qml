@@ -32,18 +32,45 @@ Popup {
     return name === "" || name === "notify-send" ? "Other" : name;
   }
 
+  // One list of both kinds: the notifications still alive, and the text of those kept from
+  // before the shell last stopped. A row is told which it has by `live`.
   function rebuild() {
+    var rowsNewestFirst = [];
     var all = Inbox.all;
+    for (var i = all.length - 1; i >= 0; i--)
+      rowsNewestFirst.push({
+        live: true,
+        notification: all[i],
+        app: appOf(all[i]),
+        summary: all[i].summary,
+        body: all[i].body,
+        critical: all[i].urgency === NotificationUrgency.Critical,
+        at: Inbox.arrivedAt[all[i].id]
+      });
+    var past = Inbox.past;
+    for (var p = past.length - 1; p >= 0; p--)
+      rowsNewestFirst.push({
+        live: false,
+        entry: past[p],
+        app: appOf({
+          appName: past[p].app
+        }),
+        summary: past[p].summary,
+        body: past[p].body,
+        critical: past[p].critical === true,
+        at: past[p].at
+      });
+
     var byApp = {};
     var order = [];
-    // Newest first, and an application is as recent as its newest.
-    for (var i = all.length - 1; i >= 0; i--) {
-      var app = appOf(all[i]);
+    // An application is as recent as its newest.
+    for (var r = 0; r < rowsNewestFirst.length; r++) {
+      var app = rowsNewestFirst[r].app;
       if (byApp[app] === undefined) {
         byApp[app] = [];
         order.push(app);
       }
-      byApp[app].push(all[i]);
+      byApp[app].push(rowsNewestFirst[r]);
     }
     var out = [];
     for (var g = 0; g < order.length; g++)
@@ -52,7 +79,7 @@ Popup {
         entries: byApp[order[g]]
       });
     groups = out;
-    total = all.length;
+    total = rowsNewestFirst.length;
   }
 
   Timer {
@@ -66,6 +93,9 @@ Popup {
     target: Inbox
 
     function onAllChanged() {
+      settle.restart();
+    }
+    function onPastChanged() {
       settle.restart();
     }
   }
@@ -82,9 +112,8 @@ Popup {
     onTriggered: root.now = Date.now()
   }
 
-  function ago(notification) {
-    var at = Inbox.arrivedAt[notification.id];
-    if (at === undefined)
+  function ago(at) {
+    if (at === undefined || at === null)
       return "";
     var minutes = Math.floor((now - at) / 60000);
     if (minutes < 1)
@@ -103,7 +132,13 @@ Popup {
   //
   // Not named open and close: those are the panel's own, and a function called open here
   // replaced the one that shows it -- the panel then did nothing at all when asked for.
-  function follow(notification) {
+  function follow(row) {
+    // Kept from before: there is nobody left to tell, so reading it is all there is.
+    if (!row.live) {
+      putAway(row);
+      return;
+    }
+    var notification = row.notification;
     Qt.callLater(function () {
       var actions = notification.actions;
       for (var i = 0; i < actions.length; i++)
@@ -116,9 +151,12 @@ Popup {
     });
   }
 
-  function putAway(notification) {
+  function putAway(row) {
     Qt.callLater(function () {
-      notification.dismiss();
+      if (row.live)
+        row.notification.dismiss();
+      else
+        Inbox.forget(row.entry);
     });
   }
 
@@ -127,6 +165,7 @@ Popup {
     Qt.callLater(function () {
       for (var i = 0; i < all.length; i++)
         all[i].dismiss();
+      Inbox.forgetAll();
     });
   }
 
@@ -222,7 +261,7 @@ Popup {
 
                 required property var modelData
 
-                readonly property bool critical: modelData.urgency === NotificationUrgency.Critical
+                readonly property bool critical: modelData.critical
 
                 icon: critical ? "\u{f0026}" : "\u{f0f6a}"
                 accentColor: critical ? Color.popupUrgent : Color.popupAccent
@@ -236,7 +275,7 @@ Popup {
                 onRightClicked: root.putAway(modelData)
 
                 Text {
-                  text: root.ago(row.modelData)
+                  text: root.ago(row.modelData.at)
                   color: Color.popupMuted
                   font.family: Style.fontFamily
                   font.pixelSize: Style.fontSize - 2
@@ -252,7 +291,9 @@ Popup {
       width: parent.width
       visible: root.total > 0
       topPadding: Style.sectionSpacing
-      text: "Click opens  ·  right click dismisses"
+      // Wrapped rather than cut: the panel is narrower than the sentence.
+      wrapMode: Text.WordWrap
+      text: "Click opens  ·  right click dismisses\nThose from before a restart can only be read"
       color: Color.popupMuted
       font.family: Style.fontFamily
       font.pixelSize: Style.fontSize - 2

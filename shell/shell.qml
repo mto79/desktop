@@ -168,6 +168,11 @@ ShellRoot {
       notifications.dismissLatest();
     }
 
+    // How many notifications are waiting: "2 live, 3 kept from before".
+    function notificationCounts(): string {
+      return notifications.counts();
+    }
+
     function clearNotifications(): void {
       notifications.dismissAll();
     }

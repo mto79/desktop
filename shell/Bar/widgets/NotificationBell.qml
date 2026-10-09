@@ -12,7 +12,7 @@ import qs.Ui
 BarItem {
   id: root
 
-  readonly property int count: Inbox.all.length
+  readonly property int count: Inbox.count
 
   tooltip: {
     var lines = [count === 0 ? "No notifications" : count + (count === 1 ? " notification" : " notifications")];

@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import Quickshell.Services.Notifications
 import qs.Commons
 import qs.Ui
@@ -89,6 +90,79 @@ Item {
     target: Inbox
     property: "all"
     value: server.trackedNotifications ? server.trackedNotifications.values : []
+  }
+
+  // --- kept across a restart ---------------------------------------------------------------
+  //
+  // The list lived only in this process, so restarting the shell -- which every change to
+  // it does -- or the machine emptied it, and what had not been read was gone after all.
+  // It is written down whenever it changes and read back once at start. What comes back is
+  // text, in Inbox.past: the notifications themselves ended with the process that held
+  // them, and their senders are no longer waiting on an answer.
+  readonly property string storePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/desktop/notifications.json"
+  // Nothing is written until the file has been read, or the first save would replace
+  // what the last run left with the empty list this one starts with.
+  property bool storeRead: false
+
+  FileView {
+    path: root.storePath
+    printErrors: false
+
+    onLoaded: {
+      try {
+        var entries = JSON.parse(text());
+        if (Array.isArray(entries))
+          Inbox.past = entries.slice(-root.keep);
+      } catch (error) {
+        // A half-written or hand-edited file is no reason to start without notifications.
+      }
+      root.storeRead = true;
+    }
+    onLoadFailed: root.storeRead = true
+  }
+
+  function plain(notification) {
+    return {
+      app: String(notification.appName || ""),
+      summary: String(notification.summary || ""),
+      body: String(notification.body || ""),
+      critical: notification.urgency === NotificationUrgency.Critical,
+      at: Inbox.arrivedAt[notification.id] || Date.now()
+    };
+  }
+
+  Timer {
+    id: store
+
+    interval: 500
+    onTriggered: {
+      if (!root.storeRead)
+        return;
+      var entries = Inbox.past.slice();
+      var all = server.trackedNotifications ? server.trackedNotifications.values : [];
+      for (var i = 0; i < all.length; i++)
+        // What its sender called transient was never meant to be read later at all.
+        if (!all[i].transient)
+          entries.push(root.plain(all[i]));
+      // Not FileView's own write: this has to be private -- it is other people's messages
+      // -- and whole or absent, never half. A one-shot command with a tight umask writes
+      // beside the file and renames it into place.
+      Quickshell.execDetached({
+        command: ["sh", "-c", 'umask 077; mkdir -p "$(dirname "$2")" && printf "%s" "$1" > "$2.part" && mv "$2.part" "$2"', "desktop-notifications", JSON.stringify(entries.slice(-root.keep)), root.storePath],
+        workingDirectory: Quickshell.env("HOME")
+      });
+    }
+  }
+
+  Connections {
+    target: Inbox
+
+    function onAllChanged() {
+      store.restart();
+    }
+    function onPastChanged() {
+      store.restart();
+    }
   }
 
   // A toast that has had its time is put away, not thrown away: it leaves the screen and
@@ -205,6 +279,14 @@ Item {
     var all = server.trackedNotifications ? server.trackedNotifications.values.slice() : [];
     for (var i = 0; i < all.length; i++)
       all[i].dismiss();
+    Inbox.forgetAll();
+  }
+
+  // For scripts, and for checking this without looking at the screen: "2 live, 3 kept from
+  // before".
+  function counts() {
+    var all = server.trackedNotifications ? server.trackedNotifications.values : [];
+    return all.length + " live, " + Inbox.past.length + " kept from before";
   }
 
   Variants {

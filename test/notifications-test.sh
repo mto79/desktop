@@ -74,4 +74,21 @@ check "the bell is on the bar" \
 check "SUPER + D, O opens the centre" \
   grep -qx 'bindd = , O, Notification centre, exec, desktop-shell shell togglePanel notifications' "$ROOT/default/hypr/bindings/utilities.conf"
 check "in the Lua bindings as well" grep -q 'togglePanel notifications' "$ROOT/default/hypr/bindings/utilities.lua"
+
+# --- kept across a restart
+# The list lived in the shell's process, and every change to the shell restarts it.
+check "the list is written down when it changes" \
+  test -n "$(sed -n '/function onAllChanged()/,/^    }/p' "$QML" | grep 'store.restart()')"
+# The first save would otherwise replace what the last run left with an empty list.
+check "nothing is written before what was kept has been read" \
+  test -n "$(sed -n '/id: store$/,/^  }/p' "$QML" | grep -A1 'if (!root.storeRead)' | grep return)"
+check "it is other people's messages, so the file is private" grep -q "umask 077" "$QML"
+check "and written whole or not at all" grep -q 'printf "%s" "$1" > "$2.part" && mv "$2.part" "$2"' "$QML"
+check "what a sender called transient is not kept for later either" \
+  test -n "$(sed -n '/id: store$/,/^  }/p' "$QML" | grep 'if (!all\[i\].transient)')"
+check "what comes back is text that can be read and put away" grep -q 'Inbox.forget(row.entry)' "$PANEL"
+check "and is not offered an action its sender is no longer waiting for" \
+  test -n "$(sed -n '/function follow(row)/,/^  }/p' "$PANEL" | grep -A2 'if (!row.live)' | grep 'putAway(row)')"
+check "the bell counts both" grep -q 'readonly property int count: all.length + past.length' "$INBOX"
+check "clearing clears both" test "$(grep -c 'Inbox.forgetAll()' "$QML" "$PANEL" | cut -d: -f2 | paste -sd+ | bc)" -ge 2
 finish
