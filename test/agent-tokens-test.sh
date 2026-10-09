@@ -159,8 +159,18 @@ check "the panel's token row is the deduplicated count" \
 # --- the top bar of an AI column
 # Only today's is asserted: whether the six-hour-old response above fell on today or
 # yesterday, and so whether the window differs, depends on when this runs.
+#
+# Nor is today's a number that can be written down here. The midnight check above adds a
+# million tokens to today whenever it runs, which is any time after two in the morning,
+# and "2.3k today" was only ever true in the two hours it does not. So what the bar says
+# is held against what the same run reports as today's, in the bar's own notation.
+burned_today=$(today burned)
+shown=$(python3 -c "
+v = $burned_today
+print(next((f'{v / l:.1f}{s}' for l, s in ((10**9, 'G'), (10**6, 'M'), (10**3, 'k')) if v >= l), str(v)))")
 check "the column's top bar gets what the model burned today" \
-  grep -q '^2\.3k today' <<<"$(python3 "$TOKENS" --tmux-status --agent claude)"
+  grep -q "^${shown//./\\.} today" <<<"$(python3 "$TOKENS" --tmux-status --agent claude)"
+check "and that is a real figure, not an empty one" test "$burned_today" -ge 2324
 check "and nothing at all for an agent that has burned nothing" \
   test -z "$(CODEX_HOME="$sandbox/none" python3 "$TOKENS" --tmux-status --agent codex)"
 

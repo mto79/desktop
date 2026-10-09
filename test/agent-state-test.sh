@@ -203,7 +203,10 @@ if require tmux; then
   check "the tab says waiting" test "$(tab)" = waiting
   check "waiting sends a notification naming the project and what it wants" \
     notified "archive - claude Waiting: Claude needs your permission to use Bash"
-  for ((i = 0; i < 30; i++)); do [[ -s $JUMP_LOG ]] && break; sleep 0.1; done
+  # Waited for by what it should say, not by the log having something in it: earlier
+  # clicks in this file are in there too, so "not empty" was true at once and the check
+  # raced the detached process that writes the line -- and lost about one run in five.
+  for ((i = 0; i < 50; i++)); do grep -qx -- "--jump work:1.0 $socket" "$JUMP_LOG" 2>/dev/null && break; sleep 0.1; done
   check "clicking it jumps to the agent's pane, on its own server" \
     grep -qx -- "--jump work:1.0 $socket" "$JUMP_LOG"
 
