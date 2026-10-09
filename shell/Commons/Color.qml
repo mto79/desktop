@@ -25,6 +25,8 @@ QtObject {
   property color muted: "#565f89"
   property color accent: "#7aa2f7"
   property color urgent: "#f7768e"
+  // The opposite of urgent: something went well and is there to be picked up.
+  property color good: "#9ece6a"
 
   // Per-surface roles. Default to the foundational palette so a theme only has to
   // override what it actually cares about.
@@ -33,6 +35,7 @@ QtObject {
   property color barMuted: muted
   property color barAccent: accent
   property color barUrgent: urgent
+  property color barGood: good
   property color barActiveWorkspace: accent
   // The filled box behind each workspace number. Derived from barText rather than named
   // as a hex the way waybar's #1e1e2e was: a fixed colour is only right for one theme,
@@ -84,6 +87,7 @@ QtObject {
     muted = pick(parsed, "muted", "#565f89");
     accent = pick(parsed, "accent", "#7aa2f7");
     urgent = pick(parsed, "urgent", "#f7768e");
+    good = pick(parsed, "good", "#9ece6a");
 
     var bar = parsed.bar || {};
     barBackground = pick(bar, "background", background);
@@ -91,6 +95,7 @@ QtObject {
     barMuted = pick(bar, "muted", muted);
     barAccent = pick(bar, "accent", accent);
     barUrgent = pick(bar, "urgent", urgent);
+    barGood = pick(bar, "good", good);
     barActiveWorkspace = pick(bar, "activeWorkspace", barAccent);
     barHover = Qt.rgba(barText.r, barText.g, barText.b, 0.1);
     barWorkspaceBackground = pick(bar, "workspaceBackground", Qt.rgba(barText.r, barText.g, barText.b, 0.08));

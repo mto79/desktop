@@ -122,10 +122,12 @@
             "warning": "accent",
             "busy": "accent",
             "waiting": "urgent",
+            "done": "good",
             "active": "muted"
           },
           "pulse": [
-            "waiting"
+            "waiting",
+            "done"
           ],
           "panel": "ai",
           "onRightClick": "desktop-menu agents"

@@ -31,7 +31,8 @@ fi
 # A session waiting on you is the one thing worth changing the bar's colour for: it will
 # sit there indefinitely, in a tmux window nobody is looking at. Counted from the hook
 # records, which only Claude Code writes; the other agents can only ever read as busy.
-waiting=$(desktop-agent-sessions --json 2>/dev/null | jq -r '.waiting // 0' 2>/dev/null)
+read -r waiting unseen < <(desktop-agent-sessions --json 2>/dev/null |
+  jq -r '"\(.waiting // 0) \(.unseen // 0)"' 2>/dev/null)
 if [[ ${waiting:-0} =~ ^[0-9]+$ ]] && ((waiting > 0)); then
   # The count goes in a badge as well as the class: when a usage limit is critical the bar
   # module is already in the urgent colour, and a class alone could no longer say that a
@@ -40,6 +41,16 @@ if [[ ${waiting:-0} =~ ^[0-9]+$ ]] && ((waiting > 0)); then
   # it counts. It is only on the bar while something waits, so the width is not a cost.
   printf '{"text":"%s","badge":"%s waiting","class":"waiting","tooltip":"%s waiting for you -- %s"}\n' \
     "$total" "$waiting" "$waiting" "$names"
+  exit 0
+fi
+
+# A turn that finished where nobody was looking is the other thing worth saying: the result
+# is there to be read, and the agent does nothing more until it is. Below waiting, which is
+# an agent stopped in the middle; and only until you have been to look -- the tab's mark,
+# which tmux.conf takes off when you arrive -- or the bar would say it all day.
+if [[ ${unseen:-0} =~ ^[0-9]+$ ]] && ((unseen > 0)); then
+  printf '{"text":"%s","class":"done","tooltip":"%s finished, not yet looked at -- %s"}\n' \
+    "$total" "$unseen" "$names"
   exit 0
 fi
 

@@ -212,6 +212,9 @@ if require tmux; then
   : >"$NOTIFY_LOG"
   tab_event Stop
   check "a finished turn marks the tab done" test "$(tab)" = done
+  # Which is what the bar goes by: done on the tab is done and not yet looked at.
+  bar_class() { PATH="$sandbox/barstubs:$ROOT/bin:$PATH" bash "$ROOT/bin/desktop-status-agents" | jq -r .class; }
+  check "the bar says a turn has finished that nobody has looked at" test "$(bar_class)" = done
   sleep 0.5
   check "a short turn is not worth a notification" test ! -s "$NOTIFY_LOG"
 
@@ -240,9 +243,12 @@ if require tmux; then
   # From another window: selecting the window already showing changes nothing, and fires
   # nothing either.
   tmux -L "$server" select-window -t work:editor
+  : >"$SHELL_LOG"
   tmux -L "$server" select-window -t work:agent
   sleep 0.3
   check "visiting the window clears done" test -z "$(tab)"
+  check "and the bar stops saying so" test "$(bar_class)" = busy
+  check "at once, because arriving asks it to look again" test "$(nudged 1)" -ge 1
   tmux -L "$server" select-window -t work:editor
 
   # Now looking: a terminal attached to this session, showing the agent's window, focused.
@@ -277,6 +283,7 @@ while True:
   sleep 0.5
   check "a turn that ends while you watch sends nothing, however long it ran" test ! -s "$NOTIFY_LOG"
   check "and leaves no done mark, because you have seen it" test -z "$(tab)"
+  check "nor anything on the bar" test "$(bar_class)" = busy
 
   tab_event UserPromptSubmit
   : >"$NOTIFY_LOG"

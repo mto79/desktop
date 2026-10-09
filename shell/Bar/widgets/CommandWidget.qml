@@ -36,8 +36,8 @@ BarItem {
   // A module with nothing to say takes no space, which is what makes this usable for
   // indicators that are absent most of the time.
   readonly property bool hideWhenEmpty: !(widgetConfig && widgetConfig.hideWhenEmpty === false)
-  // States in which the module breathes: "pulse": ["waiting"]. For the few that mean
-  // somebody is being kept waiting -- colour alone says so only to an eye already on it.
+  // States in which the module breathes: "pulse": ["waiting", "done"]. For the few that mean
+  // something is waiting on you -- colour alone says so only to an eye already on it.
   readonly property var pulse: (widgetConfig && widgetConfig.pulse) ? widgetConfig.pulse : []
   readonly property bool pulsing: state !== "" && pulse.indexOf(state) !== -1
 
@@ -79,6 +79,8 @@ BarItem {
       return Color.barUrgent;
     if (role === "accent")
       return Color.barAccent;
+    if (role === "good")
+      return Color.barGood;
     return Color.barText;
   }
 

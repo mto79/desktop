@@ -4,6 +4,7 @@
   "muted": "#4c566a",
   "accent": "#81a1c1",
   "urgent": "#bf616a",
+  "good": "#a3be8c",
   "bar": {
     "background": "#2e3440",
     "text": "#d8dee9",

@@ -132,7 +132,7 @@ check "the tab on top, in a window on show, is being looked at and gets none" \
   test -z "$(tm show-options -wqv -t "$top_pane" @agent_state)"
 check "the bar has a mark for failed" grep -q 'failed},#\[fg=#{@agent-waiting-colour}\]✗' "$ROOT/config/tmux/tmux.conf"
 check "and arriving at the tab clears it, as it does done" \
-  test "$(grep -c "m/r:^(done|failed)\$,#{@agent_state}}\" \"set -wu @agent_state\"" "$ROOT/config/tmux/tmux.conf")" = 3
+  test "$(grep -c "m/r:^(done|failed)\$,#{@agent_state}}\" \"set -wu @agent_state ; run -b" "$ROOT/config/tmux/tmux.conf")" = 3
 check "the shell reports a command that ran a while" \
   grep -q 'desktop-terminal-tabs finished $TMUX_PANE' "$ROOT/config/fish/conf.d/tmux-done.fish"
 

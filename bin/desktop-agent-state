@@ -88,8 +88,8 @@ tmx() {
   tmux -S "$socket" "$@" 2>/dev/null
 }
 
-# The bar's AI module polls, and an agent that has just started waiting should not take a
-# polling interval to say so. Only ever reached when the state has changed, so this is a
+# The bar's AI module polls, and an agent that has just started waiting, or just finished,
+# should not take a polling interval to say so. Only ever reached when the state has changed, so this is a
 # few times a turn and not once a tool call. Detached and silent: the shell may not be
 # running, and a hook must not wait on it either way.
 nudge_bar() {
@@ -168,7 +168,6 @@ jq -cn \
     pane: $pane, socket: $socket, pid: ($pid | tonumber? // null)}' >"$tmp" 2>/dev/null &&
   mv -f "$tmp" "$file" 2>/dev/null
 rm -f "$tmp" 2>/dev/null
-nudge_bar
 
 # Whether you are looking at this pane right now: it is the active pane of its window, that
 # window is the one showing, and a terminal attached to its session is the focused window.
@@ -203,6 +202,9 @@ if [[ $state == done ]] && $seen; then
 else
   tmx set-option -w -t "$pane" @agent_state "$state"
 fi
+# After the tab, not before: the bar reads the tab's mark to tell a finished turn nobody has
+# seen from one that was watched to its end.
+nudge_bar
 
 notify() { # <urgency> <title> <body>
   setsid -f "$0" --notify "$1" "$2" "$3" "$pane" "$socket" </dev/null >/dev/null 2>&1

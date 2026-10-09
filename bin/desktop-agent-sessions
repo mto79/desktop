@@ -42,24 +42,31 @@ def alive(pid):
 
 
 def pane_target(pane, socket):
-    """session:window.pane for a pane id, or None once the pane has closed.
+    """session:window.pane for a pane id and the mark on its tab, or None once it has closed.
 
     Asked of the pane's own server. Pane ids are per server, so asking the default one
     about a pane from another would find that server's own %0 and jump somewhere else.
+
+    The mark is what desktop-agent-state put on the tab and tmux.conf takes off again when
+    you arrive there. It is the only record of whether a finished turn has been seen, and
+    it comes with the answer already being asked for.
     """
     if not pane:
-        return None
+        return None, ""
     server = ["-S", socket] if socket else []
     try:
         result = subprocess.run(
             ["tmux", *server, "display-message", "-p", "-t", pane,
-             "#{session_name}:#{window_index}.#{pane_index}"],
+             "#{session_name}:#{window_index}.#{pane_index}\t#{@agent_state}"],
             capture_output=True, text=True, timeout=2,
         )
     except (OSError, subprocess.SubprocessError):
-        return None
-    target = result.stdout.strip()
-    return target if result.returncode == 0 and target else None
+        return None, ""
+    target, _, mark = result.stdout.strip("\n").partition("\t")
+    target = target.strip()
+    if result.returncode != 0 or not target:
+        return None, ""
+    return target, mark.strip()
 
 
 def duration(seconds):
@@ -108,6 +115,7 @@ def sessions(now=None, targets=True):
             continue
 
         cwd = record.get("cwd") or ""
+        target, mark = pane_target(record.get("pane"), record.get("socket")) if targets else (None, "")
         found.append({
             "agent": record.get("agent") or "claude",
             "session": record.get("session") or path.stem,
@@ -119,7 +127,10 @@ def sessions(now=None, targets=True):
             "project": project_of(cwd),
             "pane": record.get("pane") or "",
             "socket": record.get("socket") or "",
-            "target": pane_target(record.get("pane"), record.get("socket")) if targets else None,
+            "target": target,
+            # Finished, and nobody has been to look. "done" alone also covers a session
+            # that finished hours ago and was read then.
+            "unseen": record["state"] == "done" and mark == "done",
         })
 
     found.sort(key=lambda s: (ORDER[s["state"]], -s["since"]))
@@ -215,7 +226,8 @@ def main():
     listed = sessions()
     if "--json" in sys.argv[1:]:
         counts = {state: sum(1 for s in listed if s["state"] == state) for state in ORDER}
-        print(json.dumps({"sessions": listed, **counts}))
+        unseen = sum(1 for s in listed if s["unseen"])
+        print(json.dumps({"sessions": listed, **counts, "unseen": unseen}))
         return 0
 
     if not listed:
