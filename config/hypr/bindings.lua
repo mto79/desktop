@@ -2,7 +2,7 @@
 local terminal = "uwsm app -- $TERMINAL"
 local passwordmanager = "~/.local/bin/KeePassXC.AppImage"
 
-hl.bind("SUPER + return", hl.dsp.exec_cmd(terminal .. ' --working-directory="$(desktop-cmd-terminal-cwd)"'), { description = "Terminal" })
+hl.bind("SUPER + return", hl.dsp.exec_cmd("desktop-launch-terminal"), { description = "Terminal" })
 hl.bind("SUPER + E", hl.dsp.exec_cmd("uwsm app -- nautilus --new-window"), { description = "File Explorer" })
 hl.bind("SUPER + B", hl.dsp.exec_cmd("desktop-launch-browser"), { description = "Browser" })
 hl.bind("SUPER + SHIFT + B", hl.dsp.exec_cmd("desktop-launch-browser --private"), { description = "Browser (private)" })

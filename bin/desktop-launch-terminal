@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+# desktop-launch-terminal: open a terminal, the way the workspace it lands on expects.
+#
+# Workspace 3 is where tmux lives: desktop-workspace-start puts a terminal attached to
+# "home" there at login. A terminal opened on it afterwards was a bare shell beside that,
+# and once the first one had been closed there was no way back into tmux but typing the
+# command. So a terminal on that workspace attaches to "home" too, starting it if it is
+# gone. Two terminals on it show the same session; either can be switched to another.
+#
+# Anywhere else it is a plain shell, in the directory of the terminal that had the focus.
+
+TMUX_WORKSPACE="${DESKTOP_TMUX_WORKSPACE:-3}"
+TERMINAL="${TERMINAL:-xdg-terminal-exec}"
+
+workspace=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id' 2>/dev/null)
+
+if [[ $workspace == "$TMUX_WORKSPACE" ]] && command -v tmux >/dev/null; then
+  exec uwsm app -- "$TERMINAL" -e tmux new-session -A -s home -c "$HOME"
+fi
+
+exec uwsm app -- "$TERMINAL" --working-directory="$(desktop-cmd-terminal-cwd)"
