@@ -72,6 +72,25 @@ BarWidget {
   onShortcutChanged: if (tooltips && hovered)
     tooltips.request(root, root.tooltip, root.shortcut)
 
+  // Nearly every widget is one IconLabel, so going compact is handled here rather than
+  // in each of them: the label directly inside is the one that sheds its text. A widget
+  // built from something else (the tray, the workspaces) has no such child and stays as
+  // it is.
+  readonly property Item compactLabel: {
+    for (var i = 0; i < contentItem.children.length; i++)
+      if (contentItem.children[i].compactSaving !== undefined)
+        return contentItem.children[i];
+    return null;
+  }
+  compactSaving: compactLabel ? compactLabel.compactSaving : 0
+
+  Binding {
+    target: root.compactLabel
+    property: "compact"
+    value: root.compact
+    when: root.compactLabel !== null
+  }
+
   implicitWidth: contentItem.implicitWidth + Style.itemPaddingH * 2
 
   function run(cmd) {

@@ -29,6 +29,12 @@ Item {
   // The key that does what clicking this does, shown under the tooltip. BarItem works it out
   // from the panel or command; a widget with some other way to trigger it sets it itself.
   property string shortcut: ""
+  // Set by the bar on the widgets it asks to give up their text, when a section no longer
+  // fits beside the centred clock.
+  property bool compact: false
+  // How many pixels narrower this gets when compact. Zero, the default, means it has
+  // nothing to give and is never asked. Must not depend on `compact`.
+  property real compactSaving: 0
 
   implicitHeight: parent ? parent.height : Style.barSize
 }
