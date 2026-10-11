@@ -268,51 +268,58 @@ Item {
       color: root.transparent ? "transparent" : Color.barBackground
     }
 
-    // Sections are positioned independently so the centre section stays centred on the
-    // screen regardless of how wide the left and right sections grow. Anchoring centre
-    // between the other two would make the clock drift as the window title changes.
-    BarSection {
-      id: leftSection
-
-      model: root.layoutConfig.left || []
-      barScreen: barWindow.screen
-      anchors.left: parent.left
-      anchors.leftMargin: Style.sectionSpacing
-    }
-
+    // The centre section is placed first and by nothing but the screen: its anchor -- the
+    // clock -- sits on the middle of the bar, always. The other two get what is left on
+    // their own side of it, and are the ones that give way when that is not enough.
+    //
+    // It used to be the other way round: the sides took what they wanted and the centre
+    // was clamped clear of the right one, so on the laptop's screen, where the right
+    // section is wider than half the bar, the clock sat a hundred pixels left of centre.
     BarSection {
       id: centerSection
 
       model: root.layoutConfig.center || []
       barScreen: barWindow.screen
       anchorId: root.centerAnchor
-      // Centred on the anchor, but never over the top of the right section, and never
-      // off the left edge -- a centre wider than half the bar would be pushed off it to
-      // keep its anchor centred.
-      //
-      // The clamp is what stops the sections silently drawing on each other. They are
-      // positioned independently, so nothing was ever stopping them: on a full bar the
-      // right section simply grew leftwards until it was painting over the centre, and
-      // the widgets underneath went on claiming clicks nobody could see they owned. It
-      // takes a narrow screen or a wide right section to reach, which is why it went
-      // unnoticed -- the tray drawer, twenty pixels wider open than shut, was enough.
-      //
-      // The anchor stops being centred only once it is that or overlap, so the drift the
-      // anchorId exists to prevent still cannot happen on a bar with room to spare.
-      x: {
-        var ideal = Math.round(parent.width / 2 - anchorOffset);
-        var limit = rightSection.x - width - Style.sectionSpacing;
-        return Math.max(0, Math.min(ideal, limit));
+      x: Math.round(parent.width / 2 - anchorOffset)
+    }
+
+    // Each side lives in a box that ends where the centre begins. The section inside is
+    // told the box's width and sheds labels to fit it; the clip is for the case where even
+    // that is not enough, so that what cannot fit is cut off rather than painted over the
+    // centre, where the widgets underneath would go on claiming clicks nobody could see
+    // they owned.
+    Item {
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
+      anchors.left: parent.left
+      anchors.leftMargin: Style.sectionSpacing
+      width: Math.max(0, centerSection.x - Style.sectionSpacing * 2)
+      clip: true
+
+      BarSection {
+        model: root.layoutConfig.left || []
+        barScreen: barWindow.screen
+        maxWidth: parent.width
+        anchors.left: parent.left
       }
     }
 
-    BarSection {
-      id: rightSection
-
-      model: root.layoutConfig.right || []
-      barScreen: barWindow.screen
+    Item {
+      anchors.top: parent.top
+      anchors.bottom: parent.bottom
       anchors.right: parent.right
       anchors.rightMargin: Style.sectionSpacing
+      width: Math.max(0, parent.width - centerSection.x - centerSection.width - Style.sectionSpacing * 2)
+      clip: true
+
+      // Anchored right, so what the clip takes is the inner end, next to the centre.
+      BarSection {
+        model: root.layoutConfig.right || []
+        barScreen: barWindow.screen
+        maxWidth: parent.width
+        anchors.right: parent.right
+      }
     }
   }
 
@@ -336,6 +343,45 @@ Item {
       }
       return width / 2;
     }
+    // The room this section has. Past it, widgets are asked to go compact -- glyph only --
+    // starting with whichever gives the most back, so as few as possible lose their text.
+    property real maxWidth: Infinity
+
+    // Done by hand rather than as a binding: a widget's width depends on whether it is
+    // compact, and whether it is compact depends on the widths. What breaks the circle is
+    // that the full width is the same whichever widgets are compact at the moment --
+    // current width plus what each compact one is holding back -- so running this again
+    // after it has changed something changes nothing.
+    function fit() {
+      var full = 0;
+      var able = [];
+      for (var i = 0; i < repeater.count; i++) {
+        var loader = repeater.itemAt(i);
+        if (!loader)
+          continue;
+        full += loader.implicitWidth + (i > 0 ? spacing : 0);
+        var widget = loader.item;
+        if (!widget)
+          continue;
+        if (widget.compactSaving > 0) {
+          able.push(widget);
+          if (widget.compact)
+            full += widget.compactSaving;
+        } else {
+          widget.compact = false;
+        }
+      }
+      able.sort((a, b) => b.compactSaving - a.compactSaving);
+      for (var j = 0; j < able.length; j++) {
+        var over = full > maxWidth;
+        if (over)
+          full -= able[j].compactSaving;
+        able[j].compact = over;
+      }
+    }
+
+    onMaxWidthChanged: Qt.callLater(fit)
+
     // Passed down rather than read from an attached property so a widget that needs to
     // know which monitor it is on (workspaces) has it without walking back up the tree.
     property var barScreen: null
@@ -357,6 +403,17 @@ Item {
         // A widget id with no component -- a typo in shell.json, or a widget removed
         // from the registry -- loads nothing rather than breaking the whole section.
         sourceComponent: root.widgetRegistry.componentFor(modelData)
+
+        onImplicitWidthChanged: Qt.callLater(section.fit)
+
+        Connections {
+          target: item
+          ignoreUnknownSignals: true
+
+          function onCompactSavingChanged() {
+            Qt.callLater(section.fit);
+          }
+        }
 
         onLoaded: {
           item.desktopPath = root.desktopPath;

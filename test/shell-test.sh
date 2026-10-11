@@ -112,15 +112,25 @@ else
   fail "panels still take keyboard focus" "Popup.qml sets no OnDemand keyboard focus"
 fi
 
-# The three bar sections are positioned independently, so nothing but this clamp stops
-# the right one growing leftwards over the centre on a full bar -- silently, with the
-# covered widgets still taking the clicks. Twenty pixels of tray chevron were enough to
-# reach it on a 1920-wide screen.
-if grep -q "rightSection.x - width" "$ROOT/shell/Bar/Bar.qml"; then
-  pass "the centre section cannot be overlapped by the right"
+# The clock is pinned to the middle of the bar and the sections either side fit the room
+# that leaves. It was once the reverse -- the centre clamped clear of the right section --
+# which kept them from overlapping but slid the clock a hundred pixels off centre on the
+# laptop's screen, where the right section is wider than half the bar.
+if grep -q "x: Math.round(parent.width / 2 - anchorOffset)$" "$ROOT/shell/Bar/Bar.qml"; then
+  pass "the clock is centred whatever the sections beside it need"
 else
-  fail "the centre section cannot be overlapped by the right" \
-    "Bar.qml no longer clamps centerSection.x against rightSection"
+  fail "the clock is centred whatever the sections beside it need" \
+    "Bar.qml positions centerSection by something other than the bar's middle"
+fi
+
+# With the centre no longer giving way, this is all that stops a full side section being
+# drawn over it -- silently, with the covered widgets still taking the clicks.
+if [[ $(grep -c "maxWidth: parent.width" "$ROOT/shell/Bar/Bar.qml") -eq 2 ]] &&
+  [[ $(grep -c "clip: true" "$ROOT/shell/Bar/Bar.qml") -ge 2 ]]; then
+  pass "the side sections are held to the room beside the centre"
+else
+  fail "the side sections are held to the room beside the centre" \
+    "Bar.qml no longer gives both side sections a maxWidth inside a clipped box"
 fi
 
 # An icon name the theme cannot resolve does not make the Image fail -- Quickshell's
