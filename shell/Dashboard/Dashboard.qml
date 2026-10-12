@@ -89,7 +89,19 @@ Item {
   property bool shown: true
 
   readonly property var brief: answers["start"] || null
-  readonly property bool lookedAt: Hyprland.focusedWorkspace !== null && Hyprland.focusedWorkspace.id === root.workspace
+  // On a screen, not focused: with more than one monitor the focused workspace follows
+  // the pointer, so asking for focus emptied the page each time the mouse left the
+  // laptop's screen and filled it again on the way back -- while it was in plain view
+  // the whole time.
+  readonly property bool lookedAt: {
+    var monitors = Hyprland.monitors.values;
+    for (var i = 0; i < monitors.length; i++) {
+      var shownThere = monitors[i].activeWorkspace;
+      if (shownThere !== null && shownThere.id === root.workspace)
+        return true;
+    }
+    return false;
+  }
 
   function toggle() {
     shown = !shown;
