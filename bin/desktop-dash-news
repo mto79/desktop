@@ -1,0 +1,86 @@
+#!/usr/bin/env python3
+
+"""Read news feeds into the JSON the dashboard's News tab draws.
+
+    printf '%s\n' 'Tweakers|https://tweakers.net|https://tweakers.net/feeds/mixed.xml' | desktop-dash-news
+
+One line a site on standard input: heading | name | the site | its feed. desktop-dash
+news supplies the list and keeps the answer; this only fetches and reads. The heading is
+which sub-tab the site belongs under, and is passed through as it came.
+
+Feeds are RSS or Atom and nobody else's XML is to be trusted, so they are read by a parser
+and not by patterns, and only three things are taken from an entry: what it is called,
+where it is, and when. A link is kept only if it is an http address, since it will be
+handed to a browser. All the sites are asked at once -- six asked in turn is six timeouts
+when the network is slow -- and one that does not answer is a card that says so, not a
+missing page.
+"""
+
+import concurrent.futures, email.utils, html, json, re, sys, time, urllib.request
+import xml.etree.ElementTree as ET
+from datetime import datetime
+
+# More than a card shows at once: the card scrolls, and this is how far.
+PER_FEED = 14
+
+def local(tag):
+    return tag.rsplit("}", 1)[-1]
+
+def when(text):
+    text = (text or "").strip()
+    if not text:
+        return 0
+    try:
+        return int(email.utils.parsedate_to_datetime(text).timestamp())
+    except Exception:
+        pass
+    try:
+        return int(datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp())
+    except Exception:
+        return 0
+
+def clean(text):
+    text = re.sub(r"<[^>]+>", "", html.unescape(text or ""))
+    return re.sub(r"\s+", " ", text).strip()
+
+def read(line):
+    heading, name, site, feed = (part.strip() for part in line.split("|", 3))
+    answer = {"category": heading, "name": name, "site": site, "items": [], "ok": False}
+    if not feed.startswith(("https://", "http://")):
+        return answer
+    try:
+        request = urllib.request.Request(feed, headers={"User-Agent": "desktop-dash/1.0 (personal dashboard)"})
+        with urllib.request.urlopen(request, timeout=10) as reply:
+            root = ET.fromstring(reply.read(4_000_000))
+    except Exception:
+        return answer
+    for entry in root.iter():
+        if local(entry.tag) not in ("item", "entry"):
+            continue
+        title = link = stamp = ""
+        for child in entry:
+            tag = local(child.tag)
+            if tag == "title":
+                title = clean(child.text)
+            elif tag == "link" and not link:
+                # RSS keeps the address as text; Atom keeps it in an attribute.
+                link = (child.text or "").strip() or child.attrib.get("href", "")
+            elif tag in ("pubDate", "published", "updated", "date") and not stamp:
+                stamp = child.text
+        # Only an address a browser can be sent to: a feed is somebody else's text.
+        if title and link.startswith(("https://", "http://")):
+            answer["items"].append({"title": title[:200], "link": link, "at": when(stamp)})
+        if len(answer["items"]) >= PER_FEED:
+            break
+    answer["ok"] = bool(answer["items"])
+    return answer
+
+lines = [line for line in sys.stdin.read().splitlines() if line.count("|") >= 3]
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+    feeds = list(pool.map(read, lines))
+print(json.dumps({
+    "connected": any(feed["ok"] for feed in feeds),
+    "checked": int(time.time()),
+    "feeds": feeds,
+    "how": [] if any(feed["ok"] for feed in feeds) else ["None of the news sites could be reached."],
+}))

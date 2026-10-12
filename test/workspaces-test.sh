@@ -50,16 +50,16 @@ pins_for() {
 chmod +x "$stubs/hyprctl"
 
 check "the whole home desk: laptop, portrait, ultrawide" \
-  test "$(pins_for "$LAPTOP" "$ULTRAWIDE" "$PORTRAIT")" = "1 eDP-1 2 DP-8 3 DP-7 4 eDP-1 5 DP-8"
+  test "$(pins_for "$LAPTOP" "$ULTRAWIDE" "$PORTRAIT")" = "1 eDP-1 2 DP-8 3 DP-7 4 eDP-1 5 DP-8 6 eDP-1"
 
 check "without the portrait screen, chat goes to the ultrawide and notes to the laptop" \
-  test "$(pins_for "$LAPTOP" "$ULTRAWIDE")" = "1 eDP-1 2 DP-7 3 DP-7 4 eDP-1 5 eDP-1"
+  test "$(pins_for "$LAPTOP" "$ULTRAWIDE")" = "1 eDP-1 2 DP-7 3 DP-7 4 eDP-1 5 eDP-1 6 eDP-1"
 
 check "without the ultrawide, the terminal goes to the laptop, not the portrait screen" \
-  test "$(pins_for "$LAPTOP" "$PORTRAIT")" = "1 eDP-1 2 DP-8 3 eDP-1 4 eDP-1 5 DP-8"
+  test "$(pins_for "$LAPTOP" "$PORTRAIT")" = "1 eDP-1 2 DP-8 3 eDP-1 4 eDP-1 5 DP-8 6 eDP-1"
 
 check "the laptop on its own holds every workspace" \
-  test "$(pins_for "$LAPTOP")" = "1 eDP-1 2 eDP-1 3 eDP-1 4 eDP-1 5 eDP-1"
+  test "$(pins_for "$LAPTOP")" = "1 eDP-1 2 eDP-1 3 eDP-1 4 eDP-1 5 eDP-1 6 eDP-1"
 
 # Applying: the rules are written, and only a workspace on the wrong screen is moved.
 echo "[$LAPTOP,$ULTRAWIDE,$PORTRAIT]" >"$sandbox/monitors.json"
@@ -71,7 +71,7 @@ MONITORS_FIXTURE="$sandbox/monitors.json" WORKSPACES_FIXTURE="$sandbox/workspace
 
 CONF="$sandbox/.config/hypr/workspaces.conf"
 check "the rules are written for the next reload" \
-  test "$(grep -c '^workspace = ' "$CONF")" = 5
+  test "$(grep -c '^workspace = ' "$CONF")" = 6
 check "workspace 2 is written to the portrait screen" grep -qx "workspace = 2, monitor:DP-8" "$CONF"
 check "a misplaced workspace is moved" grep -qx "dispatch moveworkspacetomonitor 3 DP-7" "$log"
 check "a workspace already in place is not moved" lacks "moveworkspacetomonitor 1 " "$log"
@@ -117,14 +117,17 @@ printf '#!/usr/bin/env bash\necho "$*" >>"$TMUX_LOG"\n[[ $1 != has-session ]]\n'
 # Not a noop: what matters is that the login lays the llm-wiki session out, and with
 # which agent. The layout itself has its own suite.
 printf '#!/usr/bin/env bash\necho "$*" >>"$LAYOUT_LOG"\n' >"$stubs/desktop-agent-layout"
-for noop in desktop-workspace-pin notify-send; do
+# desktop-brief and desktop-tmux-restore as well: the first speaks a welcome out loud and
+# the second builds tmux sessions, and neither belongs on the machine the suite runs on --
+# the welcome was said, aloud, by this test the first time it existed.
+for noop in desktop-workspace-pin notify-send desktop-brief desktop-tmux-restore desktop-say; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$stubs/$noop"
 done
 chmod +x "$stubs"/* "$sandbox/.local/bin"/*
 
 CLIENTS="$clients" HYPRCTL_LOG="$log" TMUX_LOG="$sandbox/tmux.log" HOME="$sandbox" \
   LAYOUT_LOG="$sandbox/layout.log" \
-  DESKTOP_WORKSPACE_START_TIMEOUT=5 PATH="$stubs:$PATH" timeout 30 bash "$START"
+  DESKTOP_WORKSPACE_START_TIMEOUT=5 DESKTOP_WORKSPACE_START_SETTLE=0 PATH="$stubs:$PATH" timeout 30 bash "$START"
 
 moved_to() {
   local address
@@ -144,6 +147,14 @@ check "the llm-wiki tmux session is created" grep -q "new-session -d -s llm-wiki
 check "llm-wiki is laid out with claude, so it is ready when you switch to it" \
   grep -qx "llm-wiki:ide claude" "$sandbox/layout.log"
 check "home is left a plain shell" lacks "^home" "$sandbox/layout.log"
-check "the focus ends on the terminal's workspace" grep -q "dispatch workspace 3$" "$log"
+check "the focus ends on the dashboard's workspace" grep -q "dispatch workspace 6$" "$log"
+# Applications ask for the focus when they have finished starting, which is after it has
+# been put where it belongs: every login used to end on workspace 5, where Obsidian is.
+check "an application asking for attention is not followed while the windows open" \
+  test "$(grep -n -e '^keyword misc:focus_on_activate false$' -e 'movetoworkspacesilent' "$log" | head -1 | cut -d: -f2 | cut -c1-7)" = keyword
+check "and asking counts again once they are all open" \
+  test "$(grep '^keyword misc:focus_on_activate' "$log" | tail -1)" = "keyword misc:focus_on_activate true"
+check "which comes after the focus has been placed" \
+  test "$(grep -n -e '^keyword misc:focus_on_activate true$' -e 'dispatch workspace 6$' "$log" | tail -1 | cut -d: -f2 | cut -c1-7)" = keyword
 
 finish

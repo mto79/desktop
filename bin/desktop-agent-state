@@ -71,9 +71,12 @@ fi
 # Split on the unit separator, not a tab. Tab is whitespace to `read`, so an empty field --
 # notification_type is absent from every event but one -- collapses into its neighbour and
 # the cwd lands in $type.
-IFS=$'\x1f' read -r event session type cwd message < <(
-  jq -r '[.hook_event_name, .session_id, .notification_type, .cwd, .message]
-    | map(. // "" | tostring | gsub("[\u001f\n]"; " ")) | join("\u001f")' 2>/dev/null
+#
+# The prompt is the last field and is cut short here: it can be pages long, it is only
+# wanted as a reminder of what was asked, and `read` should not be handed all of it.
+IFS=$'\x1f' read -r event session type cwd message prompt < <(
+  jq -r '[.hook_event_name, .session_id, .notification_type, .cwd, .message, ((.prompt // "") | tostring | .[0:400])]
+    | map(. // "" | tostring | gsub("[\u001f\n\r\t]+"; " ")) | join("\u001f")' 2>/dev/null
 ) || exit 0
 [[ -n $event && -n $session ]] || exit 0
 # Used as a file name.
@@ -138,6 +141,18 @@ if [[ $event != UserPromptSubmit && $current =~ \"turn\":([0-9]+) ]]; then
   turn=${BASH_REMATCH[1]}
 fi
 
+# What was asked, kept for the length of the turn like its start is: the notification at
+# the end is about the answer to this, and "done after 12m" does not say to what. From the
+# prompt when this is one, and otherwise from the record -- with jq, since a prompt is
+# free text and no pattern here should be trusted to find where a quoted string ends.
+asked=""
+if [[ $event == UserPromptSubmit ]]; then
+  asked=$(sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"$prompt")
+  ((${#asked} > 110)) && asked="${asked:0:109}…"
+elif [[ -n $current ]]; then
+  asked=$(jq -r '.asked // ""' <<<"$current" 2>/dev/null) || asked=""
+fi
+
 # The claude process this hook belongs to. Its parent directly when the command is run as a
 # path, a shell in between when the command needs expanding -- "$HOME/..." does.
 agent_pid() {
@@ -164,8 +179,9 @@ jq -cn \
   --arg pane "$pane" \
   --arg socket "$socket" \
   --arg pid "$(agent_pid)" \
+  --arg asked "$asked" \
   '{agent: $agent, session: $session, state: $state, since: $since, turn: $turn, cwd: $cwd,
-    pane: $pane, socket: $socket, pid: ($pid | tonumber? // null)}' >"$tmp" 2>/dev/null &&
+    pane: $pane, socket: $socket, pid: ($pid | tonumber? // null), asked: $asked}' >"$tmp" 2>/dev/null &&
   mv -f "$tmp" "$file" 2>/dev/null
 rm -f "$tmp" 2>/dev/null
 
@@ -237,11 +253,58 @@ who="${project:-Claude Code} - claude"
 tab=$(tmx display-message -p -t "$pane" '#{?@ai_group,#{window_index},}')
 [[ -n $tab ]] && who+=" - agent $tab"
 
+# What it was about, under the line that says what happened. Two things, because neither
+# is enough alone: the conversation's subject, which Claude Code keeps as the title of its
+# pane, says which piece of work this is but stays the same all day in a long session; what
+# was last asked says which step of it, but "yes do that" says nothing without the subject.
+# The title is taken without the mark Claude leads it with, and not at all while it is
+# still the name of the program.
+#
+# The body is markup to the notification server, so what is put into it is escaped: a
+# subject or a prompt with a < in it must not end the text there. The subject is bold,
+# being the line looked for.
+markup() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+
+subject_of() {
+  local subject
+  subject=$(tmx display-message -p -t "$pane" '#{pane_title}' 2>/dev/null |
+    sed -E 's/^[^[:alnum:]]+[[:space:]]*//') || subject=""
+  case "$subject" in
+  "" | "Claude Code" | "$(hostname 2>/dev/null)") subject="" ;;
+  esac
+  printf '%s' "$subject"
+}
+
+about() {
+  local subject lines=""
+  subject=$(subject_of)
+  [[ -n $subject ]] && lines+=$'\n'"<b>$(markup "$subject")</b>"
+  [[ -n $asked ]] && lines+=$'\n'"“$(markup "$asked")”"
+  printf '%s' "$lines"
+}
+
+# And said, for when the screen is not being looked at at all -- which is most of the time
+# an agent has been left to get on with something. One short line: which project, what
+# happened, and the subject. Not what was asked: that is a sentence to read, not to be read
+# out. desktop-say decides whether this is a moment to speak; detached, like the
+# notification, so the hook returns at once.
+speak() { # <what happened>
+  local line="${project:-An agent}"
+  [[ -n $tab ]] && line+=", agent $tab,"
+  line+=" $1."
+  local subject
+  subject=$(subject_of)
+  [[ -n $subject ]] && line+=" $subject."
+  setsid -f desktop-say "$line" </dev/null >/dev/null 2>&1 || true
+}
+
 if ! $seen; then
   if [[ $state == waiting ]]; then
-    notify normal "$who" "Waiting: ${message:-your answer is needed}"
+    notify normal "$who" "Waiting: ${message:-your answer is needed}$(about)"
+    speak "is waiting for you"
   elif [[ $event == Stop && $previous_state == working ]] && ((now - turn >= NOTIFY_AFTER)); then
-    notify low "$who" "Done after $(duration $((now - turn)))"
+    notify low "$who" "Done after $(duration $((now - turn)))$(about)"
+    speak "is done"
   fi
 fi
 

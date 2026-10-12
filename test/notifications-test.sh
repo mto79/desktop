@@ -40,7 +40,8 @@ check "putting one away is done from outside the toast that asked" \
   test -n "$(sed -n '/^  function retire(notification)/,/^  }/p' "$QML" | grep 'sweep.restart()')"
 check "and not by changing the list in that function" \
   lacks 'retired = ' <<<"$(sed -n '/^  function retire(notification)/,/^  }/p' "$QML")"
-check "what its sender called transient is still forgotten" grep -q 'if (due\[d\].transient)' "$QML"
+check "what its sender called transient is still forgotten" \
+  test -n "$(sed -n '/function passing(notification)/,/^  }/p' "$QML" | grep 'notification.transient === true')"
 # Counted from the rebuild, every toast still on screen got its whole timeout again each
 # time another came or went.
 check "a toast's time is counted from when it arrived" grep -q 'at + toast.timeout - Date.now()' "$QML"
@@ -85,10 +86,23 @@ check "nothing is written before what was kept has been read" \
 check "it is other people's messages, so the file is private" grep -q "umask 077" "$QML"
 check "and written whole or not at all" grep -q 'printf "%s" "$1" > "$2.part" && mv "$2.part" "$2"' "$QML"
 check "what a sender called transient is not kept for later either" \
-  test -n "$(sed -n '/id: store$/,/^  }/p' "$QML" | grep 'if (!all\[i\].transient)')"
+  test -n "$(sed -n '/id: store$/,/^  }/p' "$QML" | grep 'if (!root.passing(all\[i\]))')"
 check "what comes back is text that can be read and put away" grep -q 'Inbox.forget(row.entry)' "$PANEL"
 check "and is not offered an action its sender is no longer waiting for" \
   test -n "$(sed -n '/function follow(row)/,/^  }/p' "$PANEL" | grep -A2 'if (!row.live)' | grep 'putAway(row)')"
 check "the bell counts both" grep -q 'readonly property int count: all.length + past.length' "$INBOX"
 check "clearing clears both" test "$(grep -c 'Inbox.forgetAll()' "$QML" "$PANEL" | cut -d: -f2 | paste -sd+ | bc)" -ge 2
+
+# --- not worth keeping
+# An agent waiting or finished is on the bar, its tab and the AI panel for as long as it is
+# true. Kept in the centre they were stale lines, hours after the agent had been answered.
+check "the coding agents' notifications are not kept" \
+  grep -q 'config.forget : \["Claude Code"\]' "$QML"
+check "they leave with their toast, like what a sender marks transient" \
+  grep -q 'if (root.passing(due\[d\]))' "$QML"
+check "and are not written down for after a restart" grep -q 'if (!root.passing(all\[i\]))' "$QML"
+check "ones kept before the rule existed are dropped when the file is read" \
+  test -n "$(sed -n '/onLoaded: {/,/root.storeRead = true/p' "$QML" | grep 'root.forget.indexOf(String(entry.app')"
+check "the agent hook sends under the name the rule knows" \
+  grep -q -- '--app-name="Claude Code"' "$ROOT/bin/desktop-agent-state"
 finish

@@ -30,6 +30,85 @@ Popup {
   // One entry per Claude Code session that reports its state through the hooks, needing
   // you first. See desktop-agent-sessions.
   property var sessions: []
+
+  // Whether an agent that needs you is said out loud as well as shown, and which voice
+  // says it. desktop-say keeps the switch; this is where it is found and flipped.
+  property bool speaking: true
+  property string voice: ""
+
+  Process {
+    id: sayStatus
+
+    command: ["desktop-say", "--status", "--json"]
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var status = JSON.parse(text);
+          root.speaking = status.speaking === true;
+          root.voice = status.engine || "";
+        } catch (error) {
+          // Not installed, or not answering: the row below simply stays as it is.
+        }
+      }
+    }
+  }
+
+  Process {
+    id: sayToggle
+
+    command: ["desktop-say", "--toggle"]
+    onExited: sayStatus.running = true
+  }
+
+  // The voices there are to choose from, and whether the list is unfolded. Folded by
+  // default: a voice is chosen once, and five rows of them every time the panel opens
+  // would be five rows between you and the agents.
+  property var voices: []
+  property bool choosingVoice: false
+  // The one being fetched and tried, so its row can say so: a voice is 60 MB the first time.
+  property string fetching: ""
+
+  readonly property string voiceLabel: {
+    for (var i = 0; i < voices.length; i++)
+      if (voices[i].current)
+        return voices[i].label;
+    return "";
+  }
+
+  Process {
+    id: voiceList
+
+    command: ["desktop-say", "--voices", "--json"]
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          root.voices = JSON.parse(text).voices || [];
+        } catch (error) {
+          root.voices = [];
+        }
+      }
+    }
+  }
+
+  Process {
+    id: voiceChoose
+
+    onExited: {
+      root.fetching = "";
+      voiceList.running = true;
+      sayStatus.running = true;
+    }
+  }
+
+  function chooseVoice(name) {
+    if (voiceChoose.running)
+      return;
+    root.fetching = name;
+    voiceChoose.command = ["desktop-say", "--voice", name];
+    voiceChoose.running = true;
+  }
   property int waitingCount: 0
 
   // Claude processes with no state recorded: open, but idle since the hooks were wired --
@@ -48,7 +127,7 @@ Popup {
   })
 
   function sessionIcon(state) {
-    return state === "waiting" ? "\u{f0026}" : state === "done" ? "\u{f012c}" : "\u{f06a9}";
+    return state === "waiting" ? "\u{f0026}" : state === "done" ? "\u{f012c}" : "\u{f1049}";
   }
 
   function sessionText(session) {
@@ -235,6 +314,10 @@ Popup {
       report.reload();
       agentProbe.reload();
       tokenReport.reload();
+      if (!sayStatus.running)
+        sayStatus.running = true;
+      if (!voiceList.running)
+        voiceList.running = true;
     }
   }
 
@@ -259,7 +342,7 @@ Popup {
         return top;
       }
 
-      icon: "\u{f06a9}"
+      icon: "\u{f1049}"
       iconColor: root.waitingCount > 0 ? Color.popupUrgent : Color.popupText
       title: "Claude Code"
       status: {
@@ -474,6 +557,41 @@ Popup {
       rule: true
     }
 
+    PanelRow {
+      icon: root.speaking ? "\u{f057e}" : "\u{f0581}"
+      label: "Say it out loud"
+      sublabel: !root.speaking ? "Off  ·  an agent that needs you is only shown"
+        : root.voice === "piper" ? "On  ·  quiet during calls, dictation and do-not-disturb"
+        : "On, with the fallback voice  ·  desktop-say --setup installs the better one"
+      active: root.speaking
+      onClicked: if (!sayToggle.running)
+        sayToggle.running = true
+    }
+
+    PanelRow {
+      visible: root.speaking && root.voice === "piper" && root.voices.length > 0
+      icon: "\u{f0a36}"
+      label: "Voice"
+      sublabel: (root.voiceLabel !== "" ? root.voiceLabel : "default") + "  ·  " + (root.choosingVoice ? "pick one to hear it" : "click to change")
+      onClicked: root.choosingVoice = !root.choosingVoice
+    }
+
+    Repeater {
+      model: (root.choosingVoice && root.speaking) ? root.voices : []
+
+      delegate: PanelRow {
+        required property var modelData
+
+        icon: modelData.current ? "\u{f012c}" : (modelData.installed ? "\u{f0a36}" : "\u{f01da}")
+        label: modelData.label
+        sublabel: root.fetching === modelData.name ? (modelData.installed ? "Listen…" : "Downloading " + modelData.megabytes + " MB…")
+          : modelData.current ? "In use" : (modelData.installed ? "Click to use" : modelData.megabytes + " MB to download")
+        active: modelData.current
+        enabled: root.fetching === ""
+        onClicked: root.chooseVoice(modelData.name)
+      }
+    }
+
     Repeater {
       model: root.sessions
 
@@ -495,7 +613,7 @@ Popup {
     }
 
     PanelRow {
-      icon: "\u{f06a9}"
+      icon: "\u{f1049}"
       label: root.unreportedClaude + " claude " + (root.unreportedClaude === 1 ? "session" : "sessions")
       sublabel: "idle, no state reported yet"
       enabled: false
@@ -508,7 +626,7 @@ Popup {
       delegate: PanelRow {
         required property var modelData
 
-        icon: "\u{f06a9}"
+        icon: "\u{f1049}"
         label: modelData
         sublabel: "running  ·  reports no state"
         enabled: false
@@ -516,7 +634,7 @@ Popup {
     }
 
     PanelRow {
-      icon: "\u{f06a9}"
+      icon: "\u{f1049}"
       label: "Nothing running"
       enabled: false
       visible: root.sessions.length === 0 && root.agents.length === 0

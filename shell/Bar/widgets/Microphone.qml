@@ -3,8 +3,13 @@ import Quickshell.Services.Pipewire
 import qs.Commons
 import qs.Ui
 
-// Default source volume. Hidden unless muted or turned down, so a normal mic does not
-// take up bar space -- waybar showed it permanently, which was mostly noise.
+// Default source volume. A microphone at full volume and not muted is the unremarkable
+// case, so it is the icon alone, dimmed: waybar showed "100%" permanently, which was mostly
+// noise. The number appears when it is turned down, and "Muted" when it is muted.
+//
+// It used to be hidden altogether in that case. Plugging in a USB microphone, which
+// arrives at 100%, then made the icon vanish at the moment it was looked for -- and with
+// it the only thing on the bar to click for the microphone panel.
 BarItem {
   id: root
 
@@ -16,7 +21,8 @@ BarItem {
     objects: root.source ? [root.source] : []
   }
 
-  visible: muted || volume < 100
+  readonly property bool unremarkable: !muted && volume >= 100
+  visible: source !== null
   implicitWidth: visible ? label.implicitWidth + Style.itemPaddingH * 2 : 0
 
   tooltip: {
@@ -47,7 +53,7 @@ BarItem {
     id: label
 
     icon: ""
-    text: root.muted ? "Muted" : root.volume + "%"
-    color: root.muted ? Color.barUrgent : Color.barText
+    text: root.muted ? "Muted" : (root.unremarkable ? "" : root.volume + "%")
+    color: root.muted ? Color.barUrgent : (root.unremarkable ? Color.barMuted : Color.barText)
   }
 }

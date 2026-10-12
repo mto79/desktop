@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+
+"""Tell when somebody has finished speaking.
+
+    pw-record --rate 16000 --channels 1 --format s16 - | desktop-voice-endpoint
+
+Reads raw 16-bit mono sound on standard input and exits 0 the moment a stretch of speech
+has been followed by a short silence. Exits 1 if nobody spoke at all, or went on past
+--max seconds. desktop-voice runs this beside the recording so that a command ends when
+you stop talking and the key does not have to be pressed a second time.
+
+How loud "speaking" is depends on the room and the microphone, so it is not a number
+written down here: the room's own level is the quietest it has been, and speech is
+whatever stands clearly above that. Only the standard library -- this runs for every
+command, and should start at once.
+"""
+
+import argparse
+import array
+import math
+import sys
+
+
+def level(chunk):
+    """How loud a piece of sound is: the root of the mean of its samples squared."""
+    samples = array.array("h")
+    samples.frombytes(chunk[: len(chunk) // 2 * 2])
+    if not samples:
+        return 0.0
+    return math.sqrt(sum(s * s for s in samples) / len(samples))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--rate", type=int, default=16000)
+    parser.add_argument("--silence", type=float, default=0.9,
+                        help="seconds of quiet after speech that mean it is over")
+    parser.add_argument("--max", type=float, default=8.0, help="give up after this long")
+    parser.add_argument("--wait", type=float, default=4.0,
+                        help="give up if nobody has started speaking by then")
+    parser.add_argument("--least", type=float, default=150.0,
+                        help="however quiet the room, nothing below this level is speech")
+    args = parser.parse_args()
+
+    step = 0.05
+    size = int(args.rate * step) * 2
+    elapsed = 0.0
+    floor = None
+    heard_for = 0.0
+    quiet_for = 0.0
+    spoke = False
+
+    while elapsed < args.max:
+        chunk = sys.stdin.buffer.read(size)
+        if len(chunk) < size:
+            break
+        elapsed += step
+        loud = level(chunk)
+
+        # A microphone opens with a click, many times louder than the room it is in.
+        # Measured here: 802 for the first tenth of a second, then 25. Taken as the
+        # room's level, that click set the bar so high that no voice ever cleared it.
+        if elapsed <= 0.15:
+            continue
+
+        # The room is the quietest it has been, not the first thing heard: somebody who
+        # starts talking at once must not have their own voice taken for the room, and
+        # the gaps between words fall back to it. It creeps up slowly, so a room that
+        # gets noisier is followed.
+        if floor is None:
+            floor = loud
+        elif loud < floor / 4.0 and floor > args.least and elapsed > 0.4:
+            # It has just become several times quieter than it had ever been: what came
+            # before was not the room, it was somebody already talking when the
+            # microphone opened. They have spoken, and this is the start of their silence.
+            spoke = True
+            floor = loud
+        else:
+            floor = min(floor * 1.01, loud)
+        threshold = max(floor * 4.0, args.least)
+
+        if loud > threshold:
+            heard_for += step
+            quiet_for = 0.0
+            # A click or a cough is not speech: it has to last.
+            if heard_for >= 0.15:
+                spoke = True
+        else:
+            quiet_for += step
+            if not spoke:
+                heard_for = 0.0
+            elif quiet_for >= args.silence:
+                return 0
+
+        if not spoke and elapsed >= args.wait:
+            return 1
+
+    return 0 if spoke else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

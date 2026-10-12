@@ -35,6 +35,11 @@ BarItem {
   // --follow of its own. Polling such a script would never see it finish.
   readonly property bool follow: !!(widgetConfig && widgetConfig.follow)
   readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : ""
+  // "orb": true draws the desktop's neural network in place of the glyph -- the same one
+  // the dashboard and the voice card show, at the bar's size. It moves while the script
+  // reports "working" above zero and is still otherwise, so the bar only repaints many
+  // times a second while there is something to show for it.
+  readonly property bool orb: !!(widgetConfig && widgetConfig.orb)
   // Class -> colour role, for a script that reports state the way waybar's CSS classes
   // did: { "colors": { "vpn-off": "muted", "critical": "urgent" } }.
   readonly property var colors: (widgetConfig && widgetConfig.colors) ? widgetConfig.colors : ({})
@@ -50,6 +55,7 @@ BarItem {
   property string badge: ""
   property var gauges: []
   property string state: ""
+  property int working: 0
 
   function shell(value) {
     if (!value)
@@ -97,6 +103,7 @@ BarItem {
       badge = "";
       gauges = [];
       state = "";
+      working = 0;
       tooltip = "";
       return;
     }
@@ -111,6 +118,7 @@ BarItem {
         gauges = Array.isArray(parsed.gauges) ? parsed.gauges : [];
         tooltip = parsed.tooltip !== undefined ? String(parsed.tooltip) : "";
         state = parsed.class !== undefined ? String(parsed.class) : "";
+        working = Number(parsed.working) || 0;
         return;
       } catch (e) {
         console.warn("CommandWidget:", JSON.stringify(root.widgetConfig.id), "printed unparseable JSON:", e);
@@ -121,6 +129,7 @@ BarItem {
     badge = "";
     gauges = [];
     state = "";
+    working = 0;
   }
 
   // Polled: run, read everything, exit, repeat on the timer.
@@ -204,9 +213,22 @@ BarItem {
       }
     }
 
+    Orb {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: root.orb
+      width: Style.barOrbSize
+      height: width
+      simple: true
+      tint: root.textColor
+      spark: Color.barGood
+      awake: root.working > 0
+      lively: root.working > 0
+      running: root.working > 0 && root.visible
+    }
+
     IconLabel {
       anchors.verticalCenter: parent.verticalCenter
-      icon: root.icon
+      icon: root.orb ? "" : root.icon
       text: root.label
       color: root.textColor
     }

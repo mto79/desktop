@@ -127,7 +127,10 @@ codex) echo 2 ;;
 esac
 STUB
 chmod +x "$sandbox/bin/pgrep"
-counted=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-agents")
+# A runtime directory of its own as well: the tooltip leads with any agent that has finished
+# and not been looked at, and read from the real one that is whatever this machine's agents
+# happen to be doing -- the check failed whenever one of them had just finished a turn.
+counted=$(PATH="$sandbox/bin:$PATH" XDG_RUNTIME_DIR="$sandbox/run" bash "$ROOT/bin/desktop-status-agents")
 check "every agent this desktop runs is counted" test "$(jq -r .text <<<"$counted")" = 7
 check "the agents are listed one per comma" \
   test "$(jq -r .tooltip <<<"$counted")" = "4 claude, 1 opencode, 2 codex"
@@ -169,6 +172,18 @@ STUB
 composed=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-ai")
 check "a waiting session is still announced while the limit has the colour" \
   test "$(jq -r '"\(.class) \(.badge)"' <<<"$composed")" = "critical 1 waiting"
+
+# What the bar's network moves for. It is no state of its own, so it has to survive the
+# limit taking the class just as the badge does -- and be zero, not absent, when unsaid.
+check "a module that says nothing of working agents reports none" \
+  test "$(jq -r .working <<<"$composed")" = "0"
+cat >"$sandbox/bin/desktop-status-agents" <<'STUB'
+#!/usr/bin/env bash
+echo '{"text":"2","class":"busy","working":1,"tooltip":"2 claude"}'
+STUB
+composed=$(PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-status-ai")
+check "an agent in the middle of a turn reaches the bar while the limit has the colour" \
+  test "$(jq -r '"\(.class) \(.working)"' <<<"$composed")" = "critical 1"
 cat >"$sandbox/bin/desktop-status-agents" <<'STUB'
 #!/usr/bin/env bash
 echo '{"text":"2","class":"busy","tooltip":"2 claude"}'

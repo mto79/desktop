@@ -88,7 +88,7 @@ Popup {
     if (task.state === "done")
       return "\u{f012c}";
     if (task.state === "working")
-      return "\u{f06a9}";
+      return "\u{f1049}";
     return task.open ? "\u{f062c}" : "\u{f0256}";
   }
 

@@ -52,8 +52,15 @@ cat >"$stubs/desktop-shell" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >>"$SHELL_LOG"
 STUB
+# What would be said out loud is written down instead.
+cat >"$stubs/desktop-say" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SAY_LOG"
+STUB
 chmod +x "$stubs"/*
 export PATH="$stubs:$PATH" NOTIFY_LOG="$sandbox/notify.log" JUMP_LOG="$sandbox/jump.log"
+export SAY_LOG="$sandbox/say.log"
+: >"$SAY_LOG"
 export SHELL_LOG="$sandbox/shell.log"
 : >"$SHELL_LOG"
 export DESKTOP_AGENT_JUMP="$stubs/jump"
@@ -220,6 +227,8 @@ if require tmux; then
   check "the bar says a turn has finished that nobody has looked at" test "$(bar_class)" = done
   sleep 0.5
   check "a short turn is not worth a notification" test ! -s "$NOTIFY_LOG"
+  sleep 0.3
+  check "nor worth saying" lacks 'is done' "$SAY_LOG"
 
   # A long one is. The turn began before a permission prompt in the middle of it, and the
   # length reported is the whole turn, not the part after the prompt.
@@ -231,6 +240,55 @@ if require tmux; then
   tab_event Stop
   check "a long turn sends a done notification with the whole turn's length" \
     notified "archive - claude Done after 10m"
+
+  # --- what it was about
+  # "Done after 10m" names the agent and not the work. Under it go the conversation's
+  # subject, which Claude Code keeps as its pane's title, and what was last asked.
+  tmux -L "$server" select-pane -t "$agent_pane" -T "✳ HARICA certificate renewal"
+  tab_event UserPromptSubmit '"prompt":"  Renew the wildcard for *.apps and\nroll it out to ocp204  "'
+  check "what was asked is kept with the session" \
+    test "$(jq -r .asked "$records/tab.json")" = "Renew the wildcard for *.apps and roll it out to ocp204"
+  jq -c '.turn -= 600 | .since -= 600' "$records/tab.json" >"$records/tab.tmp" && mv "$records/tab.tmp" "$records/tab.json"
+  : >"$NOTIFY_LOG"
+  tab_event Notification '"notification_type":"permission_prompt","message":"Claude needs your permission to use Bash"'
+  notified "Waiting: Claude needs your permission"
+  check "a waiting notification says which conversation is waiting" grep -qx "<b>HARICA certificate renewal</b>" "$NOTIFY_LOG"
+  check "without the mark Claude leads its title with" lacks '✳' "$NOTIFY_LOG"
+  check "and what it was asked to do" \
+    grep -qx '“Renew the wildcard for \*.apps and roll it out to ocp204”' "$NOTIFY_LOG"
+  # Said as well as shown, for when the screen is not being looked at.
+  said() { local i; for ((i = 0; i < 30; i++)); do grep -q "$1" "$SAY_LOG" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+  check "a waiting agent is said out loud: which project, and what about" \
+    said "^archive.* is waiting for you\. HARICA certificate renewal\.$"
+  check "but not what was asked, which is a sentence to read" lacks 'Renew the wildcard' "$SAY_LOG"
+  tab_event PostToolUse
+  check "the question is still known later in the turn" \
+    test "$(jq -r .asked "$records/tab.json")" = "Renew the wildcard for *.apps and roll it out to ocp204"
+  : >"$NOTIFY_LOG"
+  tab_event Stop
+  notified "Done after 10m"
+  check "a finished turn is said too" said "^archive.* is done\. HARICA certificate renewal\.$"
+  check "the done notification says what was done" \
+    test "$(grep -c -e '^<b>HARICA certificate renewal</b>$' -e '^“Renew the wildcard' "$NOTIFY_LOG")" = 2
+
+  # A title that is still the program's name says nothing, and a prompt can be pages long.
+  tmux -L "$server" select-pane -t "$agent_pane" -T "✳ Claude Code"
+  tab_event UserPromptSubmit "\"prompt\":\"$(printf 'word %.0s' $(seq 80))\""
+  check "a long prompt is cut to a line" test "$(jq -r '.asked | length' "$records/tab.json")" -le 110
+  jq -c '.turn -= 600 | .since -= 600' "$records/tab.json" >"$records/tab.tmp" && mv "$records/tab.tmp" "$records/tab.json"
+  : >"$NOTIFY_LOG"
+  tab_event Stop
+  notified "Done after 10m"
+  check "a title that is only the program's name is left out" lacks 'Claude Code</b>' "$NOTIFY_LOG"
+  check "and the cut prompt ends in an ellipsis" grep -q '…”$' "$NOTIFY_LOG"
+  # The body is markup, so a < in what was asked must not cut the text short there.
+  tab_event UserPromptSubmit '"prompt":"why is a < b & c > d here"'
+  jq -c '.turn -= 600 | .since -= 600' "$records/tab.json" >"$records/tab.tmp" && mv "$records/tab.tmp" "$records/tab.json"
+  : >"$NOTIFY_LOG"
+  tab_event Stop
+  notified "Done after 10m"
+  check "what was asked is escaped for the markup it is shown as" \
+    grep -qx '“why is a &lt; b &amp; c &gt; d here”' "$NOTIFY_LOG"
 
   # Claude's idle reminder a minute later is not a second notification.
   tab_event UserPromptSubmit

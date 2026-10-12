@@ -5,9 +5,11 @@ import Quickshell.Io
 import qs.Commons
 
 import "Bar"
+import "Dashboard"
 import "Launcher"
 import "Overview"
 import "Power"
+import "Voice"
 import "Notifications"
 import "Osd"
 
@@ -186,6 +188,11 @@ ShellRoot {
     }
 
     // Bound to SUPER+SPACE, in place of the wofi menu.
+    // Whether do-not-disturb is on: "on" or "off". desktop-say asks before it speaks.
+    function isQuiet(): string {
+      return notifications.doNotDisturb ? "on" : "off";
+    }
+
     function toggleLauncher(): string {
       return launcher.toggle() ? "open" : "closed";
     }
@@ -200,6 +207,23 @@ ShellRoot {
     // Lock, sleep, leave, restart, switch off. SUPER + ESCAPE.
     function togglePowerMenu(): string {
       return powerMenu.toggle() ? "open" : "closed";
+    }
+
+    // The dashboard window on workspace 6: closed and brought back. "shown" or "hidden".
+    function toggleDashboard(): string {
+      return dashboard.toggle() ? "shown" : "hidden";
+    }
+
+    // A tab of the dashboard by its key -- start, home, infra, health, finance, watch --
+    // and "ok" or "unknown". Goes there as well: asking for a tab is asking to see it.
+    function dashboardTab(key: string): string {
+      return dashboard.show(key) ? "ok" : "unknown";
+    }
+
+    // A heading of the dashboard's News tab, by name -- "tech", "world" -- and "ok" or
+    // "unknown".
+    function newsSection(name: string): string {
+      return dashboard.newsSection(name) ? "ok" : "unknown";
     }
 
     function openLauncher(): void {
@@ -248,6 +272,12 @@ ShellRoot {
 
   PowerMenu {
     id: powerMenu
+  }
+
+  Voice {}
+
+  Dashboard {
+    id: dashboard
   }
 
   Notifications {

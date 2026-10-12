@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# Voice commands: what was heard becomes one of a fixed list of things, or nothing.
+#
+# Every command the list could run is a stub that writes down what it was asked, so what
+# is checked is the mapping -- and, more to the point, what a sentence must never turn
+# into: a restart, or a prompt sent to an agent without being read first.
+source "$(dirname "$0")/lib.sh"
+
+require jq || finish
+
+VOICE="$ROOT/bin/desktop-voice"
+sandbox=$(mktemp -d)
+trap 'rm -rf "$sandbox"' EXIT
+stubs="$sandbox/stubs"
+mkdir -p "$stubs"
+
+for cmd in desktop-shell desktop-say desktop-power wpctl tmux desktop-menu-agents desktop-cmd-screenshot uwsm desktop-brief systemctl; do
+  printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s $*" >>"%s/calls"\n' "$cmd" "$sandbox" >"$stubs/$cmd"
+done
+cat >"$stubs/hyprctl" <<STUB
+#!/usr/bin/env bash
+if [[ \$1 == clients ]]; then
+  echo '[{"address":"0xaa","class":"org.mozilla.firefox","title":"iDRAC9 - Mozilla Firefox","mapped":true,"focusHistoryID":2},
+         {"address":"0xbb","class":"com.mitchellh.ghostty","title":"tmux","mapped":true,"focusHistoryID":1}]'
+else
+  printf '%s\n' "hyprctl \$*" >>"$sandbox/calls"
+fi
+STUB
+cat >"$stubs/desktop-agent-sessions" <<'STUB'
+#!/usr/bin/env bash
+echo '{"sessions":[{"project":"desktop","pane":"%7","socket":"/s","target":"ai-desktop-1-claude:1.1"},
+                   {"project":"idrac-security","pane":"%9","socket":"/s","target":"ai-idrac-security-2-claude:1.1"}]}'
+STUB
+# setsid -f detaches; here the thing it would start is simply run, so it is written down.
+printf '#!/usr/bin/env bash\n[[ $1 == -f ]] && shift\nexec "$@"\n' >"$stubs/setsid"
+chmod +x "$stubs"/*
+
+# It stands in for Ollama: answers with whatever the test put in $sandbox/model, and
+# writes down what it was asked.
+cat >"$stubs/curl" <<STUB
+#!/usr/bin/env bash
+for a in "\$@"; do [[ \$a == *'"messages"'* ]] && printf '%s\n' "\$a" >"$sandbox/asked"; done
+[[ " \$* " == *"/api/chat"* ]] || exit 0
+[[ -s "$sandbox/model" ]] || exit 22
+jq -cn --rawfile c "$sandbox/model" '{message: {content: \$c}}'
+STUB
+chmod +x "$stubs/curl"
+
+say() { : >"$sandbox/calls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" bash "$VOICE" run "$1" >/dev/null 2>&1; }
+did() { grep -qxF -- "$1" "$sandbox/calls"; }
+shown() { jq -r .text "$sandbox/run/desktop/say/now" 2>/dev/null; }
+
+# --- as the recogniser really hears them
+say "Go to Workspace 3."
+check "a workspace by its number" did "hyprctl dispatch workspace 3"
+say "workspace three"
+check "or by the word for it" did "hyprctl dispatch workspace 3"
+say "Dashboard."
+check "the dashboard is workspace 6" did "hyprctl dispatch workspace 6"
+say "Dashboard health"
+check "a tab of the dashboard by its subject" did "desktop-shell shell dashboardTab health"
+say "show domotics"
+check "domotics is the house" did "desktop-shell shell dashboardTab home"
+say "Show the news."
+check "the news" did "desktop-shell shell dashboardTab news"
+say "show the clusters"
+check "or by the word you would use for it" did "desktop-shell shell dashboardTab infra"
+say "Lock the screen."
+check "lock locks" did "desktop-power lock"
+say "Show the overview"
+check "the overview" did "desktop-shell shell toggleOverview"
+say "Clear all notifications."
+check "clearing notifications" did "desktop-shell shell clearNotifications"
+say "notifications"
+check "showing them is a different thing from clearing them" did "desktop-shell shell togglePanel notifications"
+say "What's waiting?"
+check "the brief is said out loud" did "desktop-brief --say"
+say "hush"
+check "hush hushes" did "desktop-say --hush"
+say "louder"
+check "the volume" did "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 10%+"
+
+# The cluster's name arrives in pieces, and "k9s" as almost anything.
+say "Nines on OCP 204."
+check "k9s on a cluster, as it is actually heard" did "uwsm app -- ghostty -e ocl -k ocp204"
+say "K nines on O C P two oh four"
+check "and spelled out" did "uwsm app -- ghostty -e ocl -k ocp204"
+say "argo on ocp 302"
+check "Argo CD on a cluster" did "uwsm app -- ghostty -e ocl -a ocp302"
+say "shell on ocp203"
+check "a shell on a cluster" did "uwsm app -- ghostty -e ocl ocp203"
+
+say "go to firefox"
+check "a window by a word in its name" did "hyprctl dispatch focuswindow address:0xaa"
+say "open spreadsheet"
+check "a window that is not there is said to be not there" grep -q 'No window called' <<<"$(shown)"
+
+# --- what a sentence must never become
+for sentence in "reboot" "shut down the computer" "Power off." "log out" "suspend" "restart the machine"; do
+  say "$sentence"
+  check "\"$sentence\" does nothing from here" test ! -s "$sandbox/calls"
+done
+check "and says where that is done instead" grep -q 'Super + Escape' <<<"$(shown)"
+
+say "delete everything in my home directory"
+check "a sentence that is not on the list runs nothing at all" lacks -E 'dispatch|ghostty|send-keys|togglePanel|desktop-(lock|say|worktree|cmd)' "$sandbox/calls"
+say 'workspace 3; rm -rf ~'
+check "nor does one with a command tucked in after a real one" lacks 'rm' "$sandbox/calls"
+check "there is no way from what was heard to a shell" lacks -E 'eval|bash -c|sh -c' "$VOICE"
+
+# --- to an agent
+say "Tell desktop to run the tests."
+check "what is said to an agent is typed into its prompt" did "tmux -S /s send-keys -t %7 -l -- run the tests."
+check "and not sent: Enter is yours" lacks -E 'send-keys.*(Enter|C-m)' "$sandbox/calls"
+check "you are taken to it, to read what was heard" did "desktop-menu-agents --jump ai-desktop-1-claude:1.1 /s"
+say "Ask idrac security to renew the certificate, then tell me"
+check "a project of two words, and a message with a 'to' of its own" \
+  did "tmux -S /s send-keys -t %9 -l -- renew the certificate, then tell me"
+say "tell desktop to lock the screen"
+check "what follows 'tell' is a message, never a command of its own" lacks 'desktop-power' "$sandbox/calls"
+say "tell nobody to do something"
+check "an agent that is not there gets nothing" lacks 'send-keys' "$sandbox/calls"
+
+# --- one press: knowing when somebody has stopped talking
+ENDPOINT="$ROOT/bin/desktop-voice-endpoint"
+# Sound made here: a microphone's opening click, a quiet room, and a voice as a tone.
+sound() { # <seconds of room> <seconds of voice> <seconds of room> [level of the voice]
+  python3 - "$@" <<'PY'
+import array, math, random, sys
+rate = 16000
+before, voice, after = (float(a) for a in sys.argv[1:4])
+loud = int(sys.argv[4]) if len(sys.argv) > 4 else 6000
+random.seed(1)
+out = array.array("h")
+out.extend(int(random.uniform(-1, 1) * 2500) for _ in range(int(rate * 0.1)))        # the click
+out.extend(int(random.uniform(-1, 1) * 40) for _ in range(int(rate * before)))       # the room
+out.extend(int(math.sin(i / 9.0) * loud) for i in range(int(rate * voice)))          # a voice
+out.extend(int(random.uniform(-1, 1) * 40) for _ in range(int(rate * after)))        # the room
+sys.stdout.buffer.write(out.tobytes())
+PY
+}
+heard() { sound "$@" 2>/dev/null | python3 "$ENDPOINT" "${ENDPOINT_ARGS[@]}"; echo "${PIPESTATUS[1]}"; }
+ENDPOINT_ARGS=()
+check "speech followed by silence is the end of a command" test "$(heard 0.5 1.2 2.0)" = 0
+check "a room where nobody speaks is not a command" test "$(heard 5.0 0 0)" = 1
+# The click a microphone opens with was taken for the room, and set the bar above any voice.
+check "the microphone's opening click is not taken for the room" test "$(heard 0.3 1.0 2.0 1500)" = 0
+check "somebody who starts talking at once is still heard" test "$(heard 0.0 1.5 2.0)" = 0
+ENDPOINT_ARGS=(--max 2)
+check "talking past the limit ends there, with what was said" test "$(heard 0.2 6.0 0)" = 0
+ENDPOINT_ARGS=()
+check "a cough is not speech" test "$(heard 1.0 0.08 4.5)" = 1
+check "the key need only be pressed once" grep -q 'watch_for_the_end "$mark"' "$VOICE"
+check "nobody speaking cancels, and does not complain" \
+  test -n "$(sed -n '/^watching()/,/^}/p' "$VOICE" | grep 'if \[\[ $ended == 0 \]\]; then finish_recording; else cancel; fi')"
+
+# --- more to say
+cat >"$stubs/desktop-agent-sessions" <<'STUB'
+#!/usr/bin/env bash
+echo '{"sessions":[{"project":"desktop","state":"working","since":10,"pane":"%7","socket":"/s","target":"ai-desktop-1-claude:1.1"},
+                   {"project":"idrac-security","state":"waiting","since":50,"pane":"%9","socket":"/s","target":"ai-idrac-security-2-claude:1.1"}]}'
+STUB
+cat >"$stubs/tmux" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "tmux \$*" >>"$sandbox/calls"
+case " \$* " in
+*"list-panes"*) echo "desktop-1" ;;
+*"list-clients"*) echo "ai-desktop-1-claude" ;;
+*"#{pane_id}"*) echo "%3" ;;
+*"#{pane_current_path}"*) echo "$sandbox" ;;
+*"#{client_name}"*) echo "/dev/pts/1" ;;
+esac
+STUB
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "desktop-worktree $*" >>"%s/calls"\n' "$sandbox" >"$stubs/desktop-worktree"
+cat >"$stubs/desktop-dash" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+news) echo '{"feeds":[{"category":"tech","name":"Tweakers","ok":true,"items":[{"title":"Een"},{"title":"Twee"},{"title":"Drie"},{"title":"Vier"}]},{"category":"world","name":"NOS","ok":true,"items":[{"title":"Wereld"}]}]}' ;;
+infra) echo '{"signed_in":2,"trouble":1,"clusters":[{"name":"ocp204","state":"degraded","nodes":12,"ready":11},{"name":"ocp202","state":"healthy","nodes":9,"ready":9}]}' ;;
+watch) echo '{"items":[{"name":"kubie","state":"behind","newest":"0.28.0"},{"name":"k9s","state":"current","newest":"0.51.0"}]}' ;;
+esac
+STUB
+chmod +x "$stubs"/*
+said_aloud() { grep -q -- "$1" "$sandbox/calls"; }
+
+say "tell it to run the tests"
+check "'it' is the agent in the window you are in" did "tmux -S /s send-keys -t %7 -l -- run the tests"
+say "go to the waiting agent"
+check "the agent that is waiting can be gone to" did "desktop-menu-agents --jump ai-idrac-security-2-claude:1.1 /s"
+say "start a task called fix the runner"
+check "a task can be started, where you are" did "desktop-worktree new --tab %3 fix the runner"
+say "finish the task"
+check "finishing a task opens the question, and answers nothing itself" did "desktop-worktree finish %3 /dev/pts/1"
+check "nothing here says yes to it" lacks -E 'done( --ask)?$|<<<.?y' "$sandbox/calls"
+say "world news"
+check "a heading of the news" did "desktop-shell shell newsSection world"
+say "what's new on tweakers"
+check "three headlines are read, from the site asked for" said_aloud "desktop-say Tweakers. Een. Twee. Drie."
+say "read the world headlines"
+check "or from a heading" said_aloud "desktop-say NOS. Wereld."
+say "cluster status"
+check "which clusters are in trouble is said" said_aloud "desktop-say In trouble: ocp204, 1 nodes not ready"
+say "what is behind"
+check "and what has a newer version" said_aloud "desktop-say Newer versions: kubie 0.28.0"
+
+say "workspace 4"
+say "again"
+check "'again' does the last thing once more" did "hyprctl dispatch workspace 4"
+say "tell desktop to run the tests"
+say "again"
+check "but never sends a message to an agent twice" lacks 'send-keys' "$sandbox/calls"
+
+# --- a model for what the list does not know
+model_says() { printf '%s' "$1" >"$sandbox/model"; rm -f "$sandbox/asked"; }
+
+model_says '{"action":"workspace","arg":"3"}'
+say "could you bring up the third one"
+check "a sentence the list does not know is put to the model" did "hyprctl dispatch workspace 3"
+check "which is told what is in front of you" grep -q 'Focused window' "$sandbox/asked"
+check "and may only answer from a fixed set" grep -q '"enum"' "$sandbox/asked"
+rm -f "$sandbox/asked"
+say "workspace 4"
+check "what the list knows never goes to the model" test ! -e "$sandbox/asked"
+
+# What the model says is not done: it is turned into a sentence the list knows.
+model_says '{"action":"k9s","arg":"ocp204; rm -rf ~"}'
+say "do the cluster thing"
+check "an argument with a command in it comes to nothing" lacks 'ghostty' "$sandbox/calls"
+model_says '{"action":"focus","arg":"$(reboot)"}'
+say "bring that thing forward"
+check "and cannot reach a shell" lacks -E '\$\(|reboot' "$sandbox/calls"
+model_says '{"action":"reboot","arg":""}'
+say "make the machine start over"
+check "an action that is not on the list is nothing" lacks -E 'dispatch|ghostty|send-keys|togglePanel|desktop-(lock|say|worktree|cmd)' "$sandbox/calls"
+model_says '{"action":"focus","arg":"shutdown"}'
+say "bring that thing forward"
+check "what is refused when said is refused when the model says it" lacks 'focuswindow' "$sandbox/calls"
+model_says 'not json at all'
+say "mumble mumble"
+check "an answer that makes no sense is nothing" lacks -E 'dispatch|ghostty|send-keys|togglePanel|desktop-(lock|say|worktree|cmd)' "$sandbox/calls"
+rm -f "$sandbox/model"
+say "mumble mumble"
+check "and so is no answer: Ollama not running" lacks -E 'dispatch|ghostty|send-keys|togglePanel|desktop-(lock|say|worktree|cmd)' "$sandbox/calls"
+# A message to an agent must be your words, not a paraphrase of them.
+model_says '{"action":"lock","arg":""}'
+say "tell desktop to lock the door"
+check "a message to an agent never goes to the model" test ! -e "$sandbox/asked"
+check "the model cannot empty the notification centre" lacks 'clear' <(sed -n '/^understand()/,/^}/p' "$VOICE" | grep -v '^ *#')
+DESKTOP_VOICE_MODEL=off say "could you bring up the third one"
+check "it can be switched off" test ! -e "$sandbox/asked"
+check "a clean install fetches the model where there is an Ollama" grep -q 'packaging/voice.sh' "$ROOT/install/packaging/all.sh"
+
+# --- wired in
+check "SUPER + C listens" \
+  grep -qx 'bindd = SUPER, C, Voice command, exec, desktop-voice toggle' "$ROOT/default/hypr/bindings/utilities.conf"
+check "in the Lua bindings as well" grep -q 'SUPER + C.*desktop-voice toggle' "$ROOT/default/hypr/bindings/utilities.lua"
+check "the microphone cannot be left open" grep -q 'desktop-voice-endpoint --max "$MAX_SECONDS"' "$VOICE"
+# Transcribing a recording from the command line loads the model every time; the daemon
+# has it loaded. That was the difference between four seconds and one.
+check "it listens through the dictation daemon, which has the model loaded" \
+  grep -q 'voxtype record start --file="$RUN_DIR/heard.txt"' "$VOICE"
+check "and what the daemon wrote is removed once it has been understood" grep -q 'rm -f "$RUN_DIR/heard.txt"' "$VOICE"
+check "what was recorded is removed once it has been understood" grep -q 'rm -f "$RUN_DIR/heard.wav"' "$VOICE"
+check "the list of what it understands is printed" test "$(bash "$VOICE" list | wc -l)" -ge 12
+
+finish

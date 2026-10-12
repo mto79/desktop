@@ -46,9 +46,17 @@
           "id": "spacer"
         },
         {
+          "id": "toggles"
+        },
+        {
+          "id": "spacer"
+        },
+        {
           "id": "clock",
           "format": "ddd dd HH:mm",
-          "firstDay": "monday"
+          "firstDay": "monday",
+          "pill": true,
+          "seconds": true
         },
         {
           "id": "spacer"
@@ -66,9 +74,6 @@
           },
           "panel": "monitors",
           "onRightClick": "desktop-menu monitors"
-        },
-        {
-          "id": "toggles"
         },
         {
           "id": "update"
@@ -136,7 +141,7 @@
           "type": "command",
           "exec": "desktop-status-ai",
           "interval": 15,
-          "icon": "󰚩",
+          "icon": "󱁉",
           "colors": {
             "critical": "urgent",
             "warning": "accent",
@@ -150,7 +155,8 @@
             "done"
           ],
           "panel": "ai",
-          "onRightClick": "desktop-menu agents"
+          "onRightClick": "desktop-menu agents",
+          "orb": true
         },
         {
           "id": "camera",

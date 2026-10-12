@@ -62,7 +62,13 @@ watch() {
     setpriv --pdeathsig TERM voxtype status --follow --format json 2>/dev/null |
       while IFS= read -r line; do
         class=$(jq -r '.class // "idle"' <<<"$line" 2>/dev/null) || continue
-        if [[ $class == recording ]]; then duck; else restore; fi
+        if [[ $class == recording ]]; then
+          # Starting to talk is telling it to stop talking.
+          desktop-say --hush >/dev/null 2>&1 || true
+          duck
+        else
+          restore
+        fi
       done
 
     # The follower ends when voxtype restarts or is not running yet. Give the volume

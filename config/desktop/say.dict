@@ -1,0 +1,17 @@
+# How to say what is written, for desktop-say. One rule a line:
+#   pattern<TAB>how to say it
+# The pattern is an extended regular expression, matched whatever the case. Lines
+# starting with # are comments. Yours to add to: a name the voice gets wrong is one line.
+ocp([0-9])0([0-9])	O C P \1 oh \2
+\bidrac([0-9]+)	I drack \1
+\bidrac\b	I drack
+\bk9s\b	K nines
+\bargo9s\b	Argo nines
+\bkubectl\b	cube control
+\bllm-wiki\b	L L M wiki
+\boob\b	out of band
+\bminio\b	min I O
+\bgitops\b	git ops
+\bHARICA\b	Harika
+\bnvim\b	neo vim
+\btmux\b	T mux

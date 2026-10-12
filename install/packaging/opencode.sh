@@ -1,26 +1,11 @@
 #!/usr/bin/env bash
 
+# OpenCode, from npm, into the user's own prefix -- for the reason codex.sh gives: it
+# updates itself, and cannot when it lives in a directory only root may write.
+
 set -euo pipefail
 
-# Configurable section
-INSTALL_PATH="/usr/local/bin"
-# DEFAULT_PROVIDER="${DEFAULT_PROVIDER:-}"   # e.g., "openai" or "anthropic"
-# OPENAI_KEY="${OPENAI_KEY:-}"
-# ANTHROPIC_KEY="${ANTHROPIC_KEY:-}"
-
-echo "📌 Installing OpenCode CLI ..."
-
-# Download & run official install script
-echo "🔽 Running official OpenCode install script..."
-sudo npm i -g opencode-ai
-
-echo "✔ OpenCode installed."
-echo ""
-echo "🎉 Installation Complete!"
-echo "Restart your terminal"
-echo ""
-echo "You can now run OpenCode with:"
-echo "  opencode --version"
-echo ""
-echo "To authenticate with providers, run:"
-echo "  opencode auth login"
+echo "Installing OpenCode"
+npm config set prefix "$HOME/.local"
+npm i -g opencode-ai
+echo "OpenCode $(opencode --version 2>/dev/null || echo installed)"

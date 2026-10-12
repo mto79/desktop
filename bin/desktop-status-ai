@@ -44,6 +44,8 @@ jq -c -n --argjson a "$agents" --argjson c "$claude" '
       ),
       # The waiting count stays visible whichever half wins the colour; see CommandWidget.
       badge: ($a.badge // ""),
+      # Likewise how many are mid-turn, which is what the network on the bar moves for.
+      working: ($a.working // 0),
       gauges: $gauges,
       tooltip: (
         [($a.tooltip // ""), ($c.tooltip // "")]

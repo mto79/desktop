@@ -7,6 +7,7 @@
 #   3  tmux, attached to "home", with "llm-wiki" beside it under claude
 #   4  KeePassXC
 #   5  Obsidian
+#   6  the dashboard -- the shell's own window, already there; this is where the login ends
 #
 # Which screen each of those workspaces sits on is desktop-workspace-pin's decision, so
 # it runs first; this script only decides what opens where.
@@ -52,6 +53,18 @@ open_on() {
 
 desktop-workspace-pin
 
+# While the windows open, an application asking for attention does not get the focus.
+# Hyprland otherwise follows such a request to whatever workspace the window is on
+# (misc:focus_on_activate), and applications ask when they have finished starting -- which
+# is after this script has put the focus where it should end. Obsidian asks last, so every
+# login ended on workspace 5 whatever was dispatched here. Put back as it was at the end,
+# and on any way out, so a script that dies half-way does not leave it off.
+activate=true
+[[ $(hyprctl getoption misc:focus_on_activate 2>/dev/null) == *"int: 0"* ]] && activate=false
+restore_activate() { hyprctl keyword misc:focus_on_activate "$activate" >/dev/null 2>&1 || true; }
+trap restore_activate EXIT
+hyprctl keyword misc:focus_on_activate false >/dev/null 2>&1 || true
+
 # Both sessions exist before the terminal attaches, so llm-wiki is one switch away --
 # and llm-wiki is the one that is always the same job, so it is laid out and has claude
 # up by the time it is switched to. home is left a plain shell; what it is for varies.
@@ -79,6 +92,16 @@ open_on 4 org.keepassxc.KeePassXC "$HOME/.local/bin/KeePassXC.AppImage" &
 open_on 5 md.obsidian.Obsidian "$HOME/.local/bin/Obsidian.AppImage" &
 wait
 
-# Show the first workspace of every screen, and leave the focus on the terminal. Screens
-# that hold several of these show the last one named, which is why 3 comes last.
-hyprctl --batch "dispatch workspace 5 ; dispatch workspace 4 ; dispatch workspace 2 ; dispatch workspace 1 ; dispatch workspace 3" >/dev/null
+# Show the first workspace of every screen, and leave the focus on workspace 6: the day
+# starts on the dashboard, which says what is waiting before anything is opened to find
+# out. Screens that hold several of these show the last one named, which is why 6 comes
+# last -- and 1 just before it, so that it is what the laptop falls back to.
+hyprctl --batch "dispatch workspace 5 ; dispatch workspace 4 ; dispatch workspace 2 ; dispatch workspace 3 ; dispatch workspace 1 ; dispatch workspace 6" >/dev/null
+
+# And a welcome, now that everything is where it belongs: a greeting by name and what is
+# waiting, said while the dashboard shows the same. Not waited for, and desktop-say keeps
+# quiet by itself when it is switched off or do-not-disturb is on.
+desktop-brief --welcome >/dev/null 2>&1 &
+
+# The late askers get a moment to ask and be ignored before asking counts again.
+sleep "${DESKTOP_WORKSPACE_START_SETTLE:-3}"

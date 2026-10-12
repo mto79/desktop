@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+
+# desktop-brief: what needs you, from everything that keeps track of something.
+#
+#   desktop-brief           # a few lines to read
+#   desktop-brief --json    # the same as data; what the dashboard draws
+#   desktop-brief --say     # the short version, out loud
+#   desktop-brief --welcome # a greeting by name and the short version; said at login
+#
+# Updates, the security check, backups, tasks, agents and Claude's limits each have a
+# panel and each has to be opened to be read. This asks all of them once and puts the
+# answers side by side, which is what the dashboard on workspace 6 shows and what a
+# morning is started with.
+#
+# It only reads what the other commands already produce -- their state files and their
+# own JSON -- so it cannot disagree with their panels, and a source that is missing or
+# broken is an empty section rather than a failed brief.
+
+set -uo pipefail
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop"
+RUNTIME="${XDG_RUNTIME_DIR:-/tmp}"
+
+# A command's JSON, or the fallback when it is not there, fails, or prints something else.
+json_of() { # fallback command...
+  local fallback=$1 out
+  shift
+  out=$("$@" 2>/dev/null) && jq -e . >/dev/null 2>&1 <<<"$out" && { echo "$out"; return; }
+  echo "$fallback"
+}
+
+file_json() { # fallback path
+  [[ -r $2 ]] && jq -e . "$2" 2>/dev/null || echo "$1"
+}
+
+# What to call you: the first word of the name the account was given. Nothing, rather
+# than a login name, when there is none -- "Good morning, mto" greets nobody.
+first_name() {
+  getent passwd "${USER:-$(id -un)}" 2>/dev/null | cut -d: -f5 | cut -d, -f1 | awk '{ print $1 }'
+}
+
+greeting() {
+  local hour name
+  hour=$((10#$(date +%H)))
+  name=$(first_name)
+  if ((hour < 6)); then echo "Good night${name:+, $name}"
+  elif ((hour < 12)); then echo "Good morning${name:+, $name}"
+  elif ((hour < 18)); then echo "Good afternoon${name:+, $name}"
+  else echo "Good evening${name:+, $name}"; fi
+}
+
+collect() {
+  local updates security backup tasks agents limits kept marks disk uptime_text kernel
+
+  updates=$(file_json '{"sources":[]}' "$RUNTIME/desktop-update-available.json")
+  security=$(file_json '{"findings":[]}' "$STATE/security/last.json")
+  backup=$(json_of '{"class":"","tooltip":""}' desktop-backup status --bar)
+  tasks=$(json_of '{"tasks":[]}' desktop-worktree tasks --json)
+  agents=$(json_of '{"sessions":[]}' desktop-agent-sessions --json)
+  limits=$(json_of '{"limits":[]}' desktop-status-claude --report)
+  kept=$(file_json '[]' "$STATE/notifications.json")
+  # The marks the bar reads to ask for a restart or a relogin.
+  marks=$(find "$STATE" -maxdepth 1 -type f -name '*-required' -printf '%f\n' 2>/dev/null | jq -Rcs 'split("\n") | map(select(. != ""))')
+  disk=$(df -P / 2>/dev/null | awk 'NR == 2 { gsub("%", "", $5); print $5 }')
+  uptime_text=$(uptime -p 2>/dev/null | sed 's/^up //')
+  kernel=$(uname -r)
+
+ user=$(first_name)
+  jq -cn \
+    --arg user "$user" \
+    --argjson updates "$updates" --argjson security "$security" --argjson backup "$backup" \
+    --argjson tasks "$tasks" --argjson agents "$agents" --argjson limits "$limits" \
+    --argjson kept "$kept" --argjson marks "${marks:-[]}" \
+    --arg disk "${disk:-0}" --arg uptime "$uptime_text" --arg kernel "$kernel" \
+    --argjson now "$(date +%s)" '
+    {
+      generated: $now,
+      user: $user,
+      updates: {
+        count: ([$updates.sources[]?.count] | add // 0),
+        sources: [$updates.sources[]? | {label, count}],
+        checked: ($updates.checked // null)
+      },
+      security: {
+        # "info" is the check saying what it looked at, not something to act on.
+        findings: [$security.findings[]? | select(.level != "info") | {level, title}],
+        checked: ($security.at // null)
+      },
+      backup: {state: ($backup.class // ""), detail: ($backup.tooltip // "")},
+      tasks: [$tasks.tasks[]? | {repo, name, ahead, dirty, state, target, path}],
+      agents: {
+        sessions: [$agents.sessions[]? | {project, state, "for": .["for"], target, socket}],
+        waiting: ([$agents.sessions[]? | select(.state == "waiting")] | length),
+        working: ([$agents.sessions[]? | select(.state == "working")] | length),
+        done: ([$agents.sessions[]? | select(.state == "done")] | length)
+      },
+      limits: [$limits.limits[]? | {name: (.name // .label // ""), percent: (.percent // 0), resets: (.resets // .reset // "")}],
+      notifications: {kept: ($kept | length), latest: [$kept[-4:][]? | {app, summary}] | reverse},
+      system: {uptime: $uptime, kernel: $kernel, disk_used: ($disk | tonumber? // 0), restart_marks: $marks}
+    }
+    | .security.bad = ([.security.findings[] | select(.level == "bad")] | length)
+    # One number for "how much of this wants doing", which is what a glance is for.
+    | .attention = (.agents.waiting + .security.bad + (if (.system.restart_marks | length) > 0 then 1 else 0 end)
+                    + ([.tasks[] | select(.state == "waiting")] | length))'
+}
+
+# The short version: only what there is something to say about, in the order it matters.
+sentences() {
+  jq -r '
+    def plural(n; one; many): if n == 1 then "\(n) \(one)" else "\(n) \(many)" end;
+    [
+      (if .agents.waiting > 0 then plural(.agents.waiting; "agent is"; "agents are") + " waiting for you" else empty end),
+      (if .agents.working > 0 then plural(.agents.working; "agent is"; "agents are") + " working" else empty end),
+      (if .agents.done > 0 then plural(.agents.done; "agent has"; "agents have") + " finished" else empty end),
+      (if (.tasks | length) > 0 then plural(.tasks | length; "task is"; "tasks are") + " open" else empty end),
+      (if .security.bad > 0 then plural(.security.bad; "security finding needs"; "security findings need") + " attention" else empty end),
+      (if .updates.count > 0 then plural(.updates.count; "update is"; "updates are") + " available" else empty end),
+      (if (.system.restart_marks | length) > 0 then "A restart is pending" else empty end),
+      (if (.backup.state | IN("stale", "never")) then "The backup is out of date" else empty end),
+      (if .notifications.kept > 0 then plural(.notifications.kept; "notification is"; "notifications are") + " waiting" else empty end)
+    ] | if length == 0 then ["Nothing needs you"] else . end | .[]'
+}
+
+case "${1:-}" in
+--json) collect ;;
+--say)
+  # A handful at most: a list read out is forgotten by the fourth item.
+  desktop-say "$(collect | sentences | head -4 | sed 's/$/./' | paste -sd' ')"
+  ;;
+--welcome)
+  # Three things at most after the greeting: it is said to somebody sitting down, not
+  # read to them.
+  desktop-say "$(greeting). $(collect | sentences | head -3 | sed 's/$/./' | paste -sd' ')"
+  ;;
+"" | --text) collect | sentences ;;
+*)
+  echo "usage: desktop-brief [--json | --say | --welcome]" >&2
+  exit 1
+  ;;
+esac

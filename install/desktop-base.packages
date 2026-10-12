@@ -14,6 +14,7 @@ clang
 cliphist
 dbus-tools
 du-dust
+espeak-ng
 evince
 fastfetch
 fcitx5
@@ -54,6 +55,7 @@ ImageMagick-libs
 imv
 iputils
 jq
+k9s
 keychain
 kvantum-qt5
 libheif

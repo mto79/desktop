@@ -92,6 +92,20 @@ Item {
     value: server.trackedNotifications ? server.trackedNotifications.values : []
   }
 
+  // --- not worth keeping --------------------------------------------------------------------
+  //
+  // Some notifications are only news while they are on screen. What a sender marks
+  // transient is one kind. The coding agents' are another: "waiting for you" and "finished"
+  // are already on the bar, on the agent's tab and in the AI panel for as long as they are
+  // true, and stop being true the moment you look -- kept here they were a pile of fifteen
+  // stale lines saying an agent had been waiting, hours after it was answered.
+  // notifications.forget in shell.json names the applications; these are the default.
+  readonly property var forget: (config && config.forget) ? config.forget : ["Claude Code"]
+
+  function passing(notification) {
+    return notification.transient === true || forget.indexOf(String(notification.appName || "")) !== -1;
+  }
+
   // --- kept across a restart ---------------------------------------------------------------
   //
   // The list lived only in this process, so restarting the shell -- which every change to
@@ -112,7 +126,10 @@ Item {
       try {
         var entries = JSON.parse(text());
         if (Array.isArray(entries))
-          Inbox.past = entries.slice(-root.keep);
+          // Without what would not be kept today: the rule may be newer than the file.
+          Inbox.past = entries.filter(function (entry) {
+            return root.forget.indexOf(String(entry.app || "")) === -1;
+          }).slice(-root.keep);
       } catch (error) {
         // A half-written or hand-edited file is no reason to start without notifications.
       }
@@ -141,8 +158,8 @@ Item {
       var entries = Inbox.past.slice();
       var all = server.trackedNotifications ? server.trackedNotifications.values : [];
       for (var i = 0; i < all.length; i++)
-        // What its sender called transient was never meant to be read later at all.
-        if (!all[i].transient)
+        // What was only news while it was on screen is not written down either.
+        if (!root.passing(all[i]))
           entries.push(root.plain(all[i]));
       // Not FileView's own write: this has to be private -- it is other people's messages
       // -- and whole or absent, never half. A one-shot command with a tight umask writes
@@ -200,7 +217,7 @@ Item {
           continue;
         // Asked to be forgotten by its own sender -- a volume step, a progress tick.
         // Keeping those would fill the centre with things never meant to be read twice.
-        if (due[d].transient)
+        if (root.passing(due[d]))
           forget.push(due[d]);
         else
           next[due[d].id] = true;
@@ -572,7 +589,9 @@ Item {
       Text {
         width: parent.width
         visible: toast.bodyText !== ""
-        text: toast.bodyText
+        // A body's line breaks are part of what it says -- "done", then what was done --
+        // and StyledText runs them together as it would in HTML unless they are breaks.
+        text: String(toast.bodyText || "").replace(/\r?\n/g, "<br>")
         // Senders may send Pango markup; StyledText renders the subset Qt knows and
         // ignores the rest, which beats printing tags at the reader.
         textFormat: Text.StyledText

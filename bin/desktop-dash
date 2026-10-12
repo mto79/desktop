@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+
+# desktop-dash: the data behind each tab of the dashboard.
+#
+#   desktop-dash start     --json    what needs you (desktop-brief)
+#   desktop-dash watch     --json    software worth keeping an eye on, and what is new
+#   desktop-dash infra     --json    the clusters, and this machine
+#   desktop-dash home      --json    domotics: the house, from Home Assistant
+#   desktop-dash health    --json    activity, from an export you keep
+#   desktop-dash finance   --json    money, from an export you keep
+#   desktop-dash news      --json    the headlines: Tweakers, and five more worth reading
+#   desktop-dash <tab> --sample      what that tab looks like with something to show
+#
+# One tab, one subject, one answer in JSON. The dashboard draws whatever comes back and
+# knows nothing about where it came from, so a subject gets a new source by changing what
+# is printed here and nothing in the shell.
+#
+# Every answer says how real it is:
+#
+#   "connected": true    this is your data
+#   "connected": false   it is not -- "how" says what to do about it, and the rest is
+#                        sample data, there so the tab is not an empty page and plainly
+#                        labelled as invented wherever it is drawn
+#
+# That label is the point. A dashboard that shows a plausible number it made up is worse
+# than one that shows nothing, because the number will be believed.
+#
+# What needs a secret -- a Home Assistant token -- is asked of the secret service
+# (secret-tool, which KeePassXC answers), never read from a file here.
+
+set -uo pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/desktop/dashboard"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/dashboard"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/desktop/dashboard"
+
+die() {
+  echo "desktop-dash: $*" >&2
+  exit 1
+}
+
+secret() { # name
+  command -v secret-tool >/dev/null 2>&1 || return 1
+  secret-tool lookup service desktop-dashboard account "$1" 2>/dev/null
+}
+
+# A cached answer that is still young enough, or nothing.
+cached() { # name max-age-seconds
+  local file="$CACHE/$1.json"
+  [[ -s $file ]] || return 1
+  (($(date +%s) - $(stat -c %Y "$file") < $2)) || return 1
+  cat "$file"
+}
+
+keep() { # name  (stdin: the answer)
+  mkdir -p "$CACHE" 2>/dev/null || { cat; return; }
+  tee "$CACHE/$1.json.part" && mv -f "$CACHE/$1.json.part" "$CACHE/$1.json"
+}
+
+# ---------------------------------------------------------------------------------- watch
+
+# What to keep an eye on: name | where the newest version is published | how to ask what
+# is installed here. A file of your own (watch.list in the config directory) replaces this
+# list; the third column is a command, so it is yours to write and nobody else's.
+default_watch() {
+  cat <<'LIST'
+OpenShift 4.22|ocp:stable-4.22|oc version --client | sed -n 's/^Client Version: //p'
+k9s|github:derailed/k9s|k9s version -s | awk '/^Version/ { print $2 }'
+kubie|github:sbstp/kubie|kubie --version | awk '{ print $2 }'
+argo9s|github:vvrnv/argo9s|argo9s --version | awk '{ print $2 }'
+Hyprland|github:hyprwm/Hyprland|hyprctl version | awk 'NR == 1 { print $2 }'
+voxtype|github:peteonrails/voxtype|voxtype --version | awk '{ print $2 }'
+Neovim|github:neovim/neovim|nvim --version | awk 'NR == 1 { print $2 }'
+Claude Code|npm:@anthropic-ai/claude-code|claude --version | awk '{ print $1 }'
+Codex|npm:@openai/codex|codex --version | awk '{ print $2 }'
+OpenCode|npm:opencode-ai|opencode --version
+Piper|pypi:piper-tts|"${XDG_DATA_HOME:-$HOME/.local/share}/desktop-say/venv/bin/pip" show piper-tts | sed -n 's/^Version: //p'
+LIST
+}
+
+newest() { # source -> version, or nothing
+  local kind=${1%%:*} what=${1#*:}
+  case "$kind" in
+  github) curl -fsSL --max-time 15 "https://api.github.com/repos/$what/releases/latest" 2>/dev/null | jq -r '.tag_name // empty' ;;
+  npm) curl -fsSL --max-time 15 "https://registry.npmjs.org/$what/latest" 2>/dev/null | jq -r '.version // empty' ;;
+  pypi) curl -fsSL --max-time 15 "https://pypi.org/pypi/$what/json" 2>/dev/null | jq -r '.info.version // empty' ;;
+  ocp) curl -fsSL --max-time 15 "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/$what/release.txt" 2>/dev/null |
+    sed -n 's/^Name:[[:space:]]*//p' | head -1 ;;
+  esac
+}
+
+# The number in a version, without whatever is written round it: "v0.51.0", "0.51.0-1".
+plain() { grep -oE '[0-9]+(\.[0-9]+)+' <<<"$1" | head -1; }
+
+cmd_watch() {
+  local list name source ask have want
+  cached watch 21600 && return
+  list="$CONFIG/watch.list"
+  {
+    if [[ -r $list ]]; then grep -vE '^[[:space:]]*(#|$)' "$list"; else default_watch; fi
+  } | while IFS='|' read -r name source ask; do
+    [[ -n $name && -n $source ]] || continue
+    have=$(plain "$(timeout 10 bash -c "$ask" 2>/dev/null | head -1)")
+    want=$(plain "$(newest "$source")")
+    jq -cn --arg name "$name" --arg source "$source" --arg have "$have" --arg want "$want" '
+      {name: $name, source: $source, installed: $have, newest: $want,
+       state: (if $want == "" then "unknown" elif $have == "" then "absent"
+               elif $have == $want then "current" else "behind" end)}'
+  done | jq -cs --argjson now "$(date +%s)" '
+    {connected: true, checked: $now, items: (sort_by(.state != "behind", .name)),
+     behind: ([.[] | select(.state == "behind")] | length), total: length}' | keep watch
+}
+
+# ---------------------------------------------------------------------------------- infra
+
+# The clusters ocl knows, each asked briefly and all at once: six clusters asked one after
+# the other, with a timeout each, is half a minute of nothing on a page being looked at.
+cluster() { # name
+  local name=$1 version nodes
+  if ! oc --context "$name" --request-timeout=4s whoami >/dev/null 2>&1; then
+    jq -cn --arg name "$name" '{name: $name, state: "signed-out"}'
+    return
+  fi
+  version=$(oc --context "$name" --request-timeout=6s get clusterversion version -o json 2>/dev/null)
+  nodes=$(oc --context "$name" --request-timeout=6s get nodes -o json 2>/dev/null)
+  jq -cn --arg name "$name" --argjson version "${version:-null}" --argjson nodes "${nodes:-null}" '
+    def ready: [.status.conditions[]? | select(.type == "Ready" and .status == "True")] | length > 0;
+    {name: $name,
+     version: ($version.status.desired.version // ""),
+     updating: ([$version.status.conditions[]? | select(.type == "Progressing" and .status == "True")] | length > 0),
+     nodes: ($nodes.items // [] | length),
+     ready: ([$nodes.items[]? | select(ready)] | length)}
+    | .state = (if .nodes == 0 then "unknown" elif .ready < .nodes then "degraded" elif .updating then "updating" else "healthy" end)'
+}
+
+cmd_infra() {
+  local names name work
+  cached infra 120 && return
+  command -v oc >/dev/null 2>&1 || { sample infra; return; }
+  # The names are ocl's: it is the one place the list of clusters is written down.
+  names=$(sed -n 's/^OCL_NAMES=(\(.*\))$/\1/p' "$(readlink -f "$(command -v ocl 2>/dev/null)")" 2>/dev/null)
+  [[ -n $names ]] || { sample infra; return; }
+  work=$(mktemp -d)
+  for name in $names; do cluster "$name" >"$work/$name.json" & done
+  wait
+  cat "$work"/*.json | jq -cs --argjson now "$(date +%s)" '
+    {connected: true, checked: $now, clusters: sort_by(.name),
+     signed_in: ([.[] | select(.state != "signed-out")] | length),
+     trouble: ([.[] | select(.state == "degraded")] | length)}' | keep infra
+  rm -rf "$work"
+}
+
+# ----------------------------------------------------------------------------------- home
+
+# Home Assistant, over its REST API. home.conf names the house and what to show:
+#
+#   url = https://home.example.net:8123
+#   sensor.living_room_temperature | Living room | climate
+#   light.kitchen                  | Kitchen     | light
+#
+# and the long-lived access token is in the secret service:
+#   secret-tool store --label="Home Assistant" service desktop-dashboard account homeassistant
+cmd_home() {
+  local conf="$CONFIG/home.conf" url token states
+  [[ -r $conf ]] || { sample home; return; }
+  url=$(sed -n 's/^[[:space:]]*url[[:space:]]*=[[:space:]]*//p' "$conf" | head -1)
+  token=$(secret homeassistant) || token=""
+  [[ -n $url && -n $token ]] || { sample home; return; }
+  cached home 30 && return
+  states=$(curl -fsS --max-time 10 -H "Authorization: Bearer $token" "${url%/}/api/states" 2>/dev/null) || {
+    jq -cn '{connected: false, how: ["Home Assistant did not answer. Check the url in home.conf and that the token is still valid."], rooms: []}'
+    return
+  }
+  grep -E '^[[:space:]]*[a-z_]+\.[a-z0-9_]+[[:space:]]*\|' "$conf" | jq -Rcs --argjson states "$states" --argjson now "$(date +%s)" '
+    ($states | map({key: .entity_id, value: .}) | from_entries) as $by
+    | {connected: true, checked: $now, rooms: [
+        split("\n")[] | select(. != "") | split("|") | map(gsub("^\\s+|\\s+$"; ""))
+        | {entity: .[0], label: (.[1] // .[0]), kind: (.[2] // "sensor")} as $want
+        | ($by[$want.entity] // null) as $state
+        | $want + {value: ($state.state // "unavailable"), unit: ($state.attributes.unit_of_measurement // "")}
+      ]}' | keep home
+}
+
+# ----------------------------------------------------------------------------------- news
+
+# Whose headlines, under which heading, in the order they are shown:
+#
+#   [heading]
+#   name | the site | its feed
+#
+# Each heading is a sub-tab of the News tab, and its first site is drawn wide. Technology
+# leads with Tweakers and then five that between them cover what a day in technology was:
+# what engineers are talking about, the long read, the sceptical one, the kernel and
+# distributions, and the consumer end. The world leads with the NOS and then five that do
+# not all sit in the same country or see it the same way. A file of your own (news.list in
+# the config directory) replaces this list; sites above any heading go under "tech".
+default_news() {
+  cat <<'LIST'
+[tech]
+Tweakers|https://tweakers.net|https://tweakers.net/feeds/mixed.xml
+Hacker News|https://news.ycombinator.com|https://hnrss.org/frontpage
+Ars Technica|https://arstechnica.com|https://feeds.arstechnica.com/arstechnica/index
+The Register|https://www.theregister.com|https://www.theregister.com/headlines.atom
+LWN.net|https://lwn.net|https://lwn.net/headlines/rss
+The Verge|https://www.theverge.com|https://www.theverge.com/rss/index.xml
+
+[world]
+NOS|https://nos.nl|https://feeds.nos.nl/nosnieuwsalgemeen
+BBC World|https://www.bbc.com/news/world|https://feeds.bbci.co.uk/news/world/rss.xml
+The Guardian|https://www.theguardian.com/world|https://www.theguardian.com/world/rss
+Al Jazeera|https://www.aljazeera.com|https://www.aljazeera.com/xml/rss/all.xml
+DW|https://www.dw.com|https://rss.dw.com/rdf/rss-en-world
+NPR|https://www.npr.org/sections/world/|https://feeds.npr.org/1004/rss.xml
+LIST
+}
+
+# The list with each site's heading put in front of it, which is how the reader gets it:
+# heading | name | site | feed.
+with_headings() {
+  awk '
+    /^[[:space:]]*(#|$)/ { next }
+    /^[[:space:]]*\[.*\][[:space:]]*$/ { heading = tolower($0); gsub(/[][[:space:]]/, "", heading); next }
+    { print (heading == "" ? "tech" : heading) "|" $0 }'
+}
+
+# The reading is desktop-dash-news's: feeds are XML, and XML is read by a parser.
+cmd_news() {
+  local list
+  cached news 900 && return
+  list="$CONFIG/news.list"
+  {
+    if [[ -r $list ]]; then cat "$list"; else default_news; fi
+  } | with_headings | desktop-dash-news | keep news
+}
+
+# --------------------------------------------------------------------- health and finance
+
+# Neither has a source that can simply be asked from here: Garmin has no personal API,
+# Strava's needs an application of your own, and a bank's is the bank's. So each is a file
+# you keep -- written by whatever exports you trust -- in the shape the sample shows:
+#
+#   ~/.local/state/desktop/dashboard/health.json
+#   ~/.local/state/desktop/dashboard/finance.json
+#
+# The dashboard only ever reads them. Nothing here logs in to anything.
+from_file() { # tab
+  local file="$STATE/$1.json"
+  if [[ -r $file ]] && jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    jq -c --argjson at "$(stat -c %Y "$file")" '. + {connected: true, checked: $at}' "$file"
+  else
+    sample "$1"
+  fi
+}
+
+# --------------------------------------------------------------------------------- sample
+
+# Invented, and said to be: "connected": false, and "how" says what would make it real.
+sample() { # tab
+  case "$1" in
+  infra)
+    jq -cn '{connected: false, how: ["Sign in to a cluster with ocl and it appears here.", "The list of clusters is the one in ocl."],
+      clusters: [
+        {name: "ocp202", state: "healthy", version: "4.20.12", nodes: 9, ready: 9, updating: false},
+        {name: "ocp203", state: "updating", version: "4.20.14", nodes: 9, ready: 9, updating: true},
+        {name: "ocp204", state: "degraded", version: "4.22.16", nodes: 12, ready: 11, updating: false},
+        {name: "ocp302", state: "signed-out"}], signed_in: 3, trouble: 1}'
+    ;;
+  home)
+    jq -cn '{connected: false, how: [
+        "Write ~/.config/desktop/dashboard/home.conf with a line  url = https://your-home-assistant:8123  and one line per thing to show:  sensor.living_room_temperature | Living room | climate",
+        "Store a long-lived access token:  secret-tool store --label=\"Home Assistant\" service desktop-dashboard account homeassistant"],
+      rooms: [
+        {label: "Living room", kind: "climate", value: "20.5", unit: "°C"},
+        {label: "Bedroom", kind: "climate", value: "17.8", unit: "°C"},
+        {label: "Outside", kind: "climate", value: "9.2", unit: "°C"},
+        {label: "Kitchen", kind: "light", value: "on", unit: ""},
+        {label: "Hall", kind: "light", value: "off", unit: ""},
+        {label: "Front door", kind: "lock", value: "locked", unit: ""},
+        {label: "Solar", kind: "power", value: "1840", unit: "W"},
+        {label: "House", kind: "power", value: "420", unit: "W"}]}'
+    ;;
+  health)
+    jq -cn '{connected: false, how: [
+        "Keep a file ~/.local/state/desktop/dashboard/health.json in the shape shown here -- written by a Strava or Garmin export you trust.",
+        "Nothing on this desktop logs in to either: Garmin has no personal API, and Strava needs an application of your own."],
+      week: {distance_km: 42.6, hours: 5.4, activities: 4, goal_km: 60},
+      days: [{day: "Mon", km: 0}, {day: "Tue", km: 8.2}, {day: "Wed", km: 0}, {day: "Thu", km: 12.4}, {day: "Fri", km: 0}, {day: "Sat", km: 22.0}, {day: "Sun", km: 0}],
+      body: {resting_hr: 52, sleep_hours: 7.1, steps: 8420},
+      recent: [{name: "Saturday long ride", kind: "ride", km: 22.0, minutes: 58}, {name: "Lunch run", kind: "run", km: 12.4, minutes: 61}, {name: "Evening run", kind: "run", km: 8.2, minutes: 42}]}'
+    ;;
+  finance)
+    jq -cn '{connected: false, how: [
+        "Keep a file ~/.local/state/desktop/dashboard/finance.json in the shape shown here -- from an export of your own.",
+        "Nothing on this desktop logs in to a bank, and nothing here should."],
+      currency: "€",
+      month: {spent: 1840, budget: 2400, income: 3900},
+      balance: [12100, 12480, 11920, 12350, 12890, 13240, 13010, 13620],
+      categories: [{name: "Housing", amount: 920}, {name: "Groceries", amount: 410}, {name: "Transport", amount: 180}, {name: "Subscriptions", amount: 96}, {name: "Other", amount: 234}],
+      upcoming: [{name: "Energy", amount: 145, in_days: 3}, {name: "Insurance", amount: 212, in_days: 9}]}'
+    ;;
+  watch)
+    jq -cn '{connected: false, how: ["The list is read from the network; it could not be reached."], items: [], behind: 0, total: 0}'
+    ;;
+  news)
+    jq -cn '{connected: false, how: ["None of the news sites could be reached."], feeds: []}'
+    ;;
+  *) die "no tab called $1" ;;
+  esac
+}
+
+tab=${1:-}
+[[ ${2:-} == --sample ]] && { sample "$tab"; exit; }
+case "$tab" in
+start) desktop-brief --json | jq -c '. + {connected: true}' ;;
+watch) cmd_watch ;;
+infra) cmd_infra ;;
+home) cmd_home ;;
+health) from_file health ;;
+finance) from_file finance ;;
+news) cmd_news ;;
+tabs) printf '%s\n' start home infra health finance watch news ;;
+*) die "usage: desktop-dash <start|home|infra|health|finance|watch|news> [--json|--sample]" ;;
+esac

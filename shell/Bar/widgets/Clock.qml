@@ -34,8 +34,61 @@ BarItem {
     onTriggered: root.now = new Date()
   }
 
-  IconLabel {
-    text: Qt.formatDateTime(root.now, root.format)
-    color: Color.barText
+  // "pill": true sets the clock on a plate of its own, the way the workspaces are, which
+  // is what makes it the middle of the bar rather than one more item in a row: what you
+  // switch on sits to its left, what is asking for you to its right.
+  readonly property bool pill: !!(widgetConfig && widgetConfig.pill)
+  // "seconds": true draws the minute going by as a line along the bottom of the plate.
+  // The time is shown to the minute; this is the part of it that moves, without a digit
+  // changing every second in the corner of the eye.
+  readonly property bool seconds: pill && !!(widgetConfig && widgetConfig.seconds)
+
+  Item {
+    implicitWidth: label.implicitWidth + (root.pill ? Style.barWorkspacePaddingH * 2 : 0)
+    implicitHeight: root.pill ? Math.max(label.implicitHeight, root.height - Style.barWorkspaceInsetV * 2) : label.implicitHeight
+
+    Rectangle {
+      id: plate
+
+      visible: root.pill
+      anchors.fill: parent
+      radius: Style.barWorkspaceRadius
+      color: Color.barWorkspaceBackground
+
+      Rectangle {
+        id: passing
+
+        readonly property int second: root.now.getSeconds()
+
+        visible: root.seconds
+        anchors.left: parent.left
+        anchors.leftMargin: Style.barWorkspacePaddingH
+        anchors.bottom: parent.bottom
+        height: Style.barWorkspaceIndicatorHeight
+        radius: height / 2
+        width: Math.round((parent.width - Style.barWorkspacePaddingH * 2) * second / 59)
+        color: Color.barActiveWorkspace
+        opacity: 0.7
+
+        // It glides from one second to the next, and jumps back at the top of the
+        // minute: a line running backwards across the plate would be the one second in
+        // sixty that draws the eye.
+        Behavior on width {
+          enabled: passing.second !== 0
+
+          NumberAnimation {
+            duration: 1000
+          }
+        }
+      }
+    }
+
+    IconLabel {
+      id: label
+
+      anchors.centerIn: parent
+      text: Qt.formatDateTime(root.now, root.format)
+      color: Color.barText
+    }
   }
 }

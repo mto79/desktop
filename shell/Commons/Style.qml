@@ -30,6 +30,9 @@ QtObject {
   // sectionSpacing, which sizes gaps inside popups: this one only has to beat
   // itemPaddingH by enough that the eye reads a break, and 8 did not.
   property int barGroupSpacing: 14
+  // The network drawn in place of a module's glyph -- see CommandWidget's "orb". Larger
+  // than iconSize because it is a picture with parts, not a glyph, and needs the room.
+  property int barOrbSize: 22
   property int radius: 8
   // The bar's hover highlight only. Its own token because `radius` is the shell-wide
   // corner for panels, toasts and the launcher, and a hover pill a few pixels tall
@@ -92,6 +95,19 @@ QtObject {
   property int overviewMargin: 64
   property int overviewSpacing: 28
   property int overviewLabelHeight: 30
+
+  // The dashboard on workspace 6: the space round the page, and the clock at its head.
+  property int dashboardMargin: 48
+  property int dashboardClockSize: 76
+  // The dashboard's own copy of the thing that moves while the desktop listens or speaks:
+  // the same drawing as the corner card's, large enough to be the first thing seen.
+  property int dashboardOrbSize: 116
+
+  // The card that shows while the desktop is speaking: how wide, how far from the corner,
+  // and the size of the thing that moves in it.
+  property int voiceWidth: 340
+  property int voiceMargin: 20
+  property int voiceOrbSize: 34
 
   // The power menu's tiles, and the glyph in the middle of each.
   property int powerTileSize: 136

@@ -13,6 +13,7 @@
 #   3  widest            terminal
 #   4  laptop            password manager
 #   5  portrait laptop   notes
+#   6  laptop            the dashboard, where the day starts
 #
 # The connectors behind those kinds differ at every desk (DP-6 at work, DP-7 at home,
 # only the panel on the road), which is why this is computed rather than configured.
@@ -42,6 +43,7 @@ PINS=(
   "3 widest"
   "4 laptop"
   "5 portrait laptop"
+  "6 laptop"
 )
 
 # Odd transforms are the 90/270 rotations, which trade a screen's width for its height.

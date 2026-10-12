@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+
+# desktop-say: say a line out loud, for the things worth hearing about without looking.
+#
+#   desktop-say "idrac-security is waiting"   # speak it, after whatever is being said
+#   desktop-say --hush                        # stop talking now, and drop what was queued
+#   desktop-say --toggle | --mute | --unmute  # the switch; --status says on or off
+#   desktop-say --setup                       # install the voice (once; no sudo)
+#   desktop-say --voices                      # the voices there are, and which one is in use
+#   desktop-say --voice en_GB-alba-medium     # use that one, fetching it first if need be
+#   desktop-say --test                        # hear it
+#
+# A notification is seen by whoever is looking at the screen. An agent that has been
+# waiting for an answer for ten minutes is exactly the thing that happens while you are
+# not: at the other monitor, on the phone, making coffee. So desktop-agent-state says it
+# as well as showing it -- one short line, which project and what about.
+#
+# It stays quiet whenever speaking would be the wrong thing: when it is switched off,
+# when do-not-disturb is on, and whenever a microphone is being listened to, which is a
+# call or a dictation -- nobody on the other end of either wants to hear it. Starting a
+# dictation also cuts off whatever is being said (desktop-dictate runs --hush).
+#
+# Lines are said one at a time, in the order they came, and a line that has waited too
+# long for its turn is dropped: "desktop is waiting" two minutes late is not news, and
+# may no longer be true.
+#
+# The voice is Piper's, a neural one that runs on this machine: what is spoken is the
+# names of your projects and what you asked an agent to do, and that is not something to
+# send to a text-to-speech service. Until --setup has been run it falls back to
+# espeak-ng, which is already installed and sounds like 1998.
+
+set -uo pipefail
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/say"
+RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/say"
+DATA_DIR="${DESKTOP_SAY_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/desktop-say}"
+DICTIONARY="${DESKTOP_SAY_DICTIONARY:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/say.dict}"
+
+# One exact version of the engine, and each voice by its checksum: all of it is
+# downloaded, and a download is only what was asked for if it can be checked.
+PIPER_VERSION="1.8.0"
+VOICE_URL="https://huggingface.co/rhasspy/piper-voices/resolve/main"
+
+# The voices on offer: name | what to call it | where it is | megabytes | sha256 of the
+# model | sha256 of its settings. A handful rather than the hundred Piper has -- enough to
+# find one you can stand hearing twenty times a day. The Dutch one is there for subjects
+# written in Dutch, which an English voice reads as an Englishman would.
+VOICES=(
+  "en_GB-alan-medium|Alan · British|en/en_GB/alan/medium|63|0a309668932205e762801f1efc2736cd4b0120329622adf62be09e56339d3330|c0f0d124e5895c00e7c03b35dcc8287f319a6998a365b182deb5c8e752ee8c1e"
+  "en_GB-alba-medium|Alba · Scottish|en/en_GB/alba/medium|63|401369c4a81d09fdd86c32c5c864440811dbdcc66466cde2d64f7133a66ad03b|aa965a2f02ecced632c2694e1fc72bbff6d65f265fab567ca945918c73dd89f4"
+  "en_US-amy-medium|Amy · American|en/en_US/amy/medium|63|b3a6e47b57b8c7fbe6a0ce2518161a50f59a9cdd8a50835c02cb02bdd6206c18|95a23eb4d42909d38df73bb9ac7f45f597dbfcde2d1bf9526fdeaf5466977d77"
+  "en_US-ryan-medium|Ryan · American|en/en_US/ryan/medium|63|abf4c274862564ed647ba0d2c47f8ee7c9b717d27bdad9219100eb310db4047a|44034c056cb15681b2ad494307c7f3f2e4499d1253c700c711fa0a4607ffe78d"
+  "nl_NL-mls-medium|MLS · Dutch|nl/nl_NL/mls/medium|77|88312e0fbf505b87caf2373d94c1384892e86b1bf2ee482cf65dc8ba179cc7d3|6ddb215d38f1392ab935ad45441b82ada1eeae0452a2d6849ed71ea4f2e0aa63"
+)
+DEFAULT_VOICE="en_GB-alan-medium"
+
+voice_entry() { # name -> its line in VOICES
+  local entry
+  for entry in "${VOICES[@]}"; do
+    [[ ${entry%%|*} == "$1" ]] && { echo "$entry"; return 0; }
+  done
+  return 1
+}
+
+# The voice chosen, when it is one of those above; otherwise the default. A name that is
+# no longer on the list -- a voice dropped from it since -- must not leave it mute.
+current_voice() {
+  local chosen
+  chosen=$(cat "$STATE_DIR/voice" 2>/dev/null) || chosen=""
+  voice_entry "$chosen" >/dev/null 2>&1 && echo "$chosen" || echo "$DEFAULT_VOICE"
+}
+
+# How long a line may wait for its turn, and how long one may be.
+MAX_WAIT="${DESKTOP_SAY_MAX_WAIT:-20}"
+MAX_LENGTH=220
+
+piper_bin="$DATA_DIR/venv/bin/piper"
+voice_file="$DATA_DIR/$(current_voice).onnx"
+
+die() {
+  echo "desktop-say: $*" >&2
+  exit 1
+}
+
+muted() { [[ -e $STATE_DIR/muted ]]; }
+
+# Somebody is listening to a microphone: a call, a recording, a dictation.
+listening() {
+  [[ -n $(pactl list short source-outputs 2>/dev/null) ]]
+}
+
+quiet() {
+  [[ $(desktop-shell shell isQuiet 2>/dev/null) == on ]]
+}
+
+# How things are written is not how they are said: "ocp204" read as a word is a sneeze.
+# One rule a line, "pattern<TAB>how to say it", applied to the text before it is spoken;
+# the pattern is an extended regular expression, matched whatever the case.
+pronounce() {
+  local text=$1 pattern spoken script=()
+  if [[ -r $DICTIONARY ]]; then
+    while IFS=$'\t' read -r pattern spoken; do
+      [[ -z $pattern || $pattern == '#'* ]] && continue
+      # | is the one character a pattern or its replacement is least likely to need.
+      script+=(-e "s|$pattern|$spoken|gI")
+    done <"$DICTIONARY"
+  fi
+  if ((${#script[@]} > 0)); then
+    text=$(sed -E "${script[@]}" <<<"$text" 2>/dev/null) || text=$1
+  fi
+  # What is left of the punctuation of paths and names is read as a pause, not spelled out.
+  # A hyphen in a name is a space when spoken: "idrac-security" is two words.
+  text=$(sed -E 's/[_/·]+/, /g; s/([[:alnum:]])-([[:alnum:]])/\1 \2/g; s/[“”"`*<>|\\]//g; s/[[:space:]]+/ /g; s/ ,/,/g; s/^ //; s/ $//' <<<"$text")
+  printf '%s' "${text:0:MAX_LENGTH}"
+}
+
+synthesise() { # text file
+  if [[ -x $piper_bin && -s $voice_file ]]; then
+    "$piper_bin" -m "$voice_file" -f "$2" <<<"$1" >/dev/null 2>&1 && [[ -s $2 ]] && return 0
+  fi
+  command -v espeak-ng >/dev/null 2>&1 || return 1
+  espeak-ng -v en-gb -s 165 -w "$2" -- "$1" 2>/dev/null
+}
+
+play() { # file
+  local player
+  for player in pw-play paplay aplay; do
+    command -v "$player" >/dev/null 2>&1 || continue
+    "$player" "$1" >/dev/null 2>&1 &
+    echo $! >"$RUN_DIR/playing"
+    wait $!
+    rm -f "$RUN_DIR/playing"
+    return 0
+  done
+  return 1
+}
+
+# What is being said, for the shell to show while it is: a small file that exists for as
+# long as there is something to show. "preparing" while the voice is worked out, which is
+# a few seconds of nothing audible, then "speaking". Written beside itself and renamed, so
+# the shell never reads half of it; removed whichever way this ends.
+showing() { # state text
+  jq -cn --arg state "$1" --arg text "$2" '{state: $state, text: $text}' >"$RUN_DIR/now.part" 2>/dev/null &&
+    mv -f "$RUN_DIR/now.part" "$RUN_DIR/now" 2>/dev/null
+}
+
+cmd_say() {
+  local text wav asked written="$*"
+  text=$(pronounce "$*")
+  [[ -n $text ]] || return 0
+  muted && return 0
+  listening && return 0
+  quiet && return 0
+
+  mkdir -p "$RUN_DIR" || return 0
+  asked=$(date +%s%N)
+  # One at a time. Whoever cannot have the floor within MAX_WAIT has nothing left worth
+  # saying.
+  exec 9>"$RUN_DIR/lock"
+  flock -w "$MAX_WAIT" 9 || return 0
+  # Told to be quiet while waiting in line: that was meant for this too.
+  if [[ -e $RUN_DIR/hushed ]] && (($(cat "$RUN_DIR/hushed" 2>/dev/null || echo 0) >= asked)); then
+    return 0
+  fi
+  # The reasons to stay quiet can have arrived while waiting.
+  muted && return 0
+  listening && return 0
+
+  wav=$(mktemp "$RUN_DIR/line.XXXXXX.wav") || return 0
+  # The paths are written into the trap now: by the time it runs, this function's own
+  # variables are gone.
+  # shellcheck disable=SC2064
+  trap "rm -f '$RUN_DIR/now' '$RUN_DIR/now.part' '$wav'" EXIT
+  # As it was written, not as it is pronounced: "O C P 2 oh 4" is for the ear.
+  showing preparing "$written"
+  if synthesise "$text" "$wav"; then
+    showing speaking "$written"
+    play "$wav"
+  fi
+  rm -f "$RUN_DIR/now" "$wav"
+}
+
+cmd_hush() {
+  local pid
+  mkdir -p "$RUN_DIR" 2>/dev/null || return 0
+  date +%s%N >"$RUN_DIR/hushed"
+  rm -f "$RUN_DIR/now"
+  pid=$(cat "$RUN_DIR/playing" 2>/dev/null) || pid=""
+  [[ $pid =~ ^[0-9]+$ ]] && kill "$pid" 2>/dev/null
+  return 0
+}
+
+cmd_mute() {
+  mkdir -p "$STATE_DIR" && touch "$STATE_DIR/muted"
+  cmd_hush
+}
+
+cmd_unmute() { rm -f "$STATE_DIR/muted"; }
+
+cmd_status() {
+  local engine=espeak-ng
+  [[ -x $piper_bin && -s $voice_file ]] && engine=piper
+  if [[ ${1:-} == --json ]]; then
+    printf '{"speaking": %s, "engine": "%s", "voice": "%s"}\n' "$(muted && echo false || echo true)" "$engine" "$(current_voice)"
+  else
+    muted && echo off || echo on
+  fi
+}
+
+# A voice is two files, each checked against what the list above says it should be before
+# it is given its name. Fetched once; a voice already there and intact is left alone.
+fetch_voice() { # name
+  local entry name label path size model_sum json_sum file sum
+  entry=$(voice_entry "$1") || { echo "desktop-say: no voice called $1" >&2; return 1; }
+  IFS='|' read -r name label path size model_sum json_sum <<<"$entry"
+  mkdir -p "$DATA_DIR" || return 1
+  for file in "$name.onnx:$model_sum" "$name.onnx.json:$json_sum"; do
+    sum=${file#*:} file=${file%%:*}
+    if [[ -s $DATA_DIR/$file ]] && echo "$sum  $DATA_DIR/$file" | sha256sum --check --quiet 2>/dev/null; then
+      continue
+    fi
+    echo "Downloading $label ($file)"
+    curl -fsSL --max-time 900 -o "$DATA_DIR/$file.part" "$VOICE_URL/$path/$file" ||
+      { echo "desktop-say: could not download $file" >&2; return 1; }
+    echo "$sum  $DATA_DIR/$file.part" | sha256sum --check --quiet || {
+      rm -f "$DATA_DIR/$file.part"
+      echo "desktop-say: $file does not match its checksum; not installed" >&2
+      return 1
+    }
+    mv "$DATA_DIR/$file.part" "$DATA_DIR/$file"
+  done
+}
+
+cmd_voices() {
+  local entry name label path size rest current
+  current=$(current_voice)
+  for entry in "${VOICES[@]}"; do
+    IFS='|' read -r name label path size rest <<<"$entry"
+    jq -cn --arg name "$name" --arg label "$label" --argjson size "$size" \
+      --argjson installed "$([[ -s $DATA_DIR/$name.onnx ]] && echo true || echo false)" \
+      --argjson current "$([[ $name == "$current" ]] && echo true || echo false)" \
+      '{name: $name, label: $label, megabytes: $size, installed: $installed, current: $current}'
+  done | if [[ ${1:-} == --json ]]; then jq -cs '{voices: .}'; else
+    jq -r '"\(if .current then "*" else " " end) \(.name)  \(.label)\(if .installed then "" else "  (\(.megabytes) MB to download)" end)"'
+  fi
+}
+
+# Chosen, fetched if it is not here yet, and heard: a voice is picked by ear.
+cmd_voice() {
+  local entry label
+  entry=$(voice_entry "${1:-}") || die "no voice called ${1:-}; desktop-say --voices lists them"
+  fetch_voice "$1" || exit 1
+  mkdir -p "$STATE_DIR" && echo "$1" >"$STATE_DIR/voice"
+  voice_file="$DATA_DIR/$1.onnx"
+  IFS='|' read -r _ label _ <<<"$entry"
+  cmd_say "This is ${label%% ·*}. An agent that needs you will sound like this."
+}
+
+# No sudo: a Python environment of its own under the user's data directory, and the voice
+# beside it. Safe to run again -- it only does what is not done.
+cmd_setup() {
+  local file sum
+  command -v python3 >/dev/null 2>&1 || die "python3 is needed for the voice"
+  mkdir -p "$DATA_DIR" || die "cannot write $DATA_DIR"
+
+  if [[ ! -x $piper_bin || $("$DATA_DIR/venv/bin/pip" show piper-tts 2>/dev/null | sed -n 's/^Version: //p') != "$PIPER_VERSION" ]]; then
+    echo "Installing the Piper speech engine $PIPER_VERSION"
+    python3 -m venv "$DATA_DIR/venv" || die "could not make a Python environment"
+    # Wheels only: nothing here should be compiling, or running a setup script, to install.
+    "$DATA_DIR/venv/bin/pip" install --quiet --only-binary :all: "piper-tts==$PIPER_VERSION" ||
+      die "could not install piper-tts"
+  fi
+
+  fetch_voice "$(current_voice)" || exit 1
+  echo "The voice is ready. desktop-say --test"
+}
+
+case "${1:-}" in
+--hush) cmd_hush ;;
+--mute) cmd_mute ;;
+--unmute) cmd_unmute ;;
+--toggle) if muted; then cmd_unmute; else cmd_mute; fi; cmd_status ;;
+--status) shift; cmd_status "${1:-}" ;;
+--setup) cmd_setup ;;
+--voices) shift; cmd_voices "${1:-}" ;;
+--voice) shift; cmd_voice "${1:-}" ;;
+--test) cmd_say "This is how an agent that needs you will sound." ;;
+--pronounce) shift; pronounce "$*"; echo ;;
+"" | -h | --help) sed -n '3,11p' "$0" | sed 's/^# \{0,1\}//' ;;
+-*) die "unknown option $1" ;;
+*) cmd_say "$@" ;;
+esac

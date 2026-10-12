@@ -1,0 +1,612 @@
+#!/usr/bin/env bash
+
+# desktop-voice: say what you want the desktop to do.
+#
+#   desktop-voice toggle        # SUPER + C: listen, and act when you stop talking
+#   desktop-voice run "text"    # act on a sentence as if it had been said
+#   desktop-voice list          # what it understands
+#
+# Dictation types what you say. This does what you say, from a list: "workspace three",
+# "lock the screen", "k9s on ocp204", "what is waiting", "tell desktop to run the tests".
+#
+# A list, on purpose. Speech is misheard, and what is done with a misheard sentence
+# decides how bad that is. Here it can only ever become one of the things below or
+# nothing at all: there is no path from what was heard to a shell. The things that cannot
+# be undone -- restart, shut down, log out -- are not on the list; they stay on SUPER +
+# ESCAPE, which asks twice. And what is said *to an agent* is typed into its prompt and
+# left there for you to read and send: an agent acts on what it is told, with your
+# permissions, and "run the tests" heard as something else should cost a glance, not a
+# repository.
+#
+# A key of its own rather than a word spoken into the dictation key, so that what is said
+# to it is never typed. The recording and the transcription are the dictation daemon's:
+# it is asked to write what it hears to a file this once (voxtype record start --file).
+# That is what makes an answer take a second and not four -- the daemon has the model
+# loaded already, where transcribing a recording from the command line loads it afresh
+# every time. Only when the daemon is not running is that slower way used.
+
+set -uo pipefail
+
+RUN_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/voice"
+SAY_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/say"
+MAX_SECONDS="${DESKTOP_VOICE_MAX_SECONDS:-8}"
+# The model asked what a sentence means when the list below does not know it. "off" for
+# none. Small on purpose: it has to fit on the graphics card beside the recogniser.
+MODEL="${DESKTOP_VOICE_MODEL:-qwen2.5:3b}"
+OLLAMA="${DESKTOP_VOICE_OLLAMA:-http://127.0.0.1:11434}"
+
+# The card desktop-say shows while it speaks is the natural place to say "listening" and
+# then what was understood. The same file, the same shape.
+show() { # state text [seconds to leave it]
+  mkdir -p "$SAY_DIR" 2>/dev/null || return 0
+  jq -cn --arg state "$1" --arg text "$2" '{state: $state, text: $text}' >"$SAY_DIR/now.part" 2>/dev/null &&
+    mv -f "$SAY_DIR/now.part" "$SAY_DIR/now"
+  if [[ -n ${3:-} ]]; then
+    (sleep "$3"; [[ $(jq -r .text "$SAY_DIR/now" 2>/dev/null) == "$2" ]] && rm -f "$SAY_DIR/now") >/dev/null 2>&1 &
+    disown 2>/dev/null
+  fi
+}
+
+# What happened, where it can be seen for a moment.
+did() { show speaking "$1" 3; }
+could_not() { show preparing "$1" 4; }
+
+shell_call() { desktop-shell shell "$@" >/dev/null 2>&1; }
+terminal() { setsid -f uwsm app -- ghostty -e "$@" >/dev/null 2>&1; }
+
+# What was heard, made comparable: lower case, no punctuation, numbers as digits, and a
+# cluster's name back in one piece -- it is heard as "OCP 204" or "o c p two oh four".
+normalise() {
+  local text
+  text=$(tr '[:upper:]' '[:lower:]' <<<"$1" | sed -E "s/[.,!?;:\"“”]+/ /g; s/[’']//g")
+  text=$(sed -E '
+    s/\bzero\b/0/g; s/\bone\b/1/g; s/\btwo\b/2/g; s/\bthree\b/3/g; s/\bfour\b/4/g; s/\bfive\b/5/g
+    s/\bsix\b/6/g; s/\bseven\b/7/g; s/\beight\b/8/g; s/\bnine\b/9/g; s/\bten\b/10/g; s/\boh\b/0/g
+    s/\bo ?c ?p ?([0-9]) ?([0-9]) ?([0-9])\b/ocp\1\2\3/g
+    s/[[:space:]]+/ /g; s/^ //; s/ $//' <<<"$text")
+  printf '%s' "$text"
+}
+
+# The window whose class or title has every word asked for, most recently used first.
+window_named() { # words...
+  hyprctl clients -j 2>/dev/null | jq -r --arg want "$*" '
+    ($want | ascii_downcase | split(" ") | map(select(. != ""))) as $words
+    | [.[] | select(.mapped != false)
+        | select(((.class + " " + .title) | ascii_downcase) as $text | all($words[]; . as $w | $text | contains($w)))]
+    | sort_by(.focusHistoryID) | first | .address // empty'
+}
+
+# The agent working on a project, by as much of its name as was said.
+agent_for() { # words... -> "pane<TAB>socket<TAB>project<TAB>target"
+  desktop-agent-sessions --json 2>/dev/null | jq -r --arg want "$*" '
+    ($want | ascii_downcase | gsub("[^a-z0-9]+"; " ") | split(" ") | map(select(. != ""))) as $words
+    | [.sessions[]? | select((.pane // "") != "")
+        | select((.project | ascii_downcase | gsub("[^a-z0-9]+"; " ")) as $name | all($words[]; . as $w | $name | contains($w)))]
+    | first | select(.) | [.pane, (.socket // ""), .project, (.target // "")] | @tsv'
+}
+
+# The agent in front of you: the one in the AI column of the tmux window you are in, or
+# failing that the one whose tab you looked at last. What "it" means in "tell it to ...".
+agent_here() { # -> "pane<TAB>socket<TAB>project<TAB>target"
+  local group session
+  group=$(tmux list-panes -F '#{@ai_column}' 2>/dev/null | grep -m1 .)
+  session=$(tmux list-clients -F '#{client_session}' 2>/dev/null | awk -v g="ai-$group-" 'g != "ai--" && index($0, g) == 1 { print; exit }')
+  desktop-agent-sessions --json 2>/dev/null | jq -r --arg session "$session" '
+    [.sessions[]? | select((.pane // "") != "")] as $all
+    | ([$all[] | select($session != "" and ((.target // "") | startswith($session + ":")))] | first)
+      // ($all | sort_by(.since) | last)
+    | select(.) | [.pane, (.socket // ""), .project, (.target // "")] | @tsv'
+}
+
+tell_agent() { # project words, then what to tell it
+  local who=$1 what=$2 pane socket project target
+  # "it", "this one", "the agent": the one in front of you, not one called "it".
+  if [[ $who =~ ^(it|him|her|this|this one|that|the agent|this agent|claude)$ ]]; then
+    IFS=$'\t' read -r pane socket project target < <(agent_here)
+    who="the agent here"
+  else
+    IFS=$'\t' read -r pane socket project target < <(agent_for "$who")
+  fi
+  if [[ -z ${pane:-} ]]; then
+    could_not "No agent is working on “$who”"
+    return 1
+  fi
+  # Typed, not sent. Enter is yours: it is the look at what was actually heard.
+  tmux ${socket:+-S "$socket"} send-keys -t "$pane" -l -- "$what" 2>/dev/null || {
+    could_not "Could not reach the agent on $project"
+    return 1
+  }
+  [[ -n $target ]] && setsid -f desktop-menu-agents --jump "$target" "$socket" >/dev/null 2>&1
+  did "For $project, press Enter to send: $what"
+}
+
+# The patterns have spaces in them, which a bare regular expression inside [[ ]] cannot:
+# each is a quoted string handed to this. What matched is in BASH_REMATCH afterwards.
+is() { [[ $said =~ $1 ]]; }
+
+# What was done last, so that "again" has something to mean. Only things that can be done
+# twice without thinking: not a message to an agent, and nothing that was refused.
+remember() { mkdir -p "$RUN_DIR" 2>/dev/null && printf '%s\n' "$1" >"$RUN_DIR/last"; }
+
+# The first of the things that are waiting, said and gone to.
+go_to_waiting() {
+  local target socket project
+  IFS=$'\t' read -r target socket project < <(desktop-agent-sessions --json 2>/dev/null |
+    jq -r '[.sessions[]? | select(.state == "waiting" and (.target // "") != "")] | first | select(.) | [.target, (.socket // ""), .project] | @tsv')
+  if [[ -z ${target:-} ]]; then
+    did "No agent is waiting"
+    return 0
+  fi
+  setsid -f desktop-menu-agents --jump "$target" "$socket" >/dev/null 2>&1
+  did "$project is waiting"
+}
+
+# A few headlines, read out. From what the dashboard already fetched: this asks nobody.
+headlines() { # words naming a site or a heading, or nothing
+  local want=$1 lines
+  lines=$(desktop-dash news --json 2>/dev/null | jq -r --arg want "$want" '
+    ($want | ascii_downcase) as $w
+    | ([.feeds[]? | select(.ok)]) as $feeds
+    | ([$feeds[] | select($w != "" and ((.name | ascii_downcase | contains($w)) or (.category == $w)))] | first) // $feeds[0]
+    | select(.) | "\(.name). " + ([.items[0:3][].title] | join(". ")) + "."')
+  if [[ -z $lines ]]; then
+    could_not "There are no headlines to read"
+    return 1
+  fi
+  show speaking "$lines" 12
+  desktop-say "$lines"
+}
+
+# A sentence the list does not know, put to a small model running on this machine -- and
+# what comes back is not done. It is one name out of a fixed set and a word or two to go
+# with it, and from those a sentence is made here that the list *does* know, which then
+# goes through the list like anything said. So the model widens what can be said and
+# nothing else: it cannot add an action, it cannot reach a shell, and what is refused when
+# said plainly is refused when it is the model that says it. Two things are kept from it
+# altogether: a message to an agent, whose words must be yours and not a paraphrase, and
+# emptying the notification centre, which cannot be undone and should not be guessed at.
+#
+# It is told what is in front of you, so that "the other screen" or "that cluster" has
+# something to mean: the focused window, the workspace, the agents running, what was
+# done last.
+understand() { # the sentence -> a sentence the list knows, or nothing
+  [[ $MODEL != off ]] && command -v curl >/dev/null 2>&1 || return 1
+  local heard=$1 window workspace agents last request answer action arg
+  window=$(hyprctl activewindow -j 2>/dev/null | jq -r '"\(.class // "") - \(.title // "")"' 2>/dev/null | cut -c1-80)
+  workspace=$(hyprctl activeworkspace -j 2>/dev/null | jq -r '.id // empty' 2>/dev/null)
+  agents=$(desktop-agent-sessions --json 2>/dev/null | jq -r '[.sessions[]? | "\(.project) (\(.state))"] | unique | join(", ")' 2>/dev/null)
+  last=$(cat "$RUN_DIR/last" 2>/dev/null)
+
+  request=$(jq -cn --arg model "$MODEL" --arg heard "$heard" --arg window "$window" --arg workspace "$workspace" \
+    --arg agents "$agents" --arg last "$last" '{
+      model: $model, stream: false, keep_alive: "10m",
+      options: {temperature: 0, num_predict: 48},
+      format: {type: "object", required: ["action", "arg"], properties: {arg: {type: "string"}, action: {type: "string", enum: [
+        "workspace", "dashboard", "lock", "overview", "launcher", "notifications", "do_not_disturb", "brief", "time",
+        "louder", "quieter", "mute", "hush", "voice_off", "voice_on", "screenshot", "focus", "shell", "k9s", "argo",
+        "waiting_agent", "start_task", "finish_task", "news", "headlines", "clusters", "behind", "voice", "none"]}}},
+      messages: [
+        {role: "system", content: ("You turn one spoken sentence, in English or Dutch, into one action for a Linux desktop. Speech recognition makes mistakes; go by what was most likely meant. Answer with JSON: an action and its arg (\"\" when it takes none). When nothing fits, or it asks to restart, shut down, log out, delete or run a command, the action is none.\n\nActions:\n"
+          + "workspace: go to a workspace; arg is its number 1-10\n"
+          + "dashboard: show the dashboard; arg is one of start, domotics, infrastructure, health, finance, watching, news, or empty\n"
+          + "lock: lock the screen\noverview: show all windows and workspaces\nlauncher: open the application launcher\n"
+          + "notifications: show the notifications\ndo_not_disturb: toggle do not disturb\n"
+          + "brief: say what is waiting or needs attention\ntime: say the time\n"
+          + "louder / quieter / mute: the sound volume\nhush: stop talking now\nvoice_off / voice_on: turn the spoken voice off or on\n"
+          + "screenshot: take a screenshot\nfocus: switch to an open application window; arg is its name, e.g. firefox\n"
+          + "shell / k9s / argo: open a shell, k9s, or Argo CD on an OpenShift cluster; arg is the cluster like ocp204\n"
+          + "waiting_agent: go to the coding agent that is waiting\n"
+          + "start_task: start a new coding task; arg is its name\nfinish_task: finish the current coding task\n"
+          + "news: show news; arg is tech or world\nheadlines: read headlines aloud; arg is a site or tech or world, or empty\n"
+          + "clusters: say which clusters are in trouble\nbehind: say which software has a newer version\n"
+          + "voice: change the speaking voice; arg is the voice name\nnone: anything else, including questions about the world\n\n"
+          + "Examples:\n"
+          + "switch over to the second desktop -> {\"action\":\"workspace\",\"arg\":\"2\"}\n"
+          + "show me my bank balance -> {\"action\":\"dashboard\",\"arg\":\"finance\"}\n"
+          + "how did I sleep -> {\"action\":\"dashboard\",\"arg\":\"health\"}\n"
+          + "turn it down a little -> {\"action\":\"quieter\",\"arg\":\"\"}\n"
+          + "that is enough talking -> {\"action\":\"hush\",\"arg\":\"\"}\n"
+          + "does anybody need me -> {\"action\":\"brief\",\"arg\":\"\"}\n"
+          + "take me to the agent that wants an answer -> {\"action\":\"waiting_agent\",\"arg\":\"\"}\n"
+          + "k nines on o c p one oh one -> {\"action\":\"k9s\",\"arg\":\"ocp101\"}\n"
+          + "let us start fixing the broken tests -> {\"action\":\"start_task\",\"arg\":\"broken tests\"}\n"
+          + "this task is finished -> {\"action\":\"finish_task\",\"arg\":\"\"}\n"
+          + "zet het geluid harder -> {\"action\":\"louder\",\"arg\":\"\"}\n"
+          + "who won the world cup -> {\"action\":\"none\",\"arg\":\"\"}")},
+        {role: "user", content: ("Focused window: \($window)\nWorkspace: \($workspace)\nCoding agents: \($agents)\nLast command: \($last)\n\nSentence: \($heard)")}
+      ]}')
+  answer=$(curl -sf --max-time "${DESKTOP_VOICE_MODEL_SECONDS:-8}" "$OLLAMA/api/chat" -d "$request" 2>/dev/null | jq -r '.message.content // empty' 2>/dev/null) || return 1
+  action=$(jq -r '.action // "none"' <<<"$answer" 2>/dev/null)
+  # Whatever came back as the arg is only ever letters, digits, spaces and dashes.
+  arg=$(jq -r '.arg // ""' <<<"$answer" 2>/dev/null | tr '[:upper:]_' '[:lower:] ' | tr -cd 'a-z0-9 -' | cut -c1-60 | sed -E 's/^ +//; s/ +$//')
+
+  case $action in
+  workspace) [[ $arg =~ ^[0-9]+$ ]] && echo "workspace $arg" ;;
+  dashboard) [[ $arg =~ ^(start|domotics|infrastructure|health|finance|watching|news)$ ]] && echo "dashboard $arg" || echo "dashboard" ;;
+  lock) echo "lock the screen" ;;
+  overview) echo "overview" ;;
+  launcher) echo "launcher" ;;
+  notifications) echo "notifications" ;;
+  do_not_disturb) echo "do not disturb" ;;
+  brief) echo "status" ;;
+  time) echo "what time is it" ;;
+  louder | quieter | mute | hush) echo "$action" ;;
+  voice_off) echo "voice off" ;;
+  voice_on) echo "voice on" ;;
+  screenshot) echo "screenshot" ;;
+  focus) [[ -n $arg ]] && echo "go to $arg" ;;
+  shell | k9s | argo) [[ ${arg// /} =~ ^ocp[0-9]{3}$ ]] && echo "$action on ${arg// /}" ;;
+  waiting_agent) echo "go to the waiting agent" ;;
+  start_task) [[ -n $arg ]] && echo "start a task called $arg" ;;
+  finish_task) echo "finish the task" ;;
+  news) [[ $arg =~ ^(tech|world)$ ]] && echo "$arg news" ;;
+  headlines) echo "read the ${arg:+$arg }headlines" ;;
+  clusters) echo "cluster status" ;;
+  behind) echo "what is behind" ;;
+  voice) [[ -n $arg ]] && echo "use voice $arg" ;;
+  esac
+}
+
+# The model, loaded while you are still talking. It leaves the graphics card ten minutes
+# after it was last wanted, and loading it again takes a few seconds -- which is about as
+# long as a sentence. Asked for nothing; only to be there.
+warm_model() {
+  [[ $MODEL != off ]] && command -v curl >/dev/null 2>&1 || return 0
+  (curl -sf --max-time 30 "$OLLAMA/api/generate" -d "$(jq -cn --arg model "$MODEL" '{model: $model, keep_alive: "10m"}')" >/dev/null 2>&1 &)
+}
+
+# The list did not know it: the model is asked once, and its answer goes through the list.
+second_try() { # what was heard, and what to say if this comes to nothing
+  local heard=$1 otherwise=$2 meant
+  if [[ -z ${ASKED_MODEL:-} && $MODEL != off ]]; then
+    show preparing "…"
+    meant=$(understand "$heard")
+    if [[ -n $meant ]]; then
+      ASKED_MODEL=1 interpret "$meant"
+      return
+    fi
+  fi
+  could_not "$otherwise"
+  return 1
+}
+
+interpret() { # the sentence
+  local said heard cluster number
+  heard=$1
+  said=$(normalise "$1")
+
+  # "Again": whatever was done last, done once more.
+  if [[ $said =~ ^(again|repeat|repeat that|do that again|once more|same again)$ ]]; then
+    if [[ -s $RUN_DIR/last ]]; then
+      heard=$(cat "$RUN_DIR/last")
+      said=$(normalise "$heard")
+    else
+      could_not "There is nothing to do again"
+      return 1
+    fi
+  fi
+  [[ -n $said ]] || {
+    could_not "Nothing was heard"
+    return 1
+  }
+
+  # Not from here, however clearly it was said.
+  if is '(reboot|restart the|shut ?down|power ?off|log ?out|sign ?out|suspend|hibernate)'; then
+    could_not "That one needs the keyboard: Super + Escape"
+    return 1
+  fi
+
+  # To an agent. First, because what follows "tell" is free text and must not be read as
+  # a command of its own -- "tell desktop to lock the door" is not "lock".
+  if is '^(tell|ask) (.+)$'; then
+    # Who is everything up to the first "to" -- "idrac security" is two words -- and
+    # what to tell it is the rest. Taken from what was heard, not from the normalised
+    # text: the capitals and the punctuation of a message are part of it.
+    local rest who what
+    rest=$(sed -E 's/^[[:space:]]*(tell|ask)[[:space:]]+//I' <<<"$heard")
+    if grep -qiE '[[:space:]]to[[:space:]]' <<<"$rest"; then
+      who=$(awk 'BEGIN { IGNORECASE = 1 } { i = match($0, /[[:space:]]to[[:space:]]/); print substr($0, 1, i - 1) }' <<<"$rest")
+      what=$(awk 'BEGIN { IGNORECASE = 1 } { i = match($0, /[[:space:]]to[[:space:]]/); print substr($0, i + RLENGTH) }' <<<"$rest")
+    else
+      who=${rest%% *}
+      what=${rest#* }
+    fi
+    tell_agent "$(normalise "$who")" "$what"
+    return
+  fi
+
+  if is '(workspace|desktop) ([0-9]+)$'; then
+    number=${BASH_REMATCH[2]}
+    hyprctl dispatch workspace "$number" >/dev/null 2>&1 && did "Workspace $number"
+  elif is '(dashboard|show|open)( the)? (start|domotics|home|house|infrastructure|clusters|health|finance|money|watching|versions|news|headlines)( tab| page)?$'; then
+    # A tab of the dashboard, by its subject or the word you would use for it.
+    local subject=${BASH_REMATCH[3]} key
+    case "$subject" in
+    domotics | house) key=home ;; infrastructure | clusters) key=infra ;; money) key=finance ;;
+    watching | versions) key=watch ;; headlines) key=news ;; *) key=$subject ;;
+    esac
+    shell_call dashboardTab "$key"
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Dashboard: $subject"
+  elif is '(dashboard|what needs me)$'; then
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Dashboard"
+  elif is '^lock( the)?( screen| computer| desktop)?$'; then
+    did "Locking"
+    desktop-power lock >/dev/null 2>&1
+  elif is '(overview|show( me)?( all)?( the)? (workspaces|windows))$'; then
+    shell_call toggleOverview && did "Overview"
+  elif is 'launcher$'; then
+    shell_call openLauncher && did "Launcher"
+  elif is '^clear( all)?( the)? notifications?$'; then
+    shell_call clearNotifications && did "Notifications cleared"
+  elif is 'notifications?$'; then
+    shell_call togglePanel notifications && did "Notifications"
+  elif is '(do not disturb|dont disturb|quiet mode)'; then
+    did "Do not disturb: $(desktop-shell shell toggleDoNotDisturb 2>/dev/null)"
+  elif is '^(be quiet|hush|stop talking|shut up|silence)$'; then
+    desktop-say --hush
+  elif is '^(voice off|stop speaking|dont speak)$'; then
+    desktop-say --mute && did "Voice off"
+  elif is '^(voice on|speak again|start speaking)$'; then
+    desktop-say --unmute && did "Voice on"
+  elif is '^(volume|sound) up$|^louder$'; then
+    wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 10%+ 2>/dev/null && did "Louder"
+  elif is '^(volume|sound) down$|^quieter$'; then
+    wpctl set-volume @DEFAULT_AUDIO_SINK@ 10%- 2>/dev/null && did "Quieter"
+  elif is '^(mute|unmute)( the)?( sound| volume)?$'; then
+    wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle 2>/dev/null && did "Sound toggled"
+  elif is '^(go to|show|jump to|take me to)( the)? (waiting|agent that is waiting|waiting agent|one that is waiting)|^who is waiting|^whos waiting'; then
+    go_to_waiting
+  elif is '^(start|new|create|begin)( a)?( new)? task( called| named| for)? (.+)$'; then
+    # In the repository of the tmux pane you are in, as prefix + T does it: a branch, a
+    # worktree, and a tab whose agent works there.
+    local name=${BASH_REMATCH[5]} pane where client
+    pane=$(tmux display-message -p '#{pane_id}' 2>/dev/null)
+    where=$(tmux display-message -p '#{pane_current_path}' 2>/dev/null)
+    client=$(tmux display-message -p '#{client_name}' 2>/dev/null)
+    if [[ -z $pane || -z $where ]]; then
+      could_not "There is no tmux window to start a task in"
+      return 1
+    fi
+    (cd "$where" && DESKTOP_WORKTREE_CLIENT="$client" desktop-worktree new --tab "$pane" "$name" >/dev/null 2>&1) &&
+      did "Task: ${name// /-}" || could_not "The task could not be started"
+  elif is '^(finish|close|end|wrap up)( the| this)? task$'; then
+    # Asks before it pushes, in its own popup: this only opens the question.
+    local pane client
+    pane=$(tmux display-message -p '#{pane_id}' 2>/dev/null)
+    client=$(tmux display-message -p '#{client_name}' 2>/dev/null)
+    setsid -f desktop-worktree finish "$pane" "$client" >/dev/null 2>&1
+    did "Finishing the task: answer in the popup"
+  elif is '^(tech|technology|world)( news)?$|^(show|open)( the)? (tech|technology|world) news$'; then
+    local heading=${BASH_REMATCH[1]:-${BASH_REMATCH[5]}}
+    [[ $heading == technology ]] && heading=tech
+    shell_call dashboardTab news
+    shell_call newsSection "$heading"
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "News: $heading"
+  elif is '^(read|whats|what is)( me)?( the)?( new| latest)?( on| from| in)?( the)? ?(.*)(headlines|news)$|^whats new (on|at|from) (.+)$'; then
+    headlines "$(sed -E 's/^(read|whats|what is)( me)?( the)?( new| latest)?( on| from| in| at)?( the)? ?//; s/ ?(headlines|news)$//' <<<"$said")"
+  elif is '(cluster|clusters)( status| health)?$|in trouble$'; then
+    local report
+    report=$(desktop-dash infra --json 2>/dev/null | jq -r '
+      if .signed_in == 0 then "You are not signed in to any cluster"
+      elif .trouble == 0 then "\(.signed_in) clusters signed in, none in trouble"
+      else "In trouble: " + ([.clusters[] | select(.state == "degraded") | "\(.name), \(.nodes - .ready) nodes not ready"] | join("; ")) end')
+    show speaking "${report:-No answer from the clusters}" 6
+    desktop-say "${report:-No answer from the clusters}."
+  elif is '(whats|what is|anything) (behind|out of date|outdated)|new versions?$|^updates$'; then
+    local behind
+    behind=$(desktop-dash watch --json 2>/dev/null | jq -r '
+      [.items[]? | select(.state == "behind") | "\(.name) \(.newest)"] as $b
+      | if ($b | length) == 0 then "Everything watched is up to date" else "Newer versions: " + ($b | join(", ")) end')
+    show speaking "${behind:-Nothing to report}" 6
+    desktop-say "${behind:-Nothing to report}."
+  elif is '^(use|change to|switch to)( the)? voice (.+)$|^(use|change to|switch to) (.+)s? voice$'; then
+    local wanted=${BASH_REMATCH[3]:-${BASH_REMATCH[5]}} voice
+    voice=$(desktop-say --voices --json 2>/dev/null | jq -r --arg w "$wanted" '[.voices[] | select((.label + " " + .name) | ascii_downcase | contains($w))] | first | .name // empty')
+    if [[ -n $voice ]]; then
+      desktop-say --voice "$voice" >/dev/null 2>&1 &
+      did "Voice: $wanted"
+    else
+      could_not "No voice called “$wanted”"
+      return 1
+    fi
+  elif is '(whats|what is|anything) (waiting|new|up|going on)|^(status|brief|briefing|report)$'; then
+    show speaking "$(desktop-brief 2>/dev/null | head -3 | paste -sd'·' | sed 's/·/  ·  /g')" 6
+    desktop-brief --say
+  elif is 'what time'; then
+    did "$(date '+%H:%M')"
+    desktop-say "It is $(date '+%-H:%M')."
+  elif is '(screenshot|screen shot)$'; then
+    did "Screenshot"
+    setsid -f desktop-cmd-screenshot >/dev/null 2>&1
+  elif is '(ocp[0-9]{3})'; then
+    cluster=${BASH_REMATCH[1]}
+    # "K9s" is heard as "nines", "canines", "k nines"; anything with nines in it will do.
+    if is '(k9s|nines|k 9)'; then
+      terminal ocl -k "$cluster" && did "k9s on $cluster"
+    elif is 'argo'; then
+      terminal ocl -a "$cluster" && did "Argo CD on $cluster"
+    else
+      terminal ocl "$cluster" && did "Shell on $cluster"
+    fi
+  elif is '^(open|focus|go to|switch to|show)( the)? (.+)$'; then
+    local name=${BASH_REMATCH[3]} address
+    address=$(window_named "$name")
+    if [[ -n $address ]]; then
+      hyprctl dispatch focuswindow "address:$address" >/dev/null 2>&1 && did "$name"
+    else
+      # "Show ..." and "open ..." begin a great many sentences that are not about a window.
+      second_try "$heard" "No window called “$name”"
+      return
+    fi
+  else
+    second_try "$heard" "Not something I know how to do: “$heard”"
+    return
+  fi
+  remember "$heard"
+}
+
+# The key is pressed once. Beside the recording, the same microphone is listened to for
+# the one thing that matters -- has somebody spoken, and have they stopped -- and when
+# they have, that is the second key press. Pressing the key again still works, for a room
+# too noisy to hear a silence in; and nobody having spoken at all cancels, quietly, since
+# a key hit by accident should not end in "not something I know how to do".
+watch_for_the_end() { # the mark of the recording this belongs to
+  local mark=$1
+  command -v pw-record >/dev/null 2>&1 || {
+    # Without it there is only the clock: after a few seconds the key is taken as pressed.
+    (sleep "$MAX_SECONDS"; [[ $(cat "$RUN_DIR/recording" 2>/dev/null) == "$mark" ]] && "$0" toggle) >/dev/null 2>&1 &
+    disown 2>/dev/null
+    return
+  }
+  setsid "$0" _watch "$mark" >/dev/null 2>&1 &
+  echo $! >"$RUN_DIR/watching"
+  disown 2>/dev/null
+}
+
+# What that listener is: this script again, in a process group of its own so that it and
+# the recorder feeding it can be stopped together.
+watching() { # mark
+  pw-record --rate 16000 --channels 1 --format s16 --raw - 2>/dev/null | desktop-voice-endpoint --max "$MAX_SECONDS"
+  local ended=${PIPESTATUS[1]}
+  # The recording may have ended some other way while this was listening.
+  [[ $(cat "$RUN_DIR/recording" 2>/dev/null) == "$1" ]] || return 0
+  rm -f "$RUN_DIR/watching"
+  if [[ $ended == 0 ]]; then finish_recording; else cancel; fi
+}
+
+# The listener beside a recording, stopped: the recording has ended some other way.
+stop_watching() {
+  local pid
+  pid=$(cat "$RUN_DIR/watching" 2>/dev/null) || return 0
+  rm -f "$RUN_DIR/watching"
+  # Its own process group, so the recorder feeding it goes with it -- unless this is it.
+  [[ $pid =~ ^[0-9]+$ && $pid != "$$" && $(ps -o pgid= -p $$ | tr -d " ") != "$pid" ]] && kill -- "-$pid" 2>/dev/null
+  return 0
+}
+
+cancel() {
+  local mark
+  mark=$(cat "$RUN_DIR/recording" 2>/dev/null) || return 0
+  rm -f "$RUN_DIR/recording"
+  stop_watching
+  [[ $mark == daemon:* ]] && voxtype record cancel >/dev/null 2>&1
+  rm -f "$RUN_DIR/heard.txt" "$RUN_DIR/heard.wav" "$SAY_DIR/now"
+}
+
+daemon_running() { [[ $(voxtype status 2>/dev/null) =~ ^(idle|recording|transcribing) ]]; }
+
+recording() {
+  [[ -s $RUN_DIR/recording ]] || return 1
+  local mark
+  mark=$(cat "$RUN_DIR/recording")
+  [[ $mark == daemon:* ]] && return 0
+  kill -0 "$mark" 2>/dev/null
+}
+
+start() {
+  mkdir -p "$RUN_DIR" || exit 1
+  # Whatever is being said makes way, and would otherwise be what gets recorded.
+  desktop-say --hush >/dev/null 2>&1
+  rm -f "$RUN_DIR/heard.wav" "$RUN_DIR/heard.txt"
+  warm_model
+
+  if daemon_running && voxtype record start --file="$RUN_DIR/heard.txt" >/dev/null 2>&1; then
+    local mark="daemon:$(date +%s%N)"
+    echo "$mark" >"$RUN_DIR/recording"
+    show listening "Listening…"
+    watch_for_the_end "$mark"
+    return 0
+  fi
+
+  command -v pw-record >/dev/null 2>&1 || { could_not "Neither the dictation daemon nor pw-record is there to listen with"; exit 1; }
+  # 16 kHz mono is what the recogniser wants, so nothing has to be converted afterwards.
+  setsid pw-record --rate 16000 --channels 1 --format s16 "$RUN_DIR/heard.wav" >/dev/null 2>&1 &
+  echo $! >"$RUN_DIR/recording"
+  show listening "Listening…  (the key again when you have said it)"
+  # A key that is never pressed again must not leave the microphone open: after a few
+  # seconds it is taken as pressed.
+  local pid
+  pid=$(cat "$RUN_DIR/recording" 2>/dev/null)
+  (
+    sleep "$MAX_SECONDS"
+    [[ $(cat "$RUN_DIR/recording" 2>/dev/null) == "$pid" ]] && "$0" toggle
+  ) >/dev/null 2>&1 &
+  disown 2>/dev/null
+}
+
+finish_recording() {
+  local pid heard
+  pid=$(cat "$RUN_DIR/recording" 2>/dev/null)
+  rm -f "$RUN_DIR/recording"
+
+  stop_watching
+
+  if [[ $pid == daemon:* ]]; then
+    show preparing "…"
+    voxtype record stop >/dev/null 2>&1
+    # The file appears when the daemon has finished with what it heard.
+    for _ in $(seq 200); do [[ -e $RUN_DIR/heard.txt ]] && break; sleep 0.05; done
+    heard=$(tr '\n' ' ' <"$RUN_DIR/heard.txt" 2>/dev/null | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+    rm -f "$RUN_DIR/heard.txt"
+    interpret "$heard"
+    return
+  fi
+
+  [[ $pid =~ ^[0-9]+$ ]] && kill -INT "$pid" 2>/dev/null
+  # pw-record writes the header as it closes.
+  for _ in $(seq 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.05; done
+  [[ -s $RUN_DIR/heard.wav ]] || { could_not "Nothing was recorded"; exit 1; }
+
+  show preparing "…"
+  heard=$(timeout 60 voxtype transcribe "$RUN_DIR/heard.wav" 2>/dev/null | tail -1 | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+  # What was said stays no longer than it takes to understand it.
+  rm -f "$RUN_DIR/heard.wav"
+  interpret "$heard"
+}
+
+understands() {
+  cat <<'LIST'
+workspace <number>                 go to that workspace
+again                              whatever was done last, once more
+dashboard                          go to workspace 6
+dashboard health / show news       that tab of it: start, domotics, infrastructure, health, finance, watching, news
+lock the screen                    lock
+overview / show the windows        every workspace at once
+launcher                           the application launcher
+notifications                      the notification centre; "clear notifications" empties it
+do not disturb                     on, or off again
+what is waiting / status           the brief, said out loud
+what time is it                    the time
+louder / quieter / mute            the sound
+hush / voice off / voice on        the desktop's own voice
+screenshot                         take one
+open <name> / go to <name>         the window whose name has those words
+shell on ocp204                    a terminal on that cluster (also: k9s on …, argo on …)
+tell <project> to <anything>       typed into that project's agent, for you to send
+tell it to <anything>              the same, for the agent in the window you are in
+go to the waiting agent            the first agent that is waiting for you
+start a task called <name>         a branch, a worktree and an agent, in the repository you are in
+finish the task                    opens the question that pushes and removes it
+tech news / world news             that heading of the dashboard's News tab
+read the headlines / what's new on tweakers     three headlines, read out
+cluster status                     which clusters are in trouble, said
+what is behind                     what has a newer version out, said
+use voice alba                     another voice
+
+Not from here: restart, shut down, log out, suspend. Those are on Super + Escape.
+LIST
+}
+
+case "${1:-}" in
+toggle) if recording; then finish_recording; else start; fi ;;
+cancel) cancel ;;
+understand) shift; understand "${1:?a sentence}" ;;
+_watch) shift; watching "${1:?mark}" ;;
+run) shift; interpret "$*" ;;
+normalise) shift; normalise "$*"; echo ;;
+list | "" | -h | --help) understands ;;
+*)
+  echo "usage: desktop-voice toggle | run <sentence> | list" >&2
+  exit 1
+  ;;
+esac
