@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+
+"""What a Sony headset says about itself, and its noise cancelling.
+
+    desktop-headset status [ADDRESS]              # JSON, for the sound panel
+    desktop-headset mode nc|ambient|off [ADDRESS] # switch, then print the status
+
+Bluez knows a headset's battery and nothing else about it. Noise cancelling, ambient
+sound and the rest are behind the protocol Sony's own phone app speaks: framed messages
+over an RFCOMM channel the headset advertises under a UUID of its own. This speaks just
+enough of it to ask and to switch -- the WH-1000XM4 is what it was written against, and
+the same service is on the rest of that generation.
+
+Without an address it takes the first connected device that advertises the service, so
+the panel does not have to know which of the things on the desk is the headset. With
+none there it prints {"present": false} and exits 0: no headset is a state, not an error.
+
+Each call connects, asks and hangs up. Holding the channel open would get changes pushed
+as they happen, and would also keep the phone app from getting in.
+"""
+
+import json
+import socket
+import subprocess
+import sys
+
+# The service the Sony app connects to, as a headset lists it in SDP.
+SERVICE = "96cc203e-5068-46ad-b32d-e316f5e069ba"
+
+START, END, ESCAPE = 0x3E, 0x3C, 0x3D
+ACK, COMMAND = 0x01, 0x0C
+
+INIT, INIT_REPLY = 0x00, 0x01
+BATTERY_GET, BATTERY_REPLY = 0x10, 0x11
+SOUND_GET, SOUND_REPLY, SOUND_SET = 0x66, 0x67, 0x68
+# Noise cancelling and ambient sound are one setting to the headset, asked for together.
+SOUND_BOTH = 0x02
+
+MODES = ("nc", "ambient", "off")
+TIMEOUT = 3
+
+
+def frame(kind, seq, payload=b""):
+    """One message as it goes over the air.
+
+    Type, sequence, length and payload, then their sum as a checksum, between a start
+    and an end byte -- and since those two may not appear inside, they and the escape
+    byte itself are sent as the escape followed by the byte with bit 4 cleared.
+    """
+    body = bytes([kind, seq]) + len(payload).to_bytes(4, "big") + payload
+    body += bytes([sum(body) & 0xFF])
+    out = bytearray([START])
+    for byte in body:
+        if byte in (START, END, ESCAPE):
+            out += bytes([ESCAPE, byte & 0xEF])
+        else:
+            out.append(byte)
+    out.append(END)
+    return bytes(out)
+
+
+def unframe(buffer):
+    """Take the complete messages off the front of a bytearray: (type, seq, payload).
+
+    A message that fails its checksum is dropped rather than raised: the headset sends
+    it again when it is not acknowledged.
+    """
+    messages = []
+    while True:
+        start = buffer.find(START)
+        end = buffer.find(END, start + 1)
+        if start < 0 or end < 0:
+            return messages
+        body, escaped = bytearray(), False
+        for byte in buffer[start + 1 : end]:
+            if escaped:
+                body.append(byte | 0x10)
+                escaped = False
+            elif byte == ESCAPE:
+                escaped = True
+            else:
+                body.append(byte)
+        del buffer[: end + 1]
+        if len(body) >= 7 and sum(body[:-1]) & 0xFF == body[-1]:
+            messages.append((body[0], body[1], bytes(body[6:-1])))
+
+
+def decode_sound(payload):
+    """The mode out of the reply to SOUND_GET.
+
+    Eight bytes: the reply code, which setting, whether any of it is on, how noise
+    cancelling is expressed and its value, how ambient is expressed, whether ambient
+    favours voices, and the ambient level. Noise cancelling at 2 is the ordinary kind
+    and at 1 the wind-noise variant; at 0 with the effect on, it is ambient sound.
+    """
+    if len(payload) < 8 or payload[0] != SOUND_REPLY:
+        return {}
+    if payload[2] == 0:
+        mode = "off"
+    else:
+        mode = {2: "nc", 1: "wind"}.get(payload[4], "ambient")
+    return {"mode": mode, "voice": payload[6] == 1, "ambient_level": payload[7]}
+
+
+def encode_sound(mode, level=20, voice=False):
+    """The payload that switches. 0x11 rather than 1 says the change is final, which is
+    what makes the headset announce it; 1 is for a slider still being dragged."""
+    if mode not in MODES:
+        raise ValueError(mode)
+    effect = 0x00 if mode == "off" else 0x11
+    cancelling = 2 if mode == "nc" else 0
+    ambient = level if mode == "ambient" else 0
+    return bytes([SOUND_SET, SOUND_BOTH, effect, 0x02, cancelling, 0x01, int(voice), ambient])
+
+
+def decode_battery(payload):
+    if len(payload) < 4 or payload[0] != BATTERY_REPLY:
+        return {}
+    return {"battery": payload[2], "charging": payload[3] == 1}
+
+
+def channel_in(response):
+    """The RFCOMM channel out of an SDP reply: in the protocol list, the RFCOMM UUID
+    (0x0003) is followed by the channel as a one-byte integer."""
+    at = response.find(b"\x19\x00\x03\x08")
+    return response[at + 4] if 0 <= at < len(response) - 4 else None
+
+
+def find_channel(address):
+    """Ask the headset which channel the service is on. It is not a fixed number, and
+    trying each in turn takes seconds on the ones that neither answer nor refuse."""
+    pattern = b"\x35\x11\x1c" + bytes.fromhex(SERVICE.replace("-", ""))
+    # Everything about the matching record, in one reply of up to 0xffff bytes.
+    params = pattern + b"\xff\xff" + b"\x35\x05\x0a\x00\x00\xff\xff" + b"\x00"
+    request = b"\x06\x00\x01" + len(params).to_bytes(2, "big") + params
+    with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_SEQPACKET, socket.BTPROTO_L2CAP) as sdp:
+        sdp.settimeout(TIMEOUT)
+        sdp.connect((address, 1))
+        sdp.send(request)
+        return channel_in(sdp.recv(4096))
+
+
+class Headset:
+    def __init__(self, address):
+        channel = find_channel(address)
+        if channel is None:
+            raise OSError("no Sony control service on " + address)
+        self.sock = socket.socket(socket.AF_BLUETOOTH, socket.SOCK_STREAM, socket.BTPROTO_RFCOMM)
+        self.sock.settimeout(TIMEOUT)
+        self.sock.connect((address, channel))
+        self.buffer = bytearray()
+        self.seq = 0
+        # Nothing else is answered until the headset has been greeted.
+        self.ask(bytes([INIT, 0x00]), INIT_REPLY)
+
+    def close(self):
+        self.sock.close()
+
+    def send(self, payload):
+        """Send a command and wait for it to be acknowledged. The sequence number
+        flips with each one, and an acknowledgement carries the one that comes next."""
+        self.sock.send(frame(COMMAND, self.seq, payload))
+        self.seq = 1 - self.seq
+        while True:
+            for kind, seq, data in self.read():
+                if kind == ACK:
+                    return
+
+    def read(self):
+        """Whatever arrives next, acknowledging what needs it. Times out by raising."""
+        self.buffer += self.sock.recv(1024)
+        messages = unframe(self.buffer)
+        for kind, seq, _ in messages:
+            if kind != ACK:
+                self.sock.send(frame(ACK, 1 - seq))
+        return messages
+
+    def ask(self, payload, reply):
+        self.sock.send(frame(COMMAND, self.seq, payload))
+        self.seq = 1 - self.seq
+        while True:
+            for kind, _, data in self.read():
+                if kind != ACK and data and data[0] == reply:
+                    return data
+
+    def status(self):
+        out = {}
+        out.update(decode_battery(self.ask(bytes([BATTERY_GET, 0x00]), BATTERY_REPLY)))
+        out.update(decode_sound(self.ask(bytes([SOUND_GET, SOUND_BOTH]), SOUND_REPLY)))
+        return out
+
+
+def connected():
+    """(address, name) of each connected device that advertises the service."""
+    def bluetoothctl(*args):
+        return subprocess.run(["bluetoothctl", *args], capture_output=True, text=True, timeout=5).stdout
+
+    found = []
+    for line in bluetoothctl("devices", "Connected").splitlines():
+        parts = line.split(" ", 2)
+        if len(parts) == 3 and parts[0] == "Device" and SERVICE in bluetoothctl("info", parts[1]):
+            found.append((parts[1], parts[2]))
+    return found
+
+
+def main(argv):
+    if not argv or argv[0] not in ("status", "mode"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    rest = argv[1:]
+    mode = None
+    if argv[0] == "mode":
+        if not rest or rest[0] not in MODES:
+            print("desktop-headset: mode is one of " + ", ".join(MODES), file=sys.stderr)
+            return 2
+        mode, rest = rest[0], rest[1:]
+
+    try:
+        if rest:
+            address, name = rest[0], rest[0]
+        else:
+            devices = connected()
+            if not devices:
+                print(json.dumps({"present": False}))
+                return 0
+            address, name = devices[0]
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"desktop-headset: {error}", file=sys.stderr)
+        return 1
+
+    # Twice: the headset now and then lets a connection through and then says nothing,
+    # and answers the next one at once.
+    for attempt in (1, 2):
+        try:
+            headset = Headset(address)
+            try:
+                if mode:
+                    headset.send(encode_sound(mode))
+                result = headset.status()
+            finally:
+                headset.close()
+            break
+        except OSError as error:
+            if attempt == 1:
+                continue
+            # Connected, and not answering: the phone app holds the channel, or it is busy.
+            print(json.dumps({"present": True, "address": address, "name": name, "reachable": False}))
+            print(f"desktop-headset: {address}: {error}", file=sys.stderr)
+            return 1
+
+    print(json.dumps({"present": True, "address": address, "name": name, "reachable": True, **result}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

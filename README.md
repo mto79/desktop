@@ -45,6 +45,22 @@ From there you should be able to connect to your WiFi network using `iwctl`, and
 Desktop does not use the seamless login implemented, therefore once logged in, start Desktop using `desktop`.
 Stop Desktop by using the power menu or executing the bash command `uswm stop`.
 
+## Bluetooth headset
+
+A connected headset's battery shows beside the Bluetooth icon on the bar -- the lowest one,
+when several things report a battery -- and a notification says so once when it drops to
+15% or below. Both come from bluez, so they work for any device that reports a battery.
+
+A Sony headset (written against the WH-1000XM4) also gets a section in the sound panel:
+its battery, and noise cancelling as three buttons -- Cancelling, Ambient, Off. That part
+is `desktop-headset`, which speaks the protocol of Sony's phone app over Bluetooth:
+
+    desktop-headset status              # JSON: battery, charging, mode
+    desktop-headset mode nc|ambient|off
+
+The headset has one channel for this. While the Sony app on a phone holds it, the panel
+says "not answering" and shows the battery only.
+
 ## License
 
 Copyright (c) MTO79
