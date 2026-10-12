@@ -421,4 +421,10 @@ CLAUDE_CONFIG_DIR="$config" bash "$HOOKS" >/dev/null 2>&1
 check "a settings file that does not parse is left alone, not replaced" \
   test "$(cat "$config/settings.json")" = "{ broken"
 
+# tmux tells the bar too, from the hooks that clear a finished turn once it is looked at.
+# tmux prints a failed hook into the pane, and the shell is not always reachable -- it
+# was running from a worktree, so every Claude pane said "returned 255" when focused.
+unguarded=$(grep 'refreshWidget ai' "$ROOT/config/tmux/tmux.conf" | grep -v '^#' | grep -vc '|| true')
+check "tmux's nudge to the bar may fail without saying so in the pane" test "$unguarded" = 0
+
 finish
