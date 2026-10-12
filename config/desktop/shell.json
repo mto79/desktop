@@ -120,23 +120,6 @@
           "id": "spacer"
         },
         {
-          "id": "tasks",
-          "type": "command",
-          "exec": "desktop-worktree tasks --bar",
-          "interval": 30,
-          "icon": "󰘬",
-          "colors": {
-            "waiting": "urgent",
-            "done": "accent",
-            "working": "accent",
-            "idle": "muted"
-          },
-          "pulse": [
-            "waiting"
-          ],
-          "panel": "tasks"
-        },
-        {
           "id": "ai",
           "type": "command",
           "exec": "desktop-status-ai",

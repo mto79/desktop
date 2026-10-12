@@ -64,7 +64,15 @@ sourced afterwards lands inside the submap.
 - **Debounce model-driven Repeaters.** Rebuilding one from inside its own model's change
   signal crashes. `AudioPanel`, `NetworkPanel` and `BluetoothPanel` each keep a
   snapshot behind a short timer.
-- **A new `shell/Ui/` component needs a line in `shell/Ui/qmldir`.**
+- **A new `shell/Ui/` component needs a line in `shell/Ui/qmldir`.** So does a new
+  singleton in `shell/Commons/qmldir`.
+- **A bar widget exists once per monitor.** Anything that must happen once -- sending a
+  notification, writing a file -- belongs in a `shell/Commons/` singleton the widget
+  reads, not in the widget. `BluetoothBattery` is the example: its low-battery warning
+  sent from the widget would arrive three times on three screens.
+- **Logic worth testing goes in a plain `.js` file** beside the QML that uses it
+  (`lowbattery.js`, `calc.js`, `holidays.js`), kept free of QML so a test can run it
+  with node.
 - **Quickshell services start when something binds to them.** Reading
   `Bluetooth.devices` inside a handler returns nothing; read it through a declarative
   property.

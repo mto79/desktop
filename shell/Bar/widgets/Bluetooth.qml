@@ -26,6 +26,9 @@ BarItem {
 
   readonly property int connected: connectedDevices.length
 
+  // The lowest battery among what is connected, or -1 when none of it reports one.
+  readonly property int battery: connected > 0 ? BluetoothBattery.lowest : -1
+
   tooltip: {
     if (!adapter)
       return "No Bluetooth adapter";
@@ -36,7 +39,8 @@ BarItem {
     var names = [];
     for (var i = 0; i < connectedDevices.length; i++) {
       var d = connectedDevices[i];
-      names.push(d.name || d.deviceName || d.address);
+      var level = BluetoothBattery.level(d);
+      names.push((d.name || d.deviceName || d.address) + (level >= 0 ? "  " + level + "%" : ""));
     }
     return "Bluetooth\n" + names.join("\n");
   }
@@ -51,7 +55,9 @@ BarItem {
 
   IconLabel {
     icon: root.powered ? "\u{f294}" : "\u{f00b2}"
-    text: root.connected > 0 ? String(root.connected) : ""
-    color: root.powered ? Color.barText : Color.barMuted
+    // A battery says more than a count, and only a connected device has one to
+    // report; the count stays for a desk of things that report nothing.
+    text: root.battery >= 0 ? root.battery + "%" : (root.connected > 0 ? String(root.connected) : "")
+    color: !root.powered ? Color.barMuted : (root.battery >= 0 && root.battery <= BluetoothBattery.threshold ? Color.barUrgent : Color.barText)
   }
 }
