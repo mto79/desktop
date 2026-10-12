@@ -5,6 +5,9 @@
 #   desktop-voice toggle        # SUPER + C: listen, and act when you stop talking
 #   desktop-voice run "text"    # act on a sentence as if it had been said
 #   desktop-voice list          # what it understands
+#   desktop-voice model         # which model is asked when the list does not know
+#   desktop-voice mode [local|vpn|cloud]   # how far a sentence may travel
+#   desktop-voice key           # store the Anthropic key for cloud mode in the keyring
 #
 # Dictation types what you say. This does what you say, from a list: "workspace three",
 # "lock the screen", "k9s on ocp204", "what is waiting", "tell desktop to run the tests".
@@ -34,6 +37,99 @@ MAX_SECONDS="${DESKTOP_VOICE_MAX_SECONDS:-8}"
 # none. Small on purpose: it has to fit on the graphics card beside the recogniser.
 MODEL="${DESKTOP_VOICE_MODEL:-qwen2.5:3b}"
 OLLAMA="${DESKTOP_VOICE_OLLAMA:-http://127.0.0.1:11434}"
+
+# A better model somewhere else, asked first when it can be reached -- a large one on a
+# server that is only there while a VPN is up, say. It is this machine's own business
+# where that is and what the key is, so it is not written in this repository:
+#
+#   ~/.config/desktop/voice.conf
+#     remote_url=https://llm.example.org        # an OpenAI-compatible API; /chat/completions is added
+#     remote_model=Qwen/Qwen3.8-27B
+#     remote_key_file=~/.config/desktop/voice.key
+#
+# Reachable is decided by whether its name resolves, which costs nothing when it does not.
+# When it cannot be reached, or does not answer, the model on this machine is asked.
+CONF="${DESKTOP_VOICE_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/voice.conf}"
+conf() { # key -> value
+  [[ -r $CONF ]] || return 0
+  sed -n -E "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//' | tail -1
+}
+REMOTE_URL=$(conf remote_url)
+REMOTE_URL=${REMOTE_URL%/}
+REMOTE_MODEL=$(conf remote_model)
+REMOTE_KEY_FILE=$(conf remote_key_file)
+REMOTE_KEY_FILE=${REMOTE_KEY_FILE/#\~/$HOME}
+
+# How far a sentence may travel, chosen by you (desktop-voice mode, or the AI panel) and
+# kept across a reboot:
+#
+#   local   never off this machine
+#   vpn     the model in voice.conf when it is in reach, else local      (the default)
+#   cloud   Claude Haiku at Anthropic first -- the cleverest, and the furthest away
+#
+# Cloud is hedged about, since it is the one that leaves the building:
+#   - only a sentence the list does not know goes at all, as with any model
+#   - the sentence goes alone: no window title, no agent names, no last command
+#   - a sentence naming a cluster or one of your running projects stays local
+#   - what comes back is one name from the fixed set, through the list, like the others
+#   - the key lives in the keyring, never in a file here, never on a command line
+#   - every sentence sent is written to ~/.local/state/desktop/voice/sent.log
+#   - and the card says so, in red, every time
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/voice"
+CLOUD_MODEL="${DESKTOP_VOICE_CLOUD_MODEL:-claude-haiku-5-5}"
+CLOUD_URL="${DESKTOP_VOICE_CLOUD_URL:-https://api.anthropic.com/v1/messages}"
+
+mode() {
+  local m
+  m=$(cat "$STATE_DIR/mode" 2>/dev/null)
+  [[ $m =~ ^(local|vpn|cloud)$ ]] && echo "$m" || echo vpn
+}
+
+cloud_key() { secret-tool lookup service desktop-voice account anthropic 2>/dev/null; }
+cloud_ready() { [[ $(mode) == cloud && $MODEL != off ]] && [[ -n $(cloud_key) ]]; }
+
+# A sentence that must not go to the cloud whatever the mode: it names a cluster, or one
+# of the projects an agent is working on.
+stays_home() { # the sentence
+  local said projects
+  said=$(normalise "$1")
+  [[ $said =~ ocp[0-9]{3} ]] && return 0
+  projects=$(desktop-agent-sessions --json 2>/dev/null | jq -r '[.sessions[]?.project // empty] | unique | .[]' 2>/dev/null | tr '[:upper:]-_' '[:lower:]  ')
+  local project
+  while IFS= read -r project; do
+    [[ ${#project} -ge 3 && " $said " == *" $project "* ]] && return 0
+  done <<<"$projects"
+  return 1
+}
+
+remote_reachable() {
+  [[ $(mode) != local ]] || return 1
+  [[ -n $REMOTE_URL && -n $REMOTE_MODEL && $MODEL != off ]] || return 1
+  local host=${REMOTE_URL#*://}
+  host=${host%%[:/]*}
+  getent hosts "$host" >/dev/null 2>&1
+}
+
+# Which model a sentence goes to, where everybody can see it: the cards read this file.
+# "where" is remote (it leaves this machine), local, or none (the list only).
+note_model() { # name where
+  mkdir -p "$RUN_DIR" 2>/dev/null || return 0
+  jq -cn --arg name "$1" --arg where "$2" '{name: $name, where: $where}' >"$RUN_DIR/model.part" 2>/dev/null &&
+    mv -f "$RUN_DIR/model.part" "$RUN_DIR/model"
+}
+
+# The one that would be asked now.
+model_now() { # -> "name<TAB>where"
+  if cloud_ready; then
+    printf '%s\t%s\n' "$CLOUD_MODEL" cloud
+  elif remote_reachable; then
+    printf '%s\t%s\n' "$REMOTE_MODEL" remote
+  elif [[ $MODEL != off ]] && curl -sf --max-time 1 "$OLLAMA/api/version" >/dev/null 2>&1; then
+    printf '%s\t%s\n' "$MODEL" local
+  else
+    printf '%s\t%s\n' "" none
+  fi
+}
 
 # The card desktop-say shows while it speaks is the natural place to say "listening" and
 # then what was understood. The same file, the same shape.
@@ -215,7 +311,39 @@ understand() { # the sentence -> a sentence the list knows, or nothing
           + "who won the world cup -> {\"action\":\"none\",\"arg\":\"\"}")},
         {role: "user", content: ("Focused window: \($window)\nWorkspace: \($workspace)\nCoding agents: \($agents)\nLast command: \($last)\n\nSentence: \($heard)")}
       ]}')
-  answer=$(curl -sf --max-time "${DESKTOP_VOICE_MODEL_SECONDS:-8}" "$OLLAMA/api/chat" -d "$request" 2>/dev/null | jq -r '.message.content // empty' 2>/dev/null) || return 1
+  # The better model first, where there is one in reach. The same question in the shape
+  # an OpenAI-compatible server wants, the key from its file and never on a command line.
+  answer=""
+  if cloud_ready && ! stays_home "$heard"; then
+    # The same instructions, and the sentence with nothing beside it. Thinking is off and
+    # the answer is held to the same schema: this is a choice out of a list, quickly.
+    mkdir -p "$STATE_DIR" 2>/dev/null && printf '%s\t%s\t%s\n' "$(date '+%F %T')" "$CLOUD_MODEL" "$heard" >>"$STATE_DIR/sent.log"
+    answer=$(jq -c --arg model "$CLOUD_MODEL" --arg heard "$heard" '{model: $model, max_tokens: 256,
+        thinking: {type: "disabled"},
+        output_config: {effort: "low", format: {type: "json_schema", schema: (.format + {additionalProperties: false})}},
+        system: .messages[0].content,
+        messages: [{role: "user", content: ("Sentence: " + $heard)}]}' <<<"$request" |
+      curl -sf --connect-timeout 2 --max-time "${DESKTOP_VOICE_MODEL_SECONDS:-8}" "$CLOUD_URL" \
+        -H 'Content-Type: application/json' -H 'anthropic-version: 2023-06-01' \
+        -K <(printf 'header = "x-api-key: %s"\n' "$(cloud_key)") -d @- 2>/dev/null |
+      # A refusal, or anything but a finished answer, is no answer.
+      jq -r 'select(.stop_reason == "end_turn") | [.content[]? | select(.type == "text") | .text] | join("")' 2>/dev/null)
+    [[ -n $answer ]] && note_model "$CLOUD_MODEL" cloud
+  fi
+  if [[ -z $answer ]] && remote_reachable; then
+    answer=$(jq -c --arg model "$REMOTE_MODEL" '{model: $model, temperature: 0, max_tokens: 200, messages: .messages,
+        response_format: {type: "json_schema", json_schema: {name: "action", strict: true, schema: .format}}}' <<<"$request" |
+      curl -sf --connect-timeout 2 --max-time "${DESKTOP_VOICE_MODEL_SECONDS:-8}" "$REMOTE_URL/chat/completions" \
+        -H 'Content-Type: application/json' -K <([[ -r $REMOTE_KEY_FILE ]] && printf 'header = "Authorization: Bearer %s"\n' "$(tr -d '[:space:]' <"$REMOTE_KEY_FILE")") \
+        -d @- 2>/dev/null |
+      # A model that thinks aloud first: what counts is the object at the end of it.
+      jq -r '.choices[0].message.content // empty' 2>/dev/null | tr '\n' ' ' | grep -oE '\{[^{}]*\}' | tail -1)
+    [[ -n $answer ]] && note_model "$REMOTE_MODEL" remote
+  fi
+  if [[ -z $answer ]]; then
+    answer=$(curl -sf --max-time "${DESKTOP_VOICE_MODEL_SECONDS:-8}" "$OLLAMA/api/chat" -d "$request" 2>/dev/null | jq -r '.message.content // empty' 2>/dev/null) || return 1
+    [[ -n $answer ]] && note_model "$MODEL" local
+  fi
   action=$(jq -r '.action // "none"' <<<"$answer" 2>/dev/null)
   # Whatever came back as the arg is only ever letters, digits, spaces and dashes.
   arg=$(jq -r '.arg // ""' <<<"$answer" 2>/dev/null | tr '[:upper:]_' '[:lower:] ' | tr -cd 'a-z0-9 -' | cut -c1-60 | sed -E 's/^ +//; s/ +$//')
@@ -252,6 +380,11 @@ understand() { # the sentence -> a sentence the list knows, or nothing
 # long as a sentence. Asked for nothing; only to be there.
 warm_model() {
   [[ $MODEL != off ]] && command -v curl >/dev/null 2>&1 || return 0
+  local name where
+  IFS=$'\t' read -r name where < <(model_now)
+  note_model "$name" "$where"
+  # The one elsewhere is somebody else's to keep loaded.
+  [[ $where == local ]] || return 0
   (curl -sf --max-time 30 "$OLLAMA/api/generate" -d "$(jq -cn --arg model "$MODEL" '{model: $model, keep_alive: "10m"}')" >/dev/null 2>&1 &)
 }
 
@@ -466,8 +599,16 @@ watch_for_the_end() { # the mark of the recording this belongs to
 # What that listener is: this script again, in a process group of its own so that it and
 # the recorder feeding it can be stopped together.
 watching() { # mark
-  pw-record --rate 16000 --channels 1 --format s16 --raw - 2>/dev/null | desktop-voice-endpoint --max "$MAX_SECONDS"
-  local ended=${PIPESTATUS[1]}
+  # Not a pipe from the recorder into the listener: pw-record ignores the signal that
+  # says nobody is reading any more, and sat there for ever with the listener long gone
+  # -- so the recording was never ended. It is started, listened to, and then stopped.
+  local recorder ended
+  exec 3< <(exec pw-record --rate 16000 --channels 1 --format s16 --raw - 2>/dev/null)
+  recorder=$!
+  desktop-voice-endpoint --max "$MAX_SECONDS" <&3
+  ended=$?
+  kill "$recorder" 2>/dev/null
+  exec 3<&-
   # The recording may have ended some other way while this was listening.
   [[ $(cat "$RUN_DIR/recording" 2>/dev/null) == "$1" ]] || return 0
   rm -f "$RUN_DIR/watching"
@@ -601,6 +742,36 @@ case "${1:-}" in
 toggle) if recording; then finish_recording; else start; fi ;;
 cancel) cancel ;;
 understand) shift; understand "${1:?a sentence}" ;;
+mode)
+  # desktop-voice mode [local|vpn|cloud|next] [--json]
+  case ${2:-} in
+  local | vpn | cloud) mkdir -p "$STATE_DIR" && echo "$2" >"$STATE_DIR/mode" ;;
+  next) mkdir -p "$STATE_DIR" && case $(mode) in local) echo vpn ;; vpn) echo cloud ;; *) echo local ;; esac >"$STATE_DIR/mode.new" && mv -f "$STATE_DIR/mode.new" "$STATE_DIR/mode" ;;
+  esac
+  IFS=$'\t' read -r name where < <(model_now)
+  note_model "$name" "$where"
+  if [[ " $* " == *" --json "* ]]; then
+    jq -cn --arg mode "$(mode)" --arg name "$name" --arg where "$where" --argjson key "$([[ -n $(cloud_key) ]] && echo true || echo false)" \
+      --argjson vpn "$([[ -n $REMOTE_URL ]] && echo true || echo false)" '{mode: $mode, name: $name, where: $where, cloud_key: $key, vpn_configured: $vpn}'
+  else
+    echo "$(mode)"
+  fi
+  ;;
+key)
+  # The key for cloud mode, into the keyring. Asked for by secret-tool itself, so it is
+  # never an argument and never in the shell's history.
+  secret-tool store --label="desktop-voice: Anthropic API key" service desktop-voice account anthropic ;;
+model)
+  IFS=$'\t' read -r name where < <(model_now)
+  note_model "$name" "$where"
+  if [[ ${2:-} == --json ]]; then jq -cn --arg name "$name" --arg where "$where" '{name: $name, where: $where}'
+  else case $where in
+    cloud) echo "$name, at Anthropic -- what you say leaves this machine (sentence only; see sent.log)" ;;
+    remote) echo "$name, at ${REMOTE_URL#*://} -- what you say leaves this machine" ;;
+    local) echo "$name, on this machine" ;;
+    *) echo "no model: the list only" ;;
+    esac; fi
+  ;;
 _watch) shift; watching "${1:?mark}" ;;
 run) shift; interpret "$*" ;;
 normalise) shift; normalise "$*"; echo ;;

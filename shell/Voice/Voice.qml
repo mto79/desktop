@@ -84,13 +84,29 @@ Item {
         anchors.right: parent.right
         anchors.rightMargin: Style.popupPadding
         anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: -7
         text: Speech.line
         textFormat: Text.PlainText
         color: Speech.lively ? Color.popupText : Color.popupMuted
         font.family: Style.fontFamily
         font.pixelSize: Style.fontSize - 1
         wrapMode: Text.WordWrap
-        maximumLineCount: 3
+        maximumLineCount: 2
+        elide: Text.ElideRight
+      }
+
+      // Which model hears what the list does not know -- and whether that is here.
+      Text {
+        anchors.left: caption.left
+        anchors.right: caption.right
+        anchors.top: caption.bottom
+        anchors.topMargin: 3
+        text: Speech.modelLine
+        textFormat: Text.PlainText
+        color: Speech.modelWhere === "cloud" ? Color.popupUrgent : Speech.modelWhere === "remote" ? Color.caution : Color.popupMuted
+        opacity: 0.8
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize - 4
         elide: Text.ElideRight
       }
     }

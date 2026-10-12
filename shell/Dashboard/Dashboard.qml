@@ -221,7 +221,7 @@ Item {
 
   // What the voice is doing, in a word, for beside its picture.
   readonly property string voiceState: Speech.listening ? "Listening" : Speech.state === "speaking" ? "Speaking" : Speech.state === "preparing" ? "One moment" : "Here"
-  readonly property string voiceLine: Speech.active && Speech.line !== "" ? Speech.line : "Super + C, say what you want done, Super + C again"
+  readonly property string voiceLine: Speech.active && Speech.line !== "" ? Speech.line : "Super + C, and say what you want done"
 
   FloatingWindow {
     id: window
@@ -374,6 +374,16 @@ Item {
                     duration: Style.motionQuick
                   }
                 }
+              }
+              // Which model hears what the list does not know -- and whether that is here.
+              Text {
+                width: parent.width
+                text: "\u{f09d1}  " + Speech.modelLine
+                textFormat: Text.PlainText
+                color: Speech.modelWhere === "cloud" ? Color.popupUrgent : Speech.modelWhere === "remote" ? Color.caution : Color.popupMuted
+                font.family: Style.fontFamily
+                font.pixelSize: Style.fontSize - 2
+                elide: Text.ElideRight
               }
             }
           }

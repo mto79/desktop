@@ -46,7 +46,7 @@ jq -cn --rawfile c "$sandbox/model" '{message: {content: \$c}}'
 STUB
 chmod +x "$stubs/curl"
 
-say() { : >"$sandbox/calls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" bash "$VOICE" run "$1" >/dev/null 2>&1; }
+say() { : >"$sandbox/calls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" run "$1" >/dev/null 2>&1; }
 did() { grep -qxF -- "$1" "$sandbox/calls"; }
 shown() { jq -r .text "$sandbox/run/desktop/say/now" 2>/dev/null; }
 
@@ -150,6 +150,10 @@ ENDPOINT_ARGS=(--max 2)
 check "talking past the limit ends there, with what was said" test "$(heard 0.2 6.0 0)" = 0
 ENDPOINT_ARGS=()
 check "a cough is not speech" test "$(heard 1.0 0.08 4.5)" = 1
+# pw-record ignores SIGPIPE: piped into the listener it outlived it, and nothing ended.
+check "the recorder is stopped, not left to notice" \
+  test -n "$(sed -n '/^watching()/,/^}/p' "$VOICE" | grep 'kill "$recorder"')"
+check "and is not piped into the listener" lacks -E 'pw-record .*\| *desktop-voice-endpoint' "$VOICE"
 check "the key need only be pressed once" grep -q 'watch_for_the_end "$mark"' "$VOICE"
 check "nobody speaking cancels, and does not complain" \
   test -n "$(sed -n '/^watching()/,/^}/p' "$VOICE" | grep 'if \[\[ $ended == 0 \]\]; then finish_recording; else cancel; fi')"
@@ -250,11 +254,99 @@ DESKTOP_VOICE_MODEL=off say "could you bring up the third one"
 check "it can be switched off" test ! -e "$sandbox/asked"
 check "a clean install fetches the model where there is an Ollama" grep -q 'packaging/voice.sh' "$ROOT/install/packaging/all.sh"
 
+# --- a better model elsewhere, when it can be reached
+cat >"$stubs/curl" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "curl \$*" >>"$sandbox/curls"
+case " \$* " in
+*"/chat/completions"*) [[ -s "$sandbox/remote" ]] || exit 6; jq -cn --rawfile c "$sandbox/remote" '{choices: [{message: {content: \$c}}]}' ;;
+*"/api/chat"*) [[ -s "$sandbox/model" ]] || exit 22; jq -cn --rawfile c "$sandbox/model" '{message: {content: \$c}}' ;;
+esac
+STUB
+printf 'remote_url=http://localhost:9/\nremote_model=Big/Model # the large one\nremote_key_file=%s/key\n' "$sandbox" >"$sandbox/voice.conf"
+printf 'sekrit-key\n' >"$sandbox/key"
+far() { : >"$sandbox/calls"; : >"$sandbox/curls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/voice.conf" bash "$VOICE" run "$1" >/dev/null 2>&1; }
+which_model() { jq -r '"\(.name) \(.where)"' "$sandbox/run/desktop/voice/model" 2>/dev/null; }
+
+printf '<think>hm</think> {"action":"workspace","arg":"5"}' >"$sandbox/remote"
+model_says '{"action":"workspace","arg":"9"}'
+far "could you bring up the fifth one"
+check "the model elsewhere is asked first when it is in reach" did "hyprctl dispatch workspace 5"
+check "and it is written down that the sentence left this machine" test "$(which_model)" = "Big/Model remote"
+check "its key is never on a command line" lacks 'sekrit-key' "$sandbox/curls"
+rm -f "$sandbox/remote"
+far "could you bring up the fifth one"
+check "when it does not answer, the one on this machine is asked" did "hyprctl dispatch workspace 9"
+check "and that is what is written down" test "$(which_model)" = "qwen2.5:3b local"
+sed -i 's|^remote_url=.*|remote_url=https://nowhere.invalid|' "$sandbox/voice.conf"
+printf '{"action":"workspace","arg":"5"}' >"$sandbox/remote"
+far "could you bring up the fifth one"
+check "a name that does not resolve -- the VPN is down -- is not even tried" lacks 'chat/completions' "$sandbox/curls"
+# Where it is and what its key is are this machine's business, not the repository's.
+check "no server of anybody's is written into the command" lacks -E 'https?://[a-z0-9.-]+\.(net|nl|com)' <(grep -v 'api\.anthropic\.com' "$ROOT/bin/desktop-voice")
+check "the cards say which model, and whether it is here" grep -q 'Speech.modelLine' "$ROOT/shell/Voice/Voice.qml" "$ROOT/shell/Dashboard/Dashboard.qml"
+
+# --- the cloud: the cleverest model, and the furthest away
+cat >"$stubs/curl" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "curl \$*" >>"$sandbox/curls"
+case " \$* " in
+*"/v1/messages"*) cat >"$sandbox/body"; [[ -s "$sandbox/cloud" ]] || exit 22; cat "$sandbox/cloud" ;;
+*"/chat/completions"*) cat >/dev/null; [[ -s "$sandbox/remote" ]] || exit 6; jq -cn --rawfile c "$sandbox/remote" '{choices: [{message: {content: \$c}}]}' ;;
+*"/api/chat"*) [[ -s "$sandbox/model" ]] || exit 22; jq -cn --rawfile c "$sandbox/model" '{message: {content: \$c}}' ;;
+esac
+STUB
+printf '#!/usr/bin/env bash\n[[ -e "%s/haskey" ]] && echo sk-ant-sekrit\n' "$sandbox" >"$stubs/secret-tool"
+chmod +x "$stubs/secret-tool"
+cloud() { : >"$sandbox/calls"; : >"$sandbox/curls"; rm -f "$sandbox/body"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" "${@:2}" run "$1" >/dev/null 2>&1; }
+set_mode() { PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" bash "$VOICE" mode "$1" >/dev/null 2>&1; }
+haiku_says() { jq -cn --arg t "$1" --arg stop "${2:-end_turn}" '{stop_reason: $stop, content: [{type: "text", text: $t}]}' >"$sandbox/cloud"; }
+
+haiku_says '{"action":"workspace","arg":"7"}'
+model_says '{"action":"workspace","arg":"9"}'
+touch "$sandbox/haskey"
+cloud "could you bring up the seventh one"
+check "nothing goes to the cloud unless you chose it" did "hyprctl dispatch workspace 9"
+set_mode cloud
+cloud "could you bring up the seventh one"
+check "in cloud mode a sentence the list does not know goes to Haiku" did "hyprctl dispatch workspace 7"
+check "which is written down as having left" test "$(which_model)" = "claude-haiku-5-5 cloud"
+check "the sentence goes alone: no window, no agents, no last command" lacks -E 'Focused window|Coding agents|Last command' "$sandbox/body"
+check "and is held to the same fixed set" test "$(jq -r '.output_config.format.schema.properties.action.enum | index("workspace") != null' "$sandbox/body")" = true
+check "the key is never on a command line" lacks 'sk-ant-sekrit' "$sandbox/curls"
+check "every sentence sent is kept in a log" grep -q 'could you bring up the seventh one' "$sandbox/state/desktop/voice/sent.log"
+cloud "workspace 4"
+check "what the list knows still never leaves" test ! -e "$sandbox/body"
+cloud "do the usual on o c p two oh four"
+check "a sentence naming a cluster stays on this machine" test ! -e "$sandbox/body"
+cloud "how is idrac security getting on"
+check "and so does one naming a project an agent is working on" test ! -e "$sandbox/body"
+cloud "tell desktop to lock the door"
+check "a message to an agent never goes anywhere" test ! -e "$sandbox/body"
+haiku_says '{"action":"workspace","arg":"7"}' refusal
+cloud "could you bring up the seventh one"
+check "a refusal is no answer, and the local model is asked" did "hyprctl dispatch workspace 9"
+haiku_says '{"action":"lock; reboot","arg":""}'
+model_says 'x'
+cloud "do the thing"
+check "an action the cloud invents is nothing" lacks -E 'dispatch|desktop-lock|reboot' "$sandbox/calls"
+rm -f "$sandbox/haskey"
+haiku_says '{"action":"workspace","arg":"7"}'
+model_says '{"action":"workspace","arg":"9"}'
+cloud "could you bring up the seventh one"
+check "without a key in the keyring nothing is sent" test ! -e "$sandbox/body"
+touch "$sandbox/haskey"; set_mode local
+printf '{"action":"workspace","arg":"5"}' >"$sandbox/remote"
+: >"$sandbox/calls"; : >"$sandbox/curls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/voice.conf" bash "$VOICE" run "could you bring up the seventh one" >/dev/null 2>&1
+check "local mode asks nobody else at all" lacks -E 'v1/messages|chat/completions' "$sandbox/curls"
+check "the key is kept in the keyring, not in a file" grep -q 'secret-tool lookup service desktop-voice account anthropic' "$VOICE"
+check "the AI panel has the switch" grep -q '"desktop-voice", "mode", "next", "--json"' "$ROOT/shell/Bar/panels/AiPanel.qml"
+
 # --- wired in
 check "SUPER + C listens" \
   grep -qx 'bindd = SUPER, C, Voice command, exec, desktop-voice toggle' "$ROOT/default/hypr/bindings/utilities.conf"
 check "in the Lua bindings as well" grep -q 'SUPER + C.*desktop-voice toggle' "$ROOT/default/hypr/bindings/utilities.lua"
-check "the microphone cannot be left open" grep -q 'desktop-voice-endpoint --max "$MAX_SECONDS"' "$VOICE"
+check "the microphone cannot be left open" grep -q 'desktop-voice-endpoint --max "$MAX_SECONDS" <&3' "$VOICE"
 # Transcribing a recording from the command line loads the model every time; the daemon
 # has it loaded. That was the difference between four seconds and one.
 check "it listens through the dictation daemon, which has the model loaded" \

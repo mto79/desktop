@@ -66,6 +66,35 @@ Popup {
   // would be five rows between you and the agents.
   property var voices: []
   property bool choosingVoice: false
+  property string voiceMode: "vpn"
+  property bool voiceCloudKey: false
+
+  function readVoiceMode(text) {
+    try {
+      var m = JSON.parse(text);
+      root.voiceMode = String(m.mode || "vpn");
+      root.voiceCloudKey = m.cloud_key === true;
+    } catch (error) {}
+  }
+
+  Process {
+    id: voiceModeAsk
+
+    command: ["desktop-voice", "mode", "--json"]
+    running: true
+    stdout: StdioCollector {
+      onStreamFinished: root.readVoiceMode(text)
+    }
+  }
+
+  Process {
+    id: voiceModeNext
+
+    command: ["desktop-voice", "mode", "next", "--json"]
+    stdout: StdioCollector {
+      onStreamFinished: root.readVoiceMode(text)
+    }
+  }
   // The one being fetched and tried, so its row can say so: a voice is 60 MB the first time.
   property string fetching: ""
 
@@ -566,6 +595,18 @@ Popup {
       active: root.speaking
       onClicked: if (!sayToggle.running)
         sayToggle.running = true
+    }
+
+    // How far a spoken command may travel when the list does not know it. One click moves
+    // it on: this machine only, the VPN's model, Anthropic. The furthest is said in red.
+    PanelRow {
+      icon: root.voiceMode === "cloud" ? "\u{f015f}" : root.voiceMode === "vpn" ? "\u{f0582}" : "\u{f033e}"
+      label: "Voice commands understood by"
+      sublabel: root.voiceMode === "cloud" ? (root.voiceCloudKey ? "Cloud  ·  sentence only, to Anthropic" : "Cloud  ·  no key: desktop-voice key")
+        : root.voiceMode === "vpn" ? "VPN model when up, else local" : "Local  ·  nothing leaves this machine"
+      active: root.voiceMode === "cloud"
+      onClicked: if (!voiceModeNext.running)
+        voiceModeNext.running = true
     }
 
     PanelRow {
