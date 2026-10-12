@@ -91,5 +91,10 @@ check "workspace 6 has a screen to be on" grep -qx '  "6 laptop"' "$ROOT/bin/des
 # Every asking is half a dozen commands and git on every task.
 check "it only asks again while it is being looked at" \
   test -n "$(sed -n '/interval: 30000/,/onTriggered/p' "$DASH" | grep 'running: root.lookedAt')"
+# Looked at means on a screen. It used to mean focused, and with three monitors focus
+# follows the pointer: the page emptied when the mouse left the laptop's screen and
+# filled again when it came back, in plain view the whole time.
+check "and being looked at does not depend on where the pointer is" \
+  lacks 'lookedAt:.*focusedWorkspace' "$DASH"
 
 finish
