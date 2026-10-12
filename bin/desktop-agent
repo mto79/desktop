@@ -23,6 +23,12 @@ esac
 AGENT="${1:?usage: desktop-agent <claude|opencode> [args...]}"
 shift
 
+# Bun's JavaScriptCore JIT can emit an illegal instruction in some OpenCode builds.
+# Keep OpenCode in the interpreter so a SIGILL does not take down its tmux pane.
+if [[ "${AGENT##*/}" == opencode ]]; then
+  export BUN_JSC_useJIT=0
+fi
+
 # A wrapper that is started by the desktop rather than by a shell cannot assume the
 # shell's PATH. Saying which agent is missing beats bash's "command not found" arriving
 # in a window that is about to close.
