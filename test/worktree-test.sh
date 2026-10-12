@@ -282,8 +282,11 @@ chmod +x "$sandbox/notmux/tmux"
 check "with no tasks the bar module has no text, and so is not drawn" \
   test "$(cd / && TMUX_SESSIONIZER_CONFIG_FILE="$sandbox/no-repos" PATH="$sandbox/notmux:$PATH" bash "$WT" tasks --bar | jq -r .text)" = ""
 rmdir "$empty"
-check "the tasks module is on the bar" \
-  test "$(jq -r '[.bar.layout[][] | select(.id == "tasks")][0].exec' "$ROOT/config/desktop/shell.json")" = "desktop-worktree tasks --bar"
+# The count came off the bar to make room; the panel is still a key away.
+check "the tasks module is off the bar" \
+  test "$(jq '[.bar.layout[][] | select(.id == "tasks")] | length' "$ROOT/config/desktop/shell.json")" = 0
+check "and the tasks panel keeps its key" \
+  grep -q 'togglePanel tasks' "$ROOT/default/hypr/bindings/utilities.conf"
 
 # --- a task as a tab
 # Asked for from a window that has an AI column, a task is a tab in that column rather than
