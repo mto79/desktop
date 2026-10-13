@@ -4,3 +4,7 @@ install/packaging/crc-linux-*/
 
 # Ansible's local cache, created when a playbook is run from this directory.
 .ansible/
+
+# Compiled Python, written beside a script whenever a test imports it. It carries the
+# absolute path of the machine it was compiled on.
+__pycache__/

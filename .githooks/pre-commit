@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# Stop a commit that would publish something private. This repository is public and is one
+# real machine's configuration; see docs/privacy.md for what that has already cost.
+#
+# The check is the working tree's own copy, so a worktree runs what its branch has. Git
+# only looks here once core.hooksPath says so, which install/config/git-hooks.sh does.
+
+exec "$(git rev-parse --show-toplevel)/bin/desktop-privacy-check"
