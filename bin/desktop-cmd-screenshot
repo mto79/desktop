@@ -11,6 +11,11 @@
 
 set -uo pipefail
 
+# A key that does nothing leaves no trace of its own, and "the screenshot key stopped
+# working" cannot be told apart from "the key never arrived" without one. Every press
+# says in the journal how far it got: journalctl --user -t desktop-screenshot
+say() { logger -t desktop-screenshot -- "$*" 2>/dev/null || true; }
+
 [[ -f ~/.config/user-dirs.dirs ]] && source ~/.config/user-dirs.dirs
 OUTPUT_DIR="${DESKTOP_SCREENSHOT_DIR:-${XDG_PICTURES_DIR:-$HOME/Pictures}}"
 
@@ -21,8 +26,23 @@ if [[ ! -d "$OUTPUT_DIR" ]] && ! mkdir -p "$OUTPUT_DIR"; then
   exit 1
 fi
 
-# A picker is already up, so this press is the cancel.
-pkill -x slurp && exit 0
+# One at a time, and the second press is the cancel -- but only a press somebody meant.
+# A key that arrives twice in the same instant (a laptop's Print Screen can be reported
+# by two devices at once, and a worn key bounces) used to start the picker and cancel it
+# in one go, so nothing appeared at all. A second press counts once the picker has been
+# up for a moment; before that it is the same press, and is ignored.
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/desktop-screenshot.lock"
+if ! flock -n 9; then
+  age=$(ps -o etimes= -C slurp 2>/dev/null | sort -n | tail -1 | tr -d ' ')
+  if [[ -n $age && $age -ge 1 ]]; then
+    pkill -x slurp
+    say "second press, picker cancelled"
+  else
+    say "press ignored, a screenshot was already starting"
+  fi
+  exit 0
+fi
+say "started, ${1:-region}"
 
 FILE="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
 
@@ -30,8 +50,21 @@ FILE="$OUTPUT_DIR/screenshot-$(date +'%Y-%m-%d_%H-%M-%S').png"
 # at rather than whatever moved while you were pointing. --silent because the
 # notification belongs at the end of this script, once satty has actually written
 # something.
-hyprshot -m "${1:-region}" --freeze --silent --raw |
-  satty --filename - \
+SHOT=$(mktemp --tmpdir desktop-screenshot.XXXXXX.png)
+trap 'rm -f "$SHOT"' EXIT
+problem=$(hyprshot -m "${1:-region}" --freeze --silent --raw 2>&1 >"$SHOT")
+# The picking is over: the next press is a new screenshot, also while this one is still
+# open in the editor.
+flock -u 9
+exec 9>&-
+# Nothing picked -- cancelled, or an empty region -- is nothing to annotate.
+if [[ ! -s $SHOT ]]; then
+  say "nothing captured${problem:+: ${problem//$'\n'/ }}"
+  exit 0
+fi
+say "captured, opening the editor"
+
+satty --filename "$SHOT" \
     --output-filename "$FILE" \
     --early-exit \
     --actions-on-enter save-to-clipboard \

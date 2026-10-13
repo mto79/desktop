@@ -101,7 +101,7 @@ low; `desktop-battery-details` supplies the facts UPower does not carry.
 
 | Command | Does |
 |---|---|
-| `desktop-cmd-screenshot [window\|output]` | Capture, then annotate in satty |
+| `desktop-cmd-screenshot [window\|output]` | Capture, then annotate in satty. Each press says how far it got: `journalctl --user -t desktop-screenshot` |
 | `desktop-cmd-screenrecord region\|output [audio]` | Record to `.mp4` |
 | `desktop-captures screen\|meetings` | The latest recordings, as JSON |
 | `desktop-cmd-camera status` | What is using the camera |
