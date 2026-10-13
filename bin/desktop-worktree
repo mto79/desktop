@@ -278,7 +278,7 @@ apply_files() { # <main> <worktree>
 # ---------------------------------------------------------------------------- commands
 
 cmd_new() {
-  local from="" branch main existing slug path start
+  local from="" branch main existing slug path start why
   if [[ ${1:-} == --tab ]]; then
     from=${2:-}
     shift 2
@@ -309,14 +309,23 @@ cmd_new() {
     echo "note: could not fetch origin; branching from what is already here"
 
   if git -C "$main" show-ref --verify --quiet "refs/heads/$branch"; then
-    git -C "$main" worktree add --quiet "$path" "$branch"
+    :
   elif git -C "$main" show-ref --verify --quiet "refs/remotes/origin/$branch"; then
-    git -C "$main" worktree add --quiet --track -b "$branch" "$path" "origin/$branch"
+    git -C "$main" branch --quiet --track "$branch" "refs/remotes/origin/$branch"
   else
     # --no-track: the new branch should not follow main; "done" gives it its own upstream.
     start=$(base_ref "$main")
-    git -C "$main" worktree add --quiet --no-track -b "$branch" "$path" "$start"
-  fi || die "git could not create the worktree"
+    git -C "$main" branch --quiet --no-track "$branch" "$start"
+  fi || die "git could not create the branch $branch"
+
+  # The branch is named in full from here on. A short name is looked up among everything
+  # in .git that could be a ref, and a tool that keeps a file of its own there -- opencode
+  # writes .git/opencode -- makes a branch of the same name "ambiguous", which git refuses
+  # to check out. "worktree add" only takes a branch by its short name, so the worktree is
+  # made on the branch's commit and its HEAD is then pointed at the branch itself.
+  why=$(git -C "$main" worktree add --quiet --detach "$path" "refs/heads/$branch" 2>&1) &&
+    why=$(git -C "$path" symbolic-ref HEAD "refs/heads/$branch" 2>&1) ||
+    die "git could not create the worktree${why:+: ${why##*fatal: }}"
 
   echo "$branch: $path"
   apply_files "$main" "$path"

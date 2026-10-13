@@ -140,6 +140,15 @@ check "asking for the same branch again goes back to the task instead of failing
 
 check "list names the task" grep -q "feature/runner-cache" <<<"$(in_repo "$repo" list)"
 
+# opencode keeps a file of its own in .git, and git then calls a branch of that name
+# ambiguous: the task for "opencode" was refused with nothing but "could not create".
+echo 0123456789012345678901234567890123456789 >"$repo/.git/opencode"
+in_repo "$repo" new opencode >/dev/null
+check "a branch named like a file in .git still gets its task" \
+  test "$(git -C "$projects/repo.worktrees/opencode" symbolic-ref HEAD 2>/dev/null)" = refs/heads/opencode
+check "with its files checked out" test -n "$(ls "$projects/repo.worktrees/opencode")"
+check "and git has nothing to say about it" test -z "$(git -C "$projects/repo.worktrees/opencode" status --porcelain 2>/dev/null)"
+
 # --- a .worktree that arrived with a clone
 git clone -q "$sandbox/remote/repo.git" "$projects/cloned" 2>/dev/null
 printf 'run touch pwned\nsymlink ../../outside\ncopy /etc/hostname\n' >"$projects/cloned/.worktree"
