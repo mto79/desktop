@@ -1,71 +1,79 @@
-# DESKTOP
+# Desktop
 
-Desktop is a minimal functional install of Hyprland on Fedora, based on the Omadora/Omarchy implementation and patterns.
+A Fedora + Hyprland desktop: a tiling compositor, a shell written in Quickshell, and a
+set of small `desktop-*` commands that do the work behind every key and panel.
 
-Purpose is to know how the code is build up from the ground.
+It is built on the patterns of Omadora and Omarchy and is deliberately its own thing:
+fewer apps, fewer features, and every piece understood. It is one person's machine, kept
+in public. Take ideas from it; expect to adjust it to your own preferences.
 
-Desktop purposely does not include all the apps and features included with Omadora/Omarchy.
+## What is in it
 
-As with all this kind of implementations it's about you know how to adjust and know your own preferences.
+- **Hyprland**, started through `uwsm`, with bindings, window rules and monitor layouts
+  under `default/hypr/`.
+- **A Quickshell shell**: bar, panels, launcher, notifications, clipboard history,
+  workspace overview, power menu, and a dashboard on workspace 6.
+- **Ghostty and tmux**, with coding agents (Claude Code, opencode, Codex) in their own
+  column, their state on the bar, and tasks in git worktrees.
+- **Voice**: dictation, spoken commands from a fixed list, and speech, all transcribed on
+  the machine.
+- **System care**: backups, a security check, updates with migrations, themes.
 
+## Requirements
 
-## Important
-
-Desktop attempts to install only packages from the official Fedora repositories, currently with the exception of a few Hyprland related packages.
-These are provided by the [solopasha/hyprland](https://copr.fedorainfracloud.org/coprs/solopasha/hyprland/) COPR, and as such, users should perform their own due diligence to ensure Omadora is safe to install.
-
-Some functionality may be broken.
-Feel free to submit issues or PRs for improvement, however there are no guarantees for timely fixes or updates.
+- Fedora, on x86_64 or aarch64. It is developed on Fedora 44.
+- A normal user with sudo; the installer refuses to run as root.
+- Most packages come from the official Fedora repositories. The installer also enables
+  these COPR repositories, which you should judge for yourself:
+  `mineiro/hyprland` (the Hyprland stack), `errornointernet/quickshell`,
+  `scottames/ghostty`, `kylegospo/grub-btrfs` and `tmichett/RHTLC`.
 
 ## Installation
 
-Install the Fedora Custom Operating System base install using the [Everything Network Installer](https://alt.fedoraproject.org/).
-It is recommended to use drive encryption, disable root, and add a privileged user.
+1. Install Fedora with the [Everything Network Installer](https://alt.fedoraproject.org/).
+   Drive encryption, a disabled root account and a privileged user are recommended.
+2. Clone the repository to `~/.local/share/desktop` and run the installer:
 
-Install git (`sudo dnf install -y git`) and clone this repo to the `~/.local/share/desktop` directory.
+       sudo dnf install -y git
+       git clone https://github.com/mto79/desktop.git ~/.local/share/desktop
+       ~/.local/share/desktop/install.sh
 
-Run `~/.local/share/desktop/install.sh` to install.
-sudo dnf install -y git && mkdir -p ~/.local/share/desktop && git clone https://github.com/mto79/desktop.git ~/.local/share/desktop
+The installer runs five stages (preflight, packaging, config, login, post-install) and
+reboots at the end. It copies `config/` over `~/.config/`, so run it on a fresh install,
+not on a machine whose configuration you want to keep.
+[docs/install-and-update.md](docs/install-and-update.md) has the details.
 
-### WiFi only install help
-
-If performing a WiFi only install, you will likely need to select and install the `networkmanager-submodules` group temporarily during the Fedora installation steps.
-
-After the OS install, `nmcli` can be used to connect to your WiFi network and install the `iwd` package, `sudo dnf install -y iwd`.
-The Network Manager Submodules group can then be removed `sudo dnf group remove networkmanager-submodules`, along with all other Network Manager packages `sudo dnf remove NetworkManager*`.
-From there you should be able to connect to your WiFi network using `iwctl`, and continue with the general installation instructions above.
-
-> **NOTE:** You may need to manually enable the built-in DHCP client for IWD as per the [Arch Wiki](https://wiki.archlinux.org/title/Iwd).
-
-> **NOTE:** There is also a chance you may be missing the correct WiFi device drivers after the Fedora install, in this case, you can use the bootable media to boot into Recovery Mode and get a shell, then `chroot /mnt/sysimage`, and from there connect and install the Hardware Support package group  `sudo dnf group install -y hardware-support`, or determine and install the specific drivers needed.
-> You may also need to disable the guard checks in the Desktop `install.sh` due to the additional package group being installed.
+On a Wi-Fi only machine, add the `networkmanager-submodules` group during the Fedora
+installation so that `nmcli` can connect before the installer runs. If the Wi-Fi device
+has no driver after the Fedora install, `sudo dnf group install -y hardware-support`
+from the installation media's rescue shell usually provides it.
 
 ## Usage
 
-Desktop does not use the seamless login implemented, therefore once logged in, start Desktop using `desktop`.
-Stop Desktop by using the power menu or executing the bash command `uswm stop`.
+Log in through SDDM; the session is Hyprland under `uwsm`. A few keys to start with:
+
+| Key | Does |
+|---|---|
+| `SUPER + SPACE` | Launcher |
+| `SUPER + K` | Every key binding, searchable |
+| `SUPER + D`, then a letter | A panel of the bar |
+| `SUPER + C` | Voice command |
+| `SUPER + V` | Clipboard history |
+
+`desktop-update` updates everything: the repository, migrations, packages, Flatpaks and
+firmware.
 
 ## Documentation
 
-[docs/](docs/README.md) has a page per subject: how the repository becomes a running session,
-install and update, Hyprland, the shell, agents and tmux, backups and security, voice,
-themes, testing, and [keeping private information out of a public repository](docs/privacy.md).
+[docs/](docs/README.md) has a page per subject: how the repository becomes a running
+session, install and update, Hyprland, the shell, agents and tmux, backups, security,
+network, audio and Bluetooth, voice, themes, testing, and
+[keeping private information out of a public repository](docs/privacy.md).
 
-## Bluetooth headset
+## Contributing
 
-A connected headset's battery shows beside the Bluetooth icon on the bar -- the lowest one,
-when several things report a battery -- and a notification says so once when it drops to
-15% or below. Both come from bluez, so they work for any device that reports a battery.
-
-A Sony headset (written against the WH-1000XM4) also gets a section in the sound panel:
-its battery, and noise cancelling as three buttons -- Cancelling, Ambient, Off. That part
-is `desktop-headset`, which speaks the protocol of Sony's phone app over Bluetooth:
-
-    desktop-headset status              # JSON: battery, charging, mode
-    desktop-headset mode nc|ambient|off
-
-The headset has one channel for this. While the Sony app on a phone holds it, the panel
-says "not answering" and shows the battery only.
+Some things may be broken. Issues and pull requests are welcome, with no promise of a
+timely answer. `./test/all` runs the tests; it needs no compositor.
 
 ## License
 
@@ -82,4 +90,3 @@ The author takes **zero responsibility** for:
 - or any other damage of any kind
 
 If you use this code, **you accept full responsibility** for whatever happens.
-

@@ -2,10 +2,9 @@
 # desktop-privacy-check stops a commit that would publish something private, in a
 # repository made for the test.
 #
-# This repository is public. A Proxmox API token was committed to it, deleted the next
-# day, and stayed readable in the history for ten months; real MAC addresses came in as
-# test fixtures pasted from nmcli; compiled Python was tracked, with this machine's paths
-# in it. Nothing looked, so nothing said so.
+# This repository is public, and private details arrive in it by accident: a token in an
+# environment file, a real hardware address pasted in as a fixture, compiled files with
+# absolute paths in them. Nothing looked, so nothing said so.
 #
 # Everything private-looking below is assembled at run time. Written out whole, this file
 # would be stopped by the check it tests.
@@ -62,7 +61,7 @@ check "an ordinary line is committed" clean a.sh 'echo "hello"'
 check "a GitHub token is stopped" blocked a.sh "TOKEN=ghp""_$(hex 36)"
 check "a GitLab token is stopped" blocked a.sh "set -x GITLAB glpat""-$(hex 24)"
 check "a private key is stopped" blocked a.sh "-----BEGIN OPENSSH PRIVATE"" KEY-----"
-check "a Proxmox API token is stopped, the one that got out" \
+check "a Proxmox API token is stopped" \
   blocked a.fish "set -x TF_VAR_pve_api_token terraform@pve!provider=$uuid"
 check "a long literal password is stopped" blocked a.conf "smtp_password = \"Zq8$(hex 20)\""
 check "the shape of a token, x-ed out, is not one" clean a.fish '# set -x GITLAB glpat-xxxxxxxxxxxxxxxxxxxxxxxx'

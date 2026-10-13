@@ -5,22 +5,13 @@ facts meet all the time: a comment showing a command's output shows the home net
 default written for this machine names its NAS, a test fixture is pasted from the real
 thing.
 
-## What has already got out
+## Why there is a check
 
-An audit in October 2026 found:
-
-- **A Proxmox API token**, committed in `config/fish/conf.d/envs.fish` in December 2025
-  and deleted the next day. Deleting a line does not take it out of the history, where it
-  stayed readable for ten months.
-- **Real MAC addresses** as test fixtures and in a comment, one of them an access point's.
-  Access point addresses are collected into public location databases, so one can be
-  turned into a street.
-- **Compiled Python** (`bin/__pycache__/*.pyc`) tracked by accident, carrying this
-  machine's absolute paths.
-- **A work email address** as the author of most commits, which a public repository shows
-  to anyone.
-
-None of it was found by anything automatic, because nothing automatic was looking.
+Private details arrive by accident, in small ways: a credential in an environment file, a
+real hardware address pasted in as a test fixture, a build product tracked with absolute
+paths in it, a commit made under the wrong email address. Deleting a line later does not
+take it out of the history. Nothing automatic was looking for any of this, so now
+something does.
 
 ## The check
 
@@ -97,7 +88,7 @@ Three ways, narrowest first:
 
 ## Writing examples and fixtures
 
-Most leaks here came from pasting real output. Use the reserved values instead:
+Pasting real output is the usual way something private gets in. Use the reserved values instead:
 
 | For | Use |
 |---|---|

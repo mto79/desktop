@@ -11,7 +11,7 @@ so a finding stops the commit.
 This repository is public, and it is the configuration of one real machine, so the two
 meet constantly: a comment showing a command's output shows the home network, a default
 written for this machine names its NAS, a test fixture is pasted from the real thing. A
-token that was committed and deleted a day later is still in the history, for good.
+line deleted a day later is still in the history, for good.
 
 What it looks for:
 
