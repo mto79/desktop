@@ -376,7 +376,10 @@ def report(agents, days, window_hours, now=None):
 
     files = read_sources(agents, min(oldest, window_start))
 
+    # Besides the days: how many answers each held, and today by the hour -- a day's total
+    # says how much, not when, and "when" is what shows a session that ran away.
     per_agent = {agent: {"days": {d: empty() for d in dates}, "window": empty(),
+                         "answers": {d: 0 for d in dates}, "hours": [0] * 24,
                          "sessions": set(), "present": False} for agent in agents}
     seen = set()
     for entry in files.values():
@@ -392,9 +395,13 @@ def report(agents, days, window_hours, now=None):
             if record[0] in seen:
                 continue
             seen.add(record[0])
-            day = datetime.fromtimestamp(record[1]).date()
+            at = datetime.fromtimestamp(record[1])
+            day = at.date()
             if day in tally["days"]:
                 add(tally["days"][day], record)
+                tally["answers"][day] += 1
+            if day == today:
+                tally["hours"][at.hour] += record[2] + record[3] + record[5]
             if in_window:
                 add(tally["window"], record)
 
@@ -408,12 +415,14 @@ def report(agents, days, window_hours, now=None):
         if agent not in agents:
             continue
         tally = per_agent[agent]
-        day_list = [dict(finish(tally["days"][d]), date=d.isoformat()) for d in dates]
+        day_list = [dict(finish(tally["days"][d]), date=d.isoformat(), answers=tally["answers"][d])
+                    for d in dates]
         window = finish(tally["window"])
         window["sessions"] = len(tally["sessions"])
         out["agents"].append({
             "id": agent, "name": name, "present": tally["present"],
             "days": day_list, "today": day_list[-1], "window": window,
+            "hours": tally["hours"],
         })
     return out
 

@@ -46,7 +46,7 @@ jq -cn --rawfile c "$sandbox/model" '{message: {content: \$c}}'
 STUB
 chmod +x "$stubs/curl"
 
-say() { : >"$sandbox/calls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" run "$1" >/dev/null 2>&1; }
+say() { : >"$sandbox/calls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" DESKTOP_VOICE_LEARN=off DESKTOP_VOICE_ALIASES="$sandbox/aliases" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_ALIASES="$sandbox/aliases" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" run "$1" >/dev/null 2>&1; }
 did() { grep -qxF -- "$1" "$sandbox/calls"; }
 shown() { jq -r .text "$sandbox/run/desktop/say/now" 2>/dev/null; }
 
@@ -65,6 +65,11 @@ say "Show the news."
 check "the news" did "desktop-shell shell dashboardTab news"
 say "show the clusters"
 check "or by the word you would use for it" did "desktop-shell shell dashboardTab infra"
+check "and the clusters are what that tab then shows" did "desktop-shell shell infraSection clusters"
+say "Which network am I on?"
+check "the network is a heading of the infrastructure tab" did "desktop-shell shell infraSection network"
+say "where am i"
+check "asked for the way you would ask" did "desktop-shell shell infraSection network"
 say "Lock the screen."
 check "lock locks" did "desktop-power lock"
 say "Show the overview"
@@ -265,7 +270,7 @@ esac
 STUB
 printf 'remote_url=http://localhost:9/\nremote_model=Big/Model # the large one\nremote_key_file=%s/key\n' "$sandbox" >"$sandbox/voice.conf"
 printf 'sekrit-key\n' >"$sandbox/key"
-far() { : >"$sandbox/calls"; : >"$sandbox/curls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/voice.conf" bash "$VOICE" run "$1" >/dev/null 2>&1; }
+far() { : >"$sandbox/calls"; : >"$sandbox/curls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" DESKTOP_VOICE_LEARN=off DESKTOP_VOICE_ALIASES="$sandbox/aliases" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/voice.conf" bash "$VOICE" run "$1" >/dev/null 2>&1; }
 which_model() { jq -r '"\(.name) \(.where)"' "$sandbox/run/desktop/voice/model" 2>/dev/null; }
 
 printf '<think>hm</think> {"action":"workspace","arg":"5"}' >"$sandbox/remote"
@@ -298,7 +303,7 @@ esac
 STUB
 printf '#!/usr/bin/env bash\n[[ -e "%s/haskey" ]] && echo sk-ant-sekrit\n' "$sandbox" >"$stubs/secret-tool"
 chmod +x "$stubs/secret-tool"
-cloud() { : >"$sandbox/calls"; : >"$sandbox/curls"; rm -f "$sandbox/body"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" "${@:2}" run "$1" >/dev/null 2>&1; }
+cloud() { : >"$sandbox/calls"; : >"$sandbox/curls"; rm -f "$sandbox/body"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" DESKTOP_VOICE_LEARN=off DESKTOP_VOICE_ALIASES="$sandbox/aliases" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_ALIASES="$sandbox/aliases" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" "${@:2}" run "$1" >/dev/null 2>&1; }
 set_mode() { PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" bash "$VOICE" mode "$1" >/dev/null 2>&1; }
 haiku_says() { jq -cn --arg t "$1" --arg stop "${2:-end_turn}" '{stop_reason: $stop, content: [{type: "text", text: $t}]}' >"$sandbox/cloud"; }
 
@@ -337,10 +342,49 @@ cloud "could you bring up the seventh one"
 check "without a key in the keyring nothing is sent" test ! -e "$sandbox/body"
 touch "$sandbox/haskey"; set_mode local
 printf '{"action":"workspace","arg":"5"}' >"$sandbox/remote"
-: >"$sandbox/calls"; : >"$sandbox/curls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/voice.conf" bash "$VOICE" run "could you bring up the seventh one" >/dev/null 2>&1
+: >"$sandbox/calls"; : >"$sandbox/curls"; PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" DESKTOP_VOICE_LEARN=off DESKTOP_VOICE_ALIASES="$sandbox/aliases" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_CONF="$sandbox/voice.conf" bash "$VOICE" run "could you bring up the seventh one" >/dev/null 2>&1
 check "local mode asks nobody else at all" lacks -E 'v1/messages|chat/completions' "$sandbox/curls"
 check "the key is kept in the keyring, not in a file" grep -q 'secret-tool lookup service desktop-voice account anthropic' "$VOICE"
-check "the AI panel has the switch" grep -q '"desktop-voice", "mode", "next", "--json"' "$ROOT/shell/Bar/panels/AiPanel.qml"
+
+# --- what it learns, and what you tell it
+set_mode local
+learnt() { PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$sandbox/state" DESKTOP_VOICE_ALIASES="$sandbox/aliases" DESKTOP_VOICE_CONF="$sandbox/none.conf" bash "$VOICE" "$@" 2>/dev/null; }
+teachable() { : >"$sandbox/calls"; : >"$sandbox/curls"; learnt run "$1" >/dev/null; }
+model_says '{"action":"workspace","arg":"8"}'
+teachable "let me see number eight"
+check "a sentence a model made sense of is done" did "hyprctl dispatch workspace 8"
+check "and kept, with what it meant and who said so" test "$(learnt learned --json | jq -r '.learned[0] | "\(.phrase)|\(.command)|\(.by)"')" = "let me see number 8|workspace 8|qwen2.5:3b"
+rm -f "$sandbox/model"
+teachable "let me see number eight"
+check "said again it is known, with no model there at all" did "hyprctl dispatch workspace 8"
+check "and nobody is asked" lacks -E 'api/chat|v1/messages|chat/completions' "$sandbox/curls"
+model_says '{"action":"none","arg":""}'
+teachable "order me a pizza"
+check "what nobody could make out is listed too" test "$(learnt learned --json | jq -r '.missed[0].phrase')" = "order me a pizza"
+check "and is not learned" test "$(learnt learned --json | jq '.learned | length')" = 1
+learnt forget "let me see number eight"
+check "a thing learned wrongly can be thrown out" test "$(learnt learned --json | jq '.learned | length')" = 0
+learnt teach "Coffee time!" "lock the screen"
+teachable "coffee time"
+check "you can say what a phrase means yourself" did "desktop-power lock"
+check "which is kept in a file of your own" grep -qx 'coffee time = lock the screen' "$sandbox/aliases"
+learnt teach "pizza" "reboot"
+teachable "pizza"
+check "a phrase cannot be taught to do what is refused" lacks -E 'reboot|systemctl' "$sandbox/calls"
+learnt teach "pizza" 'workspace 3; rm -rf ~'
+teachable "pizza"
+check "nor to reach a shell" lacks -E 'rm -rf' "$sandbox/calls"
+learnt forget "coffee time"
+check "and yours can be dropped the same way" lacks 'coffee time' "$sandbox/aliases"
+check "the dashboard lists what was learned, with a way to drop each" \
+  test "$(grep -c 'onChosen: Speech.forget(modelData.phrase)' "$ROOT/shell/Dashboard/AiPage.qml")" = 3
+check "the three ways are buttons, on the dashboard and in the AI panel" \
+  test "$(grep -l 'options: Speech.modeOptions' "$ROOT/shell/Dashboard/Dashboard.qml" "$ROOT/shell/Bar/panels/AiPanel.qml" | wc -l)" = 2
+# desktop-voice state is asked for every minute and must write nothing, or it would
+# wake the shell that asked, for ever.
+before=$(ls -la --time-style=full-iso "$sandbox/run/desktop/voice/" | md5sum)
+learnt state >/dev/null
+check "asking for the state changes nothing" test "$(ls -la --time-style=full-iso "$sandbox/run/desktop/voice/" | md5sum)" = "$before"
 
 # --- wired in
 check "SUPER + C listens" \
@@ -354,5 +398,11 @@ check "it listens through the dictation daemon, which has the model loaded" \
 check "and what the daemon wrote is removed once it has been understood" grep -q 'rm -f "$RUN_DIR/heard.txt"' "$VOICE"
 check "what was recorded is removed once it has been understood" grep -q 'rm -f "$RUN_DIR/heard.wav"' "$VOICE"
 check "the list of what it understands is printed" test "$(bash "$VOICE" list | wc -l)" -ge 12
+
+# The buttons showed the way that was chosen as the one in use: with the VPN down, "VPN"
+# stayed lit while every sentence went to the local model.
+check "the lit button is the model in use, not the one asked for" \
+  test "$(grep -l 'chosen: Speech.modeInUse' "$ROOT"/shell/Bar/panels/AiPanel.qml "$ROOT"/shell/Dashboard/AiPage.qml "$ROOT"/shell/Dashboard/Dashboard.qml | wc -l)" = 3
+check "and nowhere the other way round" lacks -rE 'chosen: Speech\.mode$' "$ROOT/shell"
 
 finish

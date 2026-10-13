@@ -42,6 +42,13 @@ Item {
       every: 30
     },
     {
+      // The assistant itself: its picture large, what it has learned, what you asked.
+      key: "ai",
+      label: "AI",
+      glyph: "\u{f06a9}",
+      every: 120
+    },
+    {
       // The key stays "home" -- it is the name of the config file and of what desktop-dash
       // is asked for -- while the tab is called what it is about.
       key: "home",
@@ -108,6 +115,12 @@ Item {
     return shown;
   }
 
+  // The tab on show, by name: the pages are told apart by this and not by where they
+  // stand in the row, so a tab can be put between two others without renumbering them.
+  readonly property string key: tabs[current].key
+  // The page with headings of its own, if that is what is showing.
+  readonly property var sectioned: key === "news" ? news : key === "ai" ? ai : key === "infra" ? infra : null
+
   function go(index) {
     current = (index + tabs.length) % tabs.length;
   }
@@ -126,6 +139,18 @@ Item {
   function newsSection(name) {
     refresh("news");
     return news.choose(name);
+  }
+
+  // Of the infrastructure tab: "clusters", "network".
+  function infraSection(name) {
+    refresh("network");
+    return infra.choose(name);
+  }
+
+  // And of the AI tab: "presence", "agents", "voice", "prompts".
+  function aiSection(name) {
+    refresh("agents");
+    return ai.choose(name);
   }
 
   // One command at a time, for whichever tab wants asking: the tab on show first, and the
@@ -173,10 +198,23 @@ Item {
     }
   }
 
-  onCurrentChanged: refresh(tabs[current].key)
+  // What a tab shows besides its own answer: a heading with a command of its own.
+  readonly property var beside: ({
+      "infra": "network",
+      "ai": "agents"
+    })
+
+  onCurrentChanged: {
+    scroll.contentY = 0;
+    refresh(tabs[current].key);
+    if (beside[key])
+      refresh(beside[key]);
+  }
   onLookedAtChanged: if (lookedAt) {
     refresh("start");
     refresh(tabs[current].key);
+    if (beside[key])
+      refresh(beside[key]);
   }
   Component.onCompleted: refresh("start")
 
@@ -193,6 +231,22 @@ Item {
     repeat: true
     running: root.lookedAt && root.shown && root.current !== 0
     onTriggered: root.refresh("start")
+  }
+  // The network under the infrastructure tab is not a tab of its own, and is asked more
+  // often than the clusters beside it: it is cheap, and a cable pulled should show.
+  Timer {
+    interval: 10000
+    repeat: true
+    running: root.lookedAt && root.shown && root.key === "infra"
+    onTriggered: root.refresh("network")
+  }
+  // The agents under the AI tab likewise: who is waiting changes by the minute, the list
+  // of prompts beside it does not.
+  Timer {
+    interval: 15000
+    repeat: true
+    running: root.lookedAt && root.shown && root.key === "ai"
+    onTriggered: root.refresh("agents")
   }
 
   Timer {
@@ -242,6 +296,14 @@ Item {
       boundsBehavior: Flickable.StopAtBounds
       focus: true
 
+      Behavior on contentY {
+        enabled: !scroll.moving
+        NumberAnimation {
+          duration: Style.motionEnter
+          easing.type: Easing.OutCubic
+        }
+      }
+
       // The tabs by number, and from one to the next. Plain keys: on this workspace
       // there is nothing else for them to be typed into.
       Keys.onPressed: event => {
@@ -251,13 +313,20 @@ Item {
           root.go(root.current + 1);
         } else if (event.key === Qt.Key_Left || event.key === Qt.Key_H || event.key === Qt.Key_Backtab) {
           root.go(root.current - 1);
-        } else if ((event.key === Qt.Key_Down || event.key === Qt.Key_J) && root.tabs[root.current].key === "news") {
+        } else if ((event.key === Qt.Key_Down || event.key === Qt.Key_J) && root.sectioned) {
           // A tab with headings of its own: down and up go through them.
-          news.step(1);
-        } else if ((event.key === Qt.Key_Up || event.key === Qt.Key_K) && root.tabs[root.current].key === "news") {
-          news.step(-1);
+          root.sectioned.step(1);
+        } else if ((event.key === Qt.Key_Up || event.key === Qt.Key_K) && root.sectioned) {
+          root.sectioned.step(-1);
+        } else if (event.key === Qt.Key_PageDown || event.key === Qt.Key_Space) {
+          // A page taller than the screen: most of a screen further, and back.
+          scroll.contentY = Math.max(0, Math.min(scroll.contentHeight - scroll.height, scroll.contentY + scroll.height * 0.8));
+        } else if (event.key === Qt.Key_PageUp) {
+          scroll.contentY = Math.max(0, scroll.contentY - scroll.height * 0.8);
         } else if (event.key === Qt.Key_R) {
           root.refresh(root.tabs[root.current].key);
+          if (root.beside[root.key])
+            root.refresh(root.beside[root.key]);
         } else {
           return;
         }
@@ -375,15 +444,47 @@ Item {
                   }
                 }
               }
-              // Which model hears what the list does not know -- and whether that is here.
-              Text {
+              // Who hears what the list does not know: the three ways, the one that is
+              // on filled in, and beside them the model that would be asked this minute.
+              Row {
                 width: parent.width
-                text: "\u{f09d1}  " + Speech.modelLine
-                textFormat: Text.PlainText
-                color: Speech.modelWhere === "cloud" ? Color.popupUrgent : Speech.modelWhere === "remote" ? Color.caution : Color.popupMuted
-                font.family: Style.fontFamily
-                font.pixelSize: Style.fontSize - 2
-                elide: Text.ElideRight
+                spacing: Style.popupPadding
+
+                Choice {
+                  id: modes
+
+                  anchors.verticalCenter: parent.verticalCenter
+                  options: Speech.modeOptions
+                  chosen: Speech.modeInUse
+                  wanted: Speech.mode
+                  onPicked: id => Speech.setMode(id)
+                }
+
+                Column {
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: parent.width - modes.width - parent.spacing
+                  spacing: 1
+
+                  Text {
+                    width: parent.width
+                    text: Speech.model !== "" ? Speech.model : "no model"
+                    textFormat: Text.PlainText
+                    color: Speech.modelTone
+                    font.family: Style.fontFamily
+                    font.pixelSize: Style.fontSize + 1
+                    font.weight: Style.barLabelWeight
+                    elide: Text.ElideRight
+                  }
+                  Text {
+                    width: parent.width
+                    text: Speech.modeNote !== "" ? Speech.modeNote : Speech.whereLine
+                    textFormat: Text.PlainText
+                    color: Color.popupMuted
+                    font.family: Style.fontFamily
+                    font.pixelSize: Style.fontSize - 2
+                    elide: Text.ElideRight
+                  }
+                }
               }
             }
           }
@@ -530,8 +631,10 @@ Item {
 
           Layout.fillWidth: true
           implicitHeight: {
-            var shown = pages.children[root.current];
-            return shown ? shown.implicitHeight : 0;
+            for (var i = 0; i < pages.children.length; i++)
+              if (pages.children[i].visible)
+                return pages.children[i].implicitHeight;
+            return 0;
           }
 
           Item {
@@ -541,39 +644,53 @@ Item {
 
             StartPage {
               width: parent.width
-              visible: root.current === 0
-              active: root.current === 0 && root.lookedAt
+              visible: root.key === "start"
+              active: root.key === "start" && root.lookedAt
               info: root.answers["start"] || null
               now: root.now
             }
+            AiPage {
+              id: ai
+
+              stats: root.answers["agents"] || null
+              // Like the news, it fits itself to what is left of the window.
+              room: scroll.height - holder.y
+              width: parent.width
+              visible: root.key === "ai"
+              active: root.key === "ai" && root.lookedAt
+              info: root.answers["ai"] || null
+            }
             HomePage {
               width: parent.width
-              visible: root.current === 1
-              active: root.current === 1 && root.lookedAt
+              visible: root.key === "home"
+              active: root.key === "home" && root.lookedAt
               info: root.answers["home"] || null
             }
             InfraPage {
+              id: infra
+
+              net: root.answers["network"] || null
               width: parent.width
-              visible: root.current === 2
-              active: root.current === 2 && root.lookedAt
+              visible: root.key === "infra"
+              active: root.key === "infra" && root.lookedAt
               info: root.answers["infra"] || null
             }
             HealthPage {
               width: parent.width
-              visible: root.current === 3
-              active: root.current === 3 && root.lookedAt
+              visible: root.key === "health"
+              active: root.key === "health" && root.lookedAt
               info: root.answers["health"] || null
             }
             FinancePage {
               width: parent.width
-              visible: root.current === 4
-              active: root.current === 4 && root.lookedAt
+              visible: root.key === "finance"
+              active: root.key === "finance" && root.lookedAt
               info: root.answers["finance"] || null
             }
             WatchPage {
               width: parent.width
-              visible: root.current === 5
-              active: root.current === 5 && root.lookedAt
+              visible: root.key === "watch"
+              active: root.key === "watch" && root.lookedAt
               info: root.answers["watch"] || null
             }
             NewsPage {
@@ -582,8 +699,8 @@ Item {
               // What is left of the window under the tabs: this page fits itself to it.
               room: scroll.height - holder.y
               width: parent.width
-              visible: root.current === 6
-              active: root.current === 6 && root.lookedAt
+              visible: root.key === "news"
+              active: root.key === "news" && root.lookedAt
               info: root.answers["news"] || null
             }
           }

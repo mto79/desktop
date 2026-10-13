@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+
+"""Every prompt you typed to a coding agent, newest first, as JSON on standard output.
+
+    desktop-dash-prompts [--limit N]
+
+For the dashboard's AI tab. Each agent keeps what was typed to it in a place and a shape
+of its own, and this reads the three of them into one list:
+
+    Claude Code   ~/.claude/history.jsonl                 one line a prompt
+    Codex         ~/.codex/history.jsonl                  one line a prompt
+    opencode      ~/.local/share/opencode/storage/...     a file a message, its text in parts
+                  (and opencode.db, where a newer opencode keeps the same)
+
+Read only, and only what you typed: not what an agent answered, and nothing is written
+or sent anywhere. An agent that is not installed, or a file in a shape this does not
+know, is an agent with no prompts and never an error -- the page still has the others.
+"""
+
+import argparse
+import glob
+import json
+import os
+import sqlite3
+import sys
+import time
+
+HOME = os.path.expanduser("~")
+# A prompt can be pages long; a list wants its opening.
+LENGTH = 400
+
+
+def tidy(text):
+    return " ".join(str(text).split())[:LENGTH]
+
+
+def name_of(path):
+    return os.path.basename(str(path).rstrip("/")) if path else ""
+
+
+def claude():
+    path = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude")), "history.jsonl")
+    with open(path, encoding="utf-8", errors="replace") as lines:
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                at = int(entry["timestamp"]) / 1000
+                text = tidy(entry.get("display", ""))
+            except (ValueError, KeyError, TypeError):
+                continue
+            if text:
+                yield {"at": int(at), "project": name_of(entry.get("project")), "text": text}
+
+
+def codex():
+    path = os.path.join(os.environ.get("CODEX_HOME", os.path.join(HOME, ".codex")), "history.jsonl")
+    with open(path, encoding="utf-8", errors="replace") as lines:
+        for line in lines:
+            try:
+                entry = json.loads(line)
+                at = int(entry["ts"])
+                text = tidy(entry.get("text", ""))
+            except (ValueError, KeyError, TypeError):
+                continue
+            if text:
+                yield {"at": at, "project": "", "text": text}
+
+
+def opencode():
+    root = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share")), "opencode")
+    seen = set()
+
+    # As files: a message, the session it belongs to (for the directory), its text parts.
+    where = {}
+    for path in glob.glob(os.path.join(root, "storage/session/*/*.json")):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                session = json.load(handle)
+            where[session["id"]] = name_of(session.get("directory"))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    for path in glob.glob(os.path.join(root, "storage/message/*/*.json")):
+        try:
+            with open(path, encoding="utf-8") as handle:
+                message = json.load(handle)
+            if message.get("role") != "user":
+                continue
+            at = int(message["time"]["created"]) / 1000
+            parts = []
+            for part_path in sorted(glob.glob(os.path.join(root, "storage/part", message["id"], "*.json"))):
+                with open(part_path, encoding="utf-8") as handle:
+                    part = json.load(handle)
+                # "synthetic" text is what opencode added itself -- a file it attached.
+                if part.get("type") == "text" and not part.get("synthetic"):
+                    parts.append(part.get("text", ""))
+            text = tidy(" ".join(parts))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if text:
+            seen.add(message["id"])
+            model = (message.get("model") or {}).get("modelID", "")
+            yield {"at": int(at), "project": where.get(message.get("sessionID"), ""), "text": text, "model": model}
+
+    # And as a database, where a newer opencode keeps them.
+    path = os.path.join(root, "opencode.db")
+    if not os.path.exists(path):
+        return
+    try:
+        db = sqlite3.connect("file:" + path + "?mode=ro", uri=True, timeout=1)
+        directories = dict(db.execute("select id, directory from session"))
+        texts = {}
+        for message_id, data in db.execute("select message_id, data from part order by time_created"):
+            try:
+                part = json.loads(data)
+            except ValueError:
+                continue
+            if part.get("type") == "text" and not part.get("synthetic"):
+                texts.setdefault(message_id, []).append(part.get("text", ""))
+        for message_id, session_id, created, data in db.execute("select id, session_id, time_created, data from message"):
+            try:
+                message = json.loads(data)
+            except ValueError:
+                continue
+            text = tidy(" ".join(texts.get(message_id, [])))
+            if message.get("role") != "user" or message_id in seen or not text:
+                continue
+            model = (message.get("model") or {}).get("modelID", "")
+            yield {"at": int(created / 1000), "project": name_of(directories.get(session_id)), "text": text, "model": model}
+    except sqlite3.Error:
+        return
+
+
+AGENTS = [("claude", "Claude Code", claude), ("opencode", "opencode", opencode), ("codex", "Codex", codex)]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--limit", type=int, default=300, help="how many prompts of each agent to list")
+    args = parser.parse_args()
+
+    now = time.time()
+    midnight = time.mktime(time.localtime(now)[:3] + (0, 0, 0, 0, 0, -1))
+    agents = []
+    for key, name, read in AGENTS:
+        try:
+            prompts = sorted(read(), key=lambda p: p["at"], reverse=True)
+        except OSError:
+            prompts = []
+        # The last seven days, oldest first, today last: how much was asked each day.
+        days = []
+        for back in range(6, -1, -1):
+            start = midnight - back * 86400
+            label = time.strftime("%a", time.localtime(start + 43200))[:2]
+            days.append({"label": label, "value": sum(1 for p in prompts if start <= p["at"] < start + 86400)})
+        projects = {}
+        for prompt in prompts:
+            if prompt["project"]:
+                projects[prompt["project"]] = projects.get(prompt["project"], 0) + 1
+        agents.append({
+            "key": key,
+            "name": name,
+            "total": len(prompts),
+            "today": days[-1]["value"],
+            "week": sum(day["value"] for day in days),
+            "last": prompts[0]["at"] if prompts else 0,
+            "days": days,
+            "projects": [{"name": n, "count": c} for n, c in sorted(projects.items(), key=lambda item: -item[1])[:5]],
+            "prompts": prompts[: args.limit],
+        })
+
+    json.dump({
+        "connected": True,
+        "total": sum(agent["total"] for agent in agents),
+        "today": sum(agent["today"] for agent in agents),
+        "week": sum(agent["week"] for agent in agents),
+        "agents": agents,
+    }, sys.stdout, ensure_ascii=False)
+    sys.stdout.write("\n")
+
+
+if __name__ == "__main__":
+    main()

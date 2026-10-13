@@ -7,6 +7,8 @@
 #   desktop-voice list          # what it understands
 #   desktop-voice model         # which model is asked when the list does not know
 #   desktop-voice mode [local|vpn|cloud]   # how far a sentence may travel
+#   desktop-voice learned       # what it has learned, and what it could not make out
+#   desktop-voice forget|teach|edit        # prune it, or say what a phrase means yourself
 #   desktop-voice key           # store the Anthropic key for cloud mode in the keyring
 #
 # Dictation types what you say. This does what you say, from a list: "workspace three",
@@ -114,8 +116,113 @@ remote_reachable() {
 # "where" is remote (it leaves this machine), local, or none (the list only).
 note_model() { # name where
   mkdir -p "$RUN_DIR" 2>/dev/null || return 0
-  jq -cn --arg name "$1" --arg where "$2" '{name: $name, where: $where}' >"$RUN_DIR/model.part" 2>/dev/null &&
-    mv -f "$RUN_DIR/model.part" "$RUN_DIR/model"
+  # A name of its own for the half-written file: the shell asks at the same moments.
+  jq -cn --arg name "$1" --arg where "$2" '{name: $name, where: $where}' >"$RUN_DIR/model.$$" 2>/dev/null &&
+    mv -f "$RUN_DIR/model.$$" "$RUN_DIR/model"
+}
+
+# What it has learned, and what you have told it.
+#
+# A sentence a model made sense of is remembered with what it turned out to mean, and
+# the next time it is said it is simply known: at once, and with nothing asked of any
+# model -- so a sentence goes to the cloud once at most. That is a guess kept, and a
+# guess can be wrong, so the list is yours to see and to prune: on the dashboard, or
+#
+#   desktop-voice learned              what it knows, and what it could not make out
+#   desktop-voice forget "<phrase>"    drop one
+#   desktop-voice teach "<phrase>" "<command>"    say what a phrase means yourself
+#   desktop-voice edit                 your own phrases, in an editor
+#
+# Yours are in ~/.config/desktop/voice.aliases, one "phrase = command" a line, and win
+# over what was learned. Either way the command is a sentence the list knows and goes
+# through the list like anything said: nothing here can make it do what it would refuse.
+ALIASES="${DESKTOP_VOICE_ALIASES:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/voice.aliases}"
+LEARNED="$STATE_DIR/learned.tsv"
+MISSED="$STATE_DIR/missed.tsv"
+
+# Anything that changes what the shell shows tells it so: it watches this file.
+changed() { mkdir -p "$RUN_DIR" 2>/dev/null && date +%s%N >"$RUN_DIR/changed"; }
+
+known_as() { # normalised phrase -> the command it stands for, or nothing
+  local phrase=$1 line key
+  if [[ -r $ALIASES ]]; then
+    while IFS= read -r line; do
+      [[ $line =~ ^[[:space:]]*# || $line != *=* ]] && continue
+      key=$(normalise "${line%%=*}")
+      if [[ $key == "$phrase" ]]; then
+        sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' <<<"${line#*=}"
+        return 0
+      fi
+    done <"$ALIASES"
+  fi
+  [[ ${DESKTOP_VOICE_LEARN:-on} != off && -r $LEARNED ]] && awk -F'\t' -v p="$phrase" '$1 == p { print $2; found = 1; exit } END { exit !found }' "$LEARNED"
+}
+
+learn() { # normalised phrase, command, who made sense of it
+  # DESKTOP_VOICE_LEARN=off: every sentence is put to the model afresh, and none is kept.
+  [[ ${DESKTOP_VOICE_LEARN:-on} != off ]] || return 0
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  { [[ -r $LEARNED ]] && awk -F'\t' -v p="$1" '$1 != p' "$LEARNED"; printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$(date '+%F %H:%M')"; } >"$LEARNED.$$" &&
+    mv -f "$LEARNED.$$" "$LEARNED"
+  unmiss "$1"
+  changed
+}
+
+missed() { # what was heard
+  mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+  local phrase
+  phrase=$(normalise "$1")
+  [[ -n $phrase ]] || return 0
+  { [[ -r $MISSED ]] && awk -F'\t' -v p="$phrase" '$1 != p' "$MISSED" | tail -29; printf '%s\t%s\n' "$phrase" "$(date '+%F %H:%M')"; } >"$MISSED.$$" &&
+    mv -f "$MISSED.$$" "$MISSED"
+  changed
+}
+
+unmiss() { [[ -r $MISSED ]] && awk -F'\t' -v p="$1" '$1 != p' "$MISSED" >"$MISSED.$$" && mv -f "$MISSED.$$" "$MISSED"; }
+
+forget() { # phrase
+  local phrase
+  phrase=$(normalise "$1")
+  [[ -r $LEARNED ]] && awk -F'\t' -v p="$phrase" '$1 != p' "$LEARNED" >"$LEARNED.$$" && mv -f "$LEARNED.$$" "$LEARNED"
+  unmiss "$phrase"
+  if [[ -r $ALIASES ]]; then
+    local line keep=()
+    while IFS= read -r line; do
+      [[ ! $line =~ ^[[:space:]]*# && $line == *=* && $(normalise "${line%%=*}") == "$phrase" ]] || keep+=("$line")
+    done <"$ALIASES"
+    printf '%s\n' "${keep[@]}" >"$ALIASES.$$" && mv -f "$ALIASES.$$" "$ALIASES"
+  fi
+  changed
+}
+
+teach() { # phrase, command
+  local phrase command
+  phrase=$(normalise "$1")
+  command=$(tr -d '\n=' <<<"$2" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+  [[ -n $phrase && -n $command ]] || { echo "usage: desktop-voice teach \"<phrase>\" \"<command>\"" >&2; return 2; }
+  forget "$phrase"
+  mkdir -p "$(dirname "$ALIASES")" && [[ -e $ALIASES ]] || printf '%s\n' "# What a phrase means, for desktop-voice: phrase = command" \
+    "# The command is anything from: desktop-voice list" >"$ALIASES"
+  printf '%s = %s\n' "$phrase" "$command" >>"$ALIASES"
+  changed
+}
+
+# Everything the shell shows about the voice, in one answer, and nothing written.
+state_json() {
+  local name where
+  IFS=$'\t' read -r name where < <(model_now)
+  jq -cn --arg mode "$(mode)" --arg name "$name" --arg where "$where" \
+    --argjson key "$([[ -n $(cloud_key) ]] && echo true || echo false)" \
+    --argjson vpn "$([[ -n $REMOTE_URL ]] && echo true || echo false)" \
+    --argjson reachable "$(remote_reachable && echo true || echo false)" \
+    --arg remote "$REMOTE_MODEL" --arg cloud "$CLOUD_MODEL" --arg local "$MODEL" \
+    --rawfile learned <(cat "$LEARNED" 2>/dev/null) --rawfile missed <(cat "$MISSED" 2>/dev/null) \
+    --rawfile aliases <(grep -v '^[[:space:]]*#' "$ALIASES" 2>/dev/null | grep '=') '
+    {mode: $mode, name: $name, where: $where, cloud_key: $key, vpn_configured: $vpn, vpn_reachable: $reachable,
+     models: {local: $local, vpn: $remote, cloud: $cloud},
+     yours: [$aliases | split("\n")[] | select(. != "") | {phrase: (.[: index("=")] | gsub("^\\s+|\\s+$"; "")), command: (.[index("=") + 1 :] | gsub("^\\s+|\\s+$"; ""))}],
+     learned: ([$learned | split("\n")[] | select(. != "") | split("\t") | {phrase: .[0], command: .[1], by: .[2], when: .[3]}] | reverse),
+     missed: ([$missed | split("\n")[] | select(. != "") | split("\t") | {phrase: .[0], when: .[1]}] | reverse)}'
 }
 
 # The one that would be asked now.
@@ -331,7 +438,8 @@ understand() { # the sentence -> a sentence the list knows, or nothing
     [[ -n $answer ]] && note_model "$CLOUD_MODEL" cloud
   fi
   if [[ -z $answer ]] && remote_reachable; then
-    answer=$(jq -c --arg model "$REMOTE_MODEL" '{model: $model, temperature: 0, max_tokens: 200, messages: .messages,
+    answer=$(jq -c --arg model "$REMOTE_MODEL" '{model: $model, temperature: 0, max_tokens: 1200, messages: .messages,
+        chat_template_kwargs: {enable_thinking: false},
         response_format: {type: "json_schema", json_schema: {name: "action", strict: true, schema: .format}}}' <<<"$request" |
       curl -sf --connect-timeout 2 --max-time "${DESKTOP_VOICE_MODEL_SECONDS:-8}" "$REMOTE_URL/chat/completions" \
         -H 'Content-Type: application/json' -K <([[ -r $REMOTE_KEY_FILE ]] && printf 'header = "Authorization: Bearer %s"\n' "$(tr -d '[:space:]' <"$REMOTE_KEY_FILE")") \
@@ -395,10 +503,15 @@ second_try() { # what was heard, and what to say if this comes to nothing
     show preparing "…"
     meant=$(understand "$heard")
     if [[ -n $meant ]]; then
-      ASKED_MODEL=1 interpret "$meant"
-      return
+      # Kept, when it led somewhere: said again, it is known without asking anybody.
+      if ASKED_MODEL=1 interpret "$meant"; then
+        learn "$(normalise "$heard")" "$meant" "$(jq -r '.name // "a model"' "$RUN_DIR/model" 2>/dev/null)"
+        return 0
+      fi
+      return 1
     fi
   fi
+  [[ -z ${ASKED_MODEL:-} ]] && missed "$heard"
   could_not "$otherwise"
   return 1
 }
@@ -422,6 +535,16 @@ interpret() { # the sentence
     could_not "Nothing was heard"
     return 1
   }
+
+  # A phrase you taught it, or one it learned: it stands for a sentence the list knows.
+  if [[ -z ${KNOWN_AS:-} ]]; then
+    local stands_for
+    stands_for=$(known_as "$said")
+    if [[ -n $stands_for ]]; then
+      KNOWN_AS=1 interpret "$stands_for"
+      return
+    fi
+  fi
 
   # Not from here, however clearly it was said.
   if is '(reboot|restart the|shut ?down|power ?off|log ?out|sign ?out|suspend|hibernate)'; then
@@ -451,15 +574,30 @@ interpret() { # the sentence
   if is '(workspace|desktop) ([0-9]+)$'; then
     number=${BASH_REMATCH[2]}
     hyprctl dispatch workspace "$number" >/dev/null 2>&1 && did "Workspace $number"
-  elif is '(dashboard|show|open)( the)? (start|domotics|home|house|infrastructure|clusters|health|finance|money|watching|versions|news|headlines)( tab| page)?$'; then
+  elif is '(dashboard|show|open)( the)? (start|ai|assistant|domotics|home|house|infrastructure|clusters|health|finance|money|watching|versions|news|headlines)( tab| page)?$'; then
     # A tab of the dashboard, by its subject or the word you would use for it.
     local subject=${BASH_REMATCH[3]} key
     case "$subject" in
-    domotics | house) key=home ;; infrastructure | clusters) key=infra ;; money) key=finance ;;
+    assistant) key=ai ;; domotics | house) key=home ;; infrastructure | clusters) key=infra ;; money) key=finance ;;
     watching | versions) key=watch ;; headlines) key=news ;; *) key=$subject ;;
     esac
     shell_call dashboardTab "$key"
+    # The clusters share their tab with the network; asked for by name, they are shown.
+    [[ $subject == clusters ]] && shell_call infraSection clusters
     hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Dashboard: $subject"
+  elif is '^(show|open)?( me)?( the| my)? ?(prompts|what i asked|voice commands|learned|what you learned|presence|agents|agent statistics|token usage)$'; then
+    # A heading of the dashboard's AI tab.
+    local heading
+    case "${BASH_REMATCH[4]}" in prompts | "what i asked") heading=prompts ;; presence) heading=presence ;;
+    agents | "agent statistics" | "token usage") heading=agents ;; *) heading=voice ;; esac
+    shell_call dashboardTab ai
+    shell_call aiSection "$heading"
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "AI: $heading"
+  elif is '^(show|open)?( me)?( the| my)? ?(network|which network( am i (on|in))?|where am i)$'; then
+    # A heading of the dashboard's infrastructure tab.
+    shell_call dashboardTab infra
+    shell_call infraSection network
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Infrastructure: network"
   elif is '(dashboard|what needs me)$'; then
     hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Dashboard"
   elif is '^lock( the)?( screen| computer| desktop)?$'; then
@@ -728,6 +866,8 @@ tell it to <anything>              the same, for the agent in the window you are
 go to the waiting agent            the first agent that is waiting for you
 start a task called <name>         a branch, a worktree and an agent, in the repository you are in
 finish the task                    opens the question that pushes and removes it
+show my prompts / voice commands   that heading of the dashboard's AI tab
+show my network / where am i       which network this is, on the dashboard
 tech news / world news             that heading of the dashboard's News tab
 read the headlines / what's new on tweakers     three headlines, read out
 cluster status                     which clusters are in trouble, said
@@ -745,8 +885,8 @@ understand) shift; understand "${1:?a sentence}" ;;
 mode)
   # desktop-voice mode [local|vpn|cloud|next] [--json]
   case ${2:-} in
-  local | vpn | cloud) mkdir -p "$STATE_DIR" && echo "$2" >"$STATE_DIR/mode" ;;
-  next) mkdir -p "$STATE_DIR" && case $(mode) in local) echo vpn ;; vpn) echo cloud ;; *) echo local ;; esac >"$STATE_DIR/mode.new" && mv -f "$STATE_DIR/mode.new" "$STATE_DIR/mode" ;;
+  local | vpn | cloud) mkdir -p "$STATE_DIR" && echo "$2" >"$STATE_DIR/mode" && changed ;;
+  next) mkdir -p "$STATE_DIR" && case $(mode) in local) echo vpn ;; vpn) echo cloud ;; *) echo local ;; esac >"$STATE_DIR/mode.new" && mv -f "$STATE_DIR/mode.new" "$STATE_DIR/mode" && changed ;;
   esac
   IFS=$'\t' read -r name where < <(model_now)
   note_model "$name" "$where"
@@ -757,6 +897,23 @@ mode)
     echo "$(mode)"
   fi
   ;;
+state) state_json ;;
+learned)
+  if [[ ${2:-} == --json ]]; then state_json | jq '{yours, learned, missed}'
+  else state_json | jq -r '
+      (if (.yours | length) > 0 then "Yours:", (.yours[] | "  \(.phrase)  ->  \(.command)") else empty end),
+      (if (.learned | length) > 0 then "Learned:", (.learned[] | "  \(.phrase)  ->  \(.command)   (\(.by), \(.when))") else "Nothing learned yet." end),
+      (if (.missed | length) > 0 then "Not understood:", (.missed[] | "  \(.phrase)   (\(.when))") else empty end)'
+  fi ;;
+forget) forget "${2:?a phrase}" ;;
+teach) teach "${2:-}" "${3:-}" ;;
+edit)
+  # With a phrase: a line is started for it, to be finished in the editor.
+  mkdir -p "$(dirname "$ALIASES")"
+  [[ -e $ALIASES ]] || printf '%s\n' "# What a phrase means, for desktop-voice: phrase = command" \
+    "# The command is anything from: desktop-voice list" >"$ALIASES"
+  [[ -n ${2:-} ]] && ! grep -qF -- "$(normalise "$2") =" "$ALIASES" && printf '%s = \n' "$(normalise "$2")" >>"$ALIASES"
+  terminal "${EDITOR:-nvim}" + "$ALIASES" ;;
 key)
   # The key for cloud mode, into the keyring. Asked for by secret-tool itself, so it is
   # never an argument and never in the shell's history.

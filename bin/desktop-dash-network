@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+
+# desktop-dash-network: which network this machine is on, for the dashboard.
+#
+#   desktop-dash-network          one JSON object: the place, the links, the way out
+#
+# Nothing here is measured from outside. NetworkManager knows the connections and what
+# each was handed -- address, router, name servers -- and the kernel's routing table says
+# which of them traffic actually takes; the one thing asked of the network is a single
+# ping of the router. No address is looked up at a service on the internet: where you are
+# is not something to tell a stranger in order to draw it.
+#
+# A network has no name of its own beyond its Wi-Fi name, so the places are yours to name,
+# one to a line in ~/.config/desktop/networks.conf:
+#
+#   Home      | home | ssid=my-wifi
+#   Office    | work | domain=example.org
+#   Office    | work | subnet=10.20.
+#   Datacentre| work | gateway=10.0.0.1
+#
+# name | kind | what gives it away. The kinds are home, work and away, and decide the
+# colour. The first line that matches wins. Without the file the place is called after
+# the Wi-Fi network or the connection, which is what NetworkManager calls it.
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+CONF = os.environ.get("DESKTOP_NETWORKS_CONF", os.path.expanduser("~/.config/desktop/networks.conf"))
+TUNNELS = ("tun", "wireguard", "vpn", "tap")
+
+
+def run(*command, wait=5):
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=wait)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return done.stdout
+
+
+def fields(line):
+    """nmcli -t separates with colons and escapes the ones that belong to a value."""
+    return [part.replace("\\:", ":").replace("\\\\", "\\") for part in re.split(r"(?<!\\):", line)]
+
+
+def active():
+    """The connections that are up: [{name, type, dev}]."""
+    out = []
+    for line in run("nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active").splitlines():
+        parts = fields(line)
+        if len(parts) >= 3 and parts[1] != "loopback":
+            out.append({"name": parts[0], "type": parts[1], "dev": parts[2]})
+    return out
+
+
+def devices():
+    """What each device was given: {dev: {type, connection, addresses, gateway, dns, domains}}."""
+    out, dev = {}, None
+    wanted = "GENERAL.DEVICE,GENERAL.TYPE,GENERAL.CONNECTION,IP4.ADDRESS,IP4.GATEWAY,IP4.DNS,IP4.DOMAIN"
+    for line in run("nmcli", "-t", "-f", wanted, "device", "show").splitlines():
+        key, _, value = line.partition(":")
+        value = value.replace("\\:", ":")
+        key = re.sub(r"\[\d+\]$", "", key)
+        if key == "GENERAL.DEVICE":
+            dev = out.setdefault(value, {"type": "", "connection": "", "addresses": [], "gateway": "", "dns": [], "domains": []})
+        elif dev is None or not value or value == "--":
+            continue
+        elif key == "GENERAL.TYPE":
+            dev["type"] = value
+        elif key == "GENERAL.CONNECTION":
+            dev["connection"] = value
+        elif key == "IP4.ADDRESS":
+            dev["addresses"].append(value)
+        elif key == "IP4.GATEWAY":
+            dev["gateway"] = value
+        elif key == "IP4.DNS":
+            dev["dns"].append(value)
+        elif key == "IP4.DOMAIN":
+            dev["domains"].append(value)
+    return out
+
+
+def wifi():
+    """The Wi-Fi network in use, from the list NetworkManager already has: no new scan."""
+    for line in run("nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,FREQ", "device", "wifi", "list", "--rescan", "no").splitlines():
+        parts = fields(line)
+        if len(parts) >= 4 and parts[0] == "yes":
+            mhz = int(re.sub(r"\D", "", parts[3]) or 0)
+            band = "6 GHz" if mhz >= 5925 else "5 GHz" if mhz >= 4900 else "2.4 GHz" if mhz else ""
+            return {"ssid": parts[1], "signal": int(parts[2] or 0), "band": band}
+    return None
+
+
+def routes():
+    try:
+        return json.loads(run("ip", "-j", "-4", "route", "show") or "[]")
+    except ValueError:
+        return []
+
+
+def ping(address):
+    """Milliseconds to the router, or None when it does not answer one ping in a second."""
+    if not address:
+        return None
+    out = run("ping", "-n", "-c", "1", "-W", "1", address, wait=3)
+    found = re.search(r"time[=<]([\d.]+) ?ms", out)
+    return round(float(found.group(1)), 1) if found else None
+
+
+def places():
+    out = []
+    try:
+        with open(CONF) as conf:
+            for line in conf:
+                line = line.split("#", 1)[0].strip()
+                parts = [part.strip() for part in line.split("|")]
+                if len(parts) == 3 and "=" in parts[2]:
+                    key, _, value = parts[2].partition("=")
+                    out.append((parts[0], parts[1].lower(), key.strip().lower(), value.strip()))
+    except OSError:
+        pass
+    return out
+
+
+def place_of(link, radio):
+    """The name of where this is, and what told us."""
+    if link is None:
+        return {"name": "No network", "kind": "none", "why": "no connection is up"}
+    facts = {
+        "ssid": [radio["ssid"]] if radio and link["kind"] == "wifi" else [],
+        "gateway": [link["gateway"]] if link["gateway"] else [],
+        "connection": [link["connection"]],
+        "domain": link["domains"],
+        "subnet": [link["address"]] if link["address"] else [],
+    }
+    for name, kind, key, value in places():
+        for fact in facts.get(key, []):
+            if fact == value or (key == "subnet" and fact.startswith(value)) or (key == "domain" and fact.endswith(value)):
+                return {"name": name, "kind": kind, "why": f"{key} {fact}"}
+    if facts["ssid"]:
+        return {"name": facts["ssid"][0], "kind": "unknown", "why": "the Wi-Fi network's own name"}
+    return {"name": link["connection"] or link["dev"], "kind": "unknown", "why": "the connection's own name"}
+
+
+def kind_of(nm_type):
+    if nm_type in ("wifi", "802-11-wireless"):
+        return "wifi"
+    if nm_type in ("ethernet", "802-3-ethernet"):
+        return "ethernet"
+    if nm_type in TUNNELS:
+        return "vpn"
+    return nm_type or "other"
+
+
+def main():
+    up, given, table = active(), devices(), routes()
+    radio = wifi()
+
+    # The way out: the default route with the lowest metric is the one the kernel takes.
+    defaults = sorted((r for r in table if r.get("dst") == "default"), key=lambda r: r.get("metric", 0))
+    out_dev = defaults[0].get("dev", "") if defaults else ""
+
+    links, tunnels = [], []
+    for dev, info in given.items():
+        kind = kind_of(info["type"])
+        if not info["connection"] or kind not in ("wifi", "ethernet", "vpn"):
+            continue
+        address = info["addresses"][0] if info["addresses"] else ""
+        link = {
+            "dev": dev,
+            "kind": kind,
+            "connection": info["connection"],
+            "address": address,
+            "gateway": info["gateway"],
+            "dns": info["dns"],
+            "domains": info["domains"],
+            "primary": dev == out_dev,
+        }
+        if kind == "wifi" and radio:
+            link.update(radio)
+        if kind == "vpn":
+            # NetworkManager lists the tunnel's device under a name of its own ("tun0") and
+            # the VPN itself as a connection on the device that carries it. The name worth
+            # showing is the VPN's.
+            named = [c["name"] for c in up if c["type"] in ("vpn", "wireguard")]
+            link["connection"] = named[0] if named else info["connection"]
+            through = [r for r in table if r.get("dev") == dev and r.get("dst") != "default"]
+            link["routes"] = len(through)
+            link["all"] = dev == out_dev
+            link["reaches"] = [r["dst"] for r in through][:8]
+            tunnels.append(link)
+        else:
+            links.append(link)
+    # A VPN with no device of its own to show for it is still a VPN that is up.
+    if not tunnels:
+        for connection in up:
+            if connection["type"] in ("vpn", "wireguard") and connection["dev"] not in [t["dev"] for t in tunnels]:
+                tunnels.append({"dev": connection["dev"], "kind": "vpn", "connection": connection["name"], "address": "",
+                                "gateway": "", "dns": [], "domains": [], "primary": False, "routes": 0, "all": False, "reaches": []})
+    links.sort(key=lambda l: (not l["primary"], l["kind"]))
+
+    # Behind a VPN that takes everything, the link that carries it is still where you are.
+    carrier = next((l for l in links if l["primary"]), None) or (links[0] if links else None)
+    router = carrier["gateway"] if carrier else ""
+    if not router and defaults:
+        router = defaults[0].get("gateway", "")
+    online = run("nmcli", "networking", "connectivity").strip() or "unknown"
+
+    servers, domains = [], []
+    for link in tunnels + links:
+        servers += [s for s in link["dns"] if s not in servers]
+        domains += [d for d in link["domains"] if d not in domains]
+
+    place = place_of(carrier, radio)
+    answer = {
+        "connected": True,
+        "checked": int(time.time()),
+        "place": place,
+        "online": online,
+        "links": links,
+        "vpn": tunnels,
+        "router": {"address": router, "ms": ping(router)},
+        "dns": servers,
+        "domains": domains,
+        "named": bool(places()),
+    }
+    answer["lines"] = words(answer, carrier)
+    json.dump(answer, sys.stdout, separators=(",", ":"))
+    print()
+
+
+def words(answer, carrier):
+    """The same picture in sentences."""
+    lines = []
+    place, router = answer["place"], answer["router"]
+    if carrier is None:
+        return ["No network connection is up."]
+    kinds = {"home": "at home", "work": "at work", "away": "away"}
+    where = f"{place['name']} ({kinds[place['kind']]})" if place["kind"] in kinds else place["name"]
+    if carrier["kind"] == "wifi":
+        how = f"over Wi-Fi {carrier.get('ssid', carrier['connection'])}"
+        if carrier.get("signal"):
+            how += f", signal {carrier['signal']}%" + (f" on {carrier['band']}" if carrier.get("band") else "")
+    else:
+        how = f"by cable ({carrier['connection']})"
+    lines.append(f"You are on {where}, {how}.")
+    others = [l for l in answer["links"] if l is not carrier]
+    for other in others:
+        lines.append(f"Also connected: {other['connection']} ({'Wi-Fi' if other['kind'] == 'wifi' else 'cable'}, {other['address'] or 'no address'}), not the way out.")
+    if carrier["address"]:
+        line = f"This machine is {carrier['address']}"
+        if router["address"]:
+            line += f"; the router is {router['address']}"
+            line += f", answering in {router['ms']} ms" if router["ms"] is not None else ", which does not answer a ping"
+        lines.append(line + ".")
+    say = {"full": "The internet is reachable.", "portal": "A login page stands between you and the internet.",
+           "limited": "The network is up but the internet is not reachable.", "none": "There is no connection."}
+    lines.append(say.get(answer["online"], "Whether the internet is reachable is not known."))
+    for tunnel in answer["vpn"]:
+        if tunnel["all"]:
+            lines.append(f"VPN {tunnel['connection']} is up and takes all traffic.")
+        elif tunnel["routes"]:
+            lines.append(f"VPN {tunnel['connection']} is up: {tunnel['routes']} networks go through it, the rest goes out directly.")
+        else:
+            lines.append(f"VPN {tunnel['connection']} is up.")
+    if not answer["vpn"]:
+        lines.append("No VPN is up.")
+    if answer["dns"]:
+        line = "Names are looked up at " + ", ".join(answer["dns"][:3])
+        if answer["domains"]:
+            line += "; short names are tried in " + ", ".join(answer["domains"][:3])
+        lines.append(line + ".")
+    if not answer["named"]:
+        lines.append("To give this place a name of your own, add a line to ~/.config/desktop/networks.conf.")
+    return lines
+
+
+if __name__ == "__main__":
+    main()

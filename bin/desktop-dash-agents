@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+
+# desktop-dash-agents: everything there is to count about the coding agents, for the
+# dashboard's AI tab.
+#
+#   desktop-dash-agents          one JSON object
+#
+# It measures nothing itself. Each number already has a command that owns it, and this
+# puts their answers side by side and works out what only shows when they are together:
+#
+#   desktop-agent-sessions --json    who is running, and in what state
+#   desktop-status-agents            how many of each agent, the ones that report no state too
+#   desktop-worktree tasks --json    the tasks open in worktrees
+#   desktop-status-claude --report   Claude's plan and how far into its limits
+#   desktop-agent-tokens --json      tokens per day, per agent, for thirty days
+#
+# A command that fails or is missing leaves its part empty; the rest is still an answer.
+
+import json
+import re
+import subprocess
+import sys
+import time
+from datetime import date
+
+DAYS = 30
+
+
+def day_label(stamp, short=False):
+    """Under a bar: the weekday in a week of bars, the date under each Monday in a month."""
+    try:
+        day = date.fromisoformat(stamp)
+    except ValueError:
+        return ""
+    if short:
+        return day.strftime("%a")[:2]
+    return f"{day.day} {day.strftime('%b')}" if day.weekday() == 0 else ""
+
+
+def hour_label(hour):
+    return f"{hour}:00" if hour % 6 == 0 else ""
+
+
+def ask(*command, wait=20):
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=wait)
+        return json.loads(done.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def share(part, whole):
+    return round(100 * part / whole) if whole else 0
+
+
+def usage(agent):
+    """One agent's thirty days, and what they come to."""
+    days = agent.get("days", [])
+    burned = [d.get("burned", 0) for d in days]
+    week, before = burned[-7:], burned[-14:-7]
+    active = [b for b in burned if b > 0]
+    best = max(days, key=lambda d: d.get("burned", 0)) if days else None
+    month = {key: sum(d.get(key, 0) for d in days) for key in ("input", "cache_write", "cache_read", "output")}
+    read_in = month["input"] + month["cache_write"] + month["cache_read"]
+    answers = sum(d.get("answers", 0) for d in days[-7:])
+    today = agent.get("today", {})
+    hours = agent.get("hours", [0] * 24)
+    return {
+        "key": agent.get("id", ""),
+        "name": agent.get("name", ""),
+        "present": bool(agent.get("present")) and sum(burned) > 0,
+        "today": today.get("burned", 0),
+        "today_answers": today.get("answers", 0),
+        "week": sum(week),
+        "before": sum(before),
+        # Against the seven days before these, as a percentage; nothing to compare with is 0.
+        "change": round(100 * (sum(week) - sum(before)) / sum(before)) if sum(before) else 0,
+        "month": sum(burned),
+        "active_days": len(active),
+        "average": round(sum(active) / len(active)) if active else 0,
+        "best": {"date": best["date"], "burned": best.get("burned", 0)} if best and best.get("burned", 0) else None,
+        # Of everything the model was given to read, how much came out of the cache: the
+        # part that was not paid for at the full price.
+        "cached": share(month["cache_read"], read_in),
+        "written": month["output"],
+        "per_answer": round(sum(week) / answers) if answers else 0,
+        "answers": answers,
+        "window": agent.get("window", {}).get("burned", 0),
+        "days": [{"date": d.get("date", ""), "value": d.get("burned", 0)} for d in days],
+        "last7": [{"label": day_label(d.get("date", ""), short=True), "value": d.get("burned", 0)} for d in days[-7:]],
+        "hours": [{"hour": hour, "value": value} for hour, value in enumerate(hours)],
+        "busiest_hour": max(range(24), key=lambda h: hours[h]) if any(hours) else None,
+    }
+
+
+def main():
+    sessions = (ask("desktop-agent-sessions", "--json") or {}).get("sessions", [])
+    tasks = (ask("desktop-worktree", "tasks", "--json") or {}).get("tasks", [])
+    claude = ask("desktop-status-claude", "--report") or {}
+    tokens = ask("desktop-agent-tokens", "--json", "--days", str(DAYS)) or {}
+    running = ask("desktop-status-agents") or {}
+
+    states = {"working": 0, "waiting": 0, "done": 0, "open": 0}
+    for session in sessions:
+        state = session.get("state", "")
+        states[state if state in ("working", "waiting", "done") else "open"] += 1
+
+    # "7 claude, 2 opencode, 5 codex": the count of every agent that is running, which is
+    # more than the sessions above -- opencode and codex report no state to be listed by.
+    kinds = [{"key": name, "count": int(count)}
+             for count, name in re.findall(r"(\d+) (\w+)", running.get("tooltip", ""))]
+
+    agents = [usage(agent) for agent in tokens.get("agents", [])]
+    week = sum(a["week"] for a in agents)
+    before = sum(a["before"] for a in agents)
+    # All agents together, a day at a time and an hour at a time.
+    days = [{"date": stamp, "label": day_label(stamp),
+             "value": sum(a["days"][i]["value"] for a in agents if i < len(a["days"]))}
+            for i, stamp in enumerate(tokens.get("days", []))]
+    hours = [{"hour": hour, "label": hour_label(hour), "value": sum(a["hours"][hour]["value"] for a in agents)}
+             for hour in range(24)]
+
+    answer = {
+        "connected": True,
+        "checked": int(time.time()),
+        "running": sum(k["count"] for k in kinds) or len(sessions),
+        "kinds": kinds,
+        "states": states,
+        "sessions": [{"agent": s.get("agent", ""), "project": s.get("project", ""), "state": s.get("state", ""),
+                      "for": s.get("for", ""), "since": s.get("since", 0), "target": s.get("target", ""),
+                      "socket": s.get("socket", ""), "place": s.get("place", "")} for s in sessions],
+        "tasks": [{"repo": t.get("repo", ""), "name": t.get("name", ""), "ahead": t.get("ahead", 0),
+                   "dirty": t.get("dirty", 0), "state": t.get("state", ""), "target": t.get("target", "")} for t in tasks],
+        "plan": claude.get("plan") or "",
+        "limits": [{"name": l.get("name") or l.get("label") or "", "percent": l.get("percent", 0),
+                    "resets": l.get("resets") or l.get("reset") or ""} for l in claude.get("limits", [])],
+        "window_hours": tokens.get("window_hours", 5),
+        "today": sum(a["today"] for a in agents),
+        "week": week,
+        "change": round(100 * (week - before) / before) if before else 0,
+        "month": sum(a["month"] for a in agents),
+        "days": days,
+        "hours": hours,
+        "agents": agents,
+    }
+    json.dump(answer, sys.stdout, separators=(",", ":"))
+    print()
+
+
+if __name__ == "__main__":
+    main()

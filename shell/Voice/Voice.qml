@@ -103,7 +103,7 @@ Item {
         anchors.topMargin: 3
         text: Speech.modelLine
         textFormat: Text.PlainText
-        color: Speech.modelWhere === "cloud" ? Color.popupUrgent : Speech.modelWhere === "remote" ? Color.caution : Color.popupMuted
+        color: Speech.modelWhere === "local" ? Color.popupMuted : Speech.modelTone
         opacity: 0.8
         font.family: Style.fontFamily
         font.pixelSize: Style.fontSize - 4

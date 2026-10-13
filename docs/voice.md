@@ -34,6 +34,33 @@ typed into its prompt and left for you to read and send.
 
 `desktop-voice-endpoint` decides when somebody has finished speaking.
 
+A sentence the list does not know is given to a model, which may only pick one action
+from the same list; the script then runs it as if it had been said that way. Which model
+is a choice of how far the sentence may travel:
+
+    desktop-voice mode [local|vpn|cloud|next]
+    desktop-voice model         # the one a sentence would go to right now
+
+| Mode | Where the sentence goes |
+|---|---|
+| `local` | A small model on this machine, through Ollama. Nothing leaves. |
+| `vpn` | A model on a network of your own, named in `~/.config/desktop/voice.conf`; local when it cannot be reached. |
+| `cloud` | Anthropic, with the key from the secret service (`desktop-voice key`); then the two above. |
+
+Only a miss is sent, and only the sentence. What is said to an agent never goes to a
+model, and a sentence naming a cluster or a running agent's project stays on this machine
+whatever the mode. Everything sent to the cloud is written to
+`~/.local/state/desktop/voice/sent.log`. The AI panel and the dashboard show the three
+modes as buttons: the filled one is the model in use, an outlined one is what you asked
+for and cannot be had right now.
+
+What a model worked out is remembered, so the same sentence is not asked twice:
+
+    desktop-voice learned       # what it learned, and what it could not make out
+    desktop-voice forget "phrase"
+    desktop-voice teach "phrase" "command"
+    desktop-voice edit          # your own phrases, ~/.config/desktop/voice.aliases
+
 ## Speech
 
     desktop-say "the backup finished"

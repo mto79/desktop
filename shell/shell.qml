@@ -226,6 +226,15 @@ ShellRoot {
       return dashboard.newsSection(name) ? "ok" : "unknown";
     }
 
+    // A heading of the dashboard's AI tab: "presence", "agents", "voice" or "prompts".
+    function infraSection(name: string): string {
+      return dashboard.infraSection(name) ? "ok" : "unknown";
+    }
+
+    function aiSection(name: string): string {
+      return dashboard.aiSection(name) ? "ok" : "unknown";
+    }
+
     function openLauncher(): void {
       launcher.show();
     }

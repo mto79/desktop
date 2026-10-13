@@ -215,7 +215,7 @@ for tab in $(bash "$DASH" tabs); do
   check "the $tab tab is on the dashboard" grep -q "key: \"$tab\"" "$frame"
 done
 check "there is a page for each" \
-  test "$(grep -cE '^            (Start|Home|Infra|Health|Finance|Watch|News)Page \{' "$frame")" = "$(bash "$DASH" tabs | wc -l)"
+  test "$(grep -cE '^            (Start|Ai|Home|Infra|Health|Finance|Watch|News)Page \{' "$frame")" = "$(bash "$DASH" tabs | wc -l)"
 for page in Home Infra Health Finance Watch News; do
   check "the $page page says so when its numbers are invented" grep -q '^  Unconnected {' "$PAGES/${page}Page.qml"
 done
@@ -230,5 +230,130 @@ check "nothing on the dashboard takes the name of an anchor" \
 check "the voice is on every tab" \
   test "$(grep -n -e '^            Orb {' -e '// --- the tabs ---' "$frame" | head -1 | grep -c 'Orb {')" = 1
 check "a tab can be asked for by name" grep -q 'function dashboardTab(key: string): string' "$ROOT/shell/shell.qml"
+
+# --- the AI tab: what you asked the coding agents
+PROMPTS="$ROOT/bin/desktop-dash-prompts"
+home=$(mktemp -d)
+mkdir -p "$home/.claude" "$home/.codex" "$home/.local/share/opencode/storage/"{message/ses_1,part/msg_1,part/msg_2,session/p}
+now=$(date +%s)
+printf '%s\n' "{\"display\":\"fix the   runner\",\"timestamp\":\"$((now - 60))000\",\"project\":\"/src/desktop\"}" \
+  "{\"display\":\"older one\",\"timestamp\":\"$((now - 3 * 86400))000\",\"project\":\"/src/wiki\"}" \
+  'not json at all' >"$home/.claude/history.jsonl"
+printf '%s\n' "{\"session_id\":\"s\",\"ts\":$((now - 120)),\"text\":\"why does it crash\"}" >"$home/.codex/history.jsonl"
+printf '{"id":"ses_1","directory":"/src/infra"}' >"$home/.local/share/opencode/storage/session/p/ses_1.json"
+printf '{"id":"msg_1","sessionID":"ses_1","role":"user","time":{"created":%s000},"model":{"modelID":"Big/Model"}}' "$((now - 30))" >"$home/.local/share/opencode/storage/message/ses_1/msg_1.json"
+printf '{"type":"text","text":"build the inventory"}' >"$home/.local/share/opencode/storage/part/msg_1/a.json"
+printf '{"type":"text","synthetic":true,"text":"<file>secret contents</file>"}' >"$home/.local/share/opencode/storage/part/msg_1/b.json"
+printf '{"id":"msg_2","sessionID":"ses_1","role":"assistant","time":{"created":%s000}}' "$now" >"$home/.local/share/opencode/storage/message/ses_1/msg_2.json"
+printf '{"type":"text","text":"an answer, not a prompt"}' >"$home/.local/share/opencode/storage/part/msg_2/a.json"
+asked=$(HOME="$home" XDG_DATA_HOME="$home/.local/share" CLAUDE_CONFIG_DIR="$home/.claude" CODEX_HOME="$home/.codex" python3 "$PROMPTS")
+of() { jq -r "$1" <<<"$asked"; }
+check "what was typed to Claude Code is read, tidied" test "$(of '.agents[] | select(.key == "claude") | .prompts[0] | "\(.text)|\(.project)"')" = "fix the runner|desktop"
+check "and to Codex" test "$(of '.agents[] | select(.key == "codex") | .prompts[0].text')" = "why does it crash"
+check "and to opencode, with the model it went to" test "$(of '.agents[] | select(.key == "opencode") | .prompts[0] | "\(.text)|\(.project)|\(.model)"')" = "build the inventory|infra|Big/Model"
+check "only what you typed: not an answer, not a file an agent attached" lacks -E 'an answer|secret contents' <<<"$asked"
+check "a line that cannot be read is passed over" test "$(of '.agents[] | select(.key == "claude") | .total')" = 2
+check "today and the week are counted" test "$(of '"\(.today) \(.week)"')" = "3 4"
+empty=$(mktemp -d)
+check "an agent that is not installed has no prompts, and is no error" \
+  test "$(HOME="$empty" XDG_DATA_HOME="$empty/x" CLAUDE_CONFIG_DIR="$empty/c" CODEX_HOME="$empty/d" python3 "$PROMPTS" | jq -r '"\(.connected) \(.total)"')" = "true 0"
+rm -rf "$home" "$empty"
+check "the reader only reads" lacks -E "open\([^)]*['\"][wa]|requests|urllib|socket" "$PROMPTS"
+check "the AI tab stands beside Start" test "$("$DASH" tabs | sed -n 2p)" = ai
+AIPAGE="$PAGES/AiPage.qml"
+check "it has the voice large, the agents, the voice commands, and the prompts" grep -q 'readonly property var headings: \["presence", "agents", "voice", "prompts"\]' "$AIPAGE"
+check "a prompt is copied as an argument, never through a shell" grep -q 'execDetached(\["wl-copy", "--", modelData.text\])' "$AIPAGE"
+# Pages were told apart by where they stood in the row; a tab put between two others
+# would have shown every later page under the wrong name.
+check "pages are shown by name, not by position" lacks -E 'visible: root\.current === [0-9]' "$PAGES/Dashboard.qml"
+check "the large voice is only animated while it is looked at" grep -q 'running: page.active && page.heading === "presence"' "$AIPAGE"
+
+# --- the network, the second heading of the infrastructure tab
+# NetworkManager and the routing table are stubs: a laptop on Wi-Fi at home with a cable
+# in as well, and a VPN that takes a few networks and leaves the rest alone.
+cat >"$stubs/nmcli" <<'STUB'
+#!/usr/bin/env bash
+case "$*" in
+*"connection show --active"*)
+  printf '%s\n' 'the-vpn:vpn:eth0' 'Wired:802-3-ethernet:eth0' 'home\:net:802-11-wireless:wlan0' 'tun0:tun:tun0' 'lo:loopback:lo' ;;
+*"device show"*)
+  printf '%s\n' 'GENERAL.DEVICE:wlan0' 'GENERAL.TYPE:wifi' 'GENERAL.CONNECTION:home\:net' 'IP4.ADDRESS[1]:192.0.2.48/24' 'IP4.GATEWAY:192.0.2.1' 'IP4.DNS[1]:192.0.2.1' '' \
+    'GENERAL.DEVICE:eth0' 'GENERAL.TYPE:ethernet' 'GENERAL.CONNECTION:Wired' 'IP4.ADDRESS[1]:10.1.2.3/24' 'IP4.GATEWAY:10.1.2.254' 'IP4.DNS[1]:10.1.2.53' 'IP4.DOMAIN[1]:lan.example' '' \
+    'GENERAL.DEVICE:tun0' 'GENERAL.TYPE:tun' 'GENERAL.CONNECTION:tun0' 'IP4.ADDRESS[1]:172.16.0.9/32' 'IP4.GATEWAY:' 'IP4.DNS[1]:172.16.0.1' 'IP4.DOMAIN[1]:corp.example' '' \
+    'GENERAL.DEVICE:lo' 'GENERAL.TYPE:loopback' 'GENERAL.CONNECTION:lo' 'IP4.ADDRESS[1]:127.0.0.1/8' ;;
+*"device wifi"*) printf '%s\n' 'no:other:40:2412 MHz' 'yes:home\:net:71:5180 MHz' ;;
+*connectivity*) echo full ;;
+esac
+STUB
+cat >"$stubs/ip" <<'STUB'
+#!/usr/bin/env bash
+echo '[{"dst":"default","gateway":"10.1.2.254","dev":"eth0","metric":100},{"dst":"default","gateway":"192.0.2.1","dev":"wlan0","metric":600},{"dst":"10.1.2.0/24","dev":"eth0"},{"dst":"172.20.0.0/16","dev":"tun0"},{"dst":"172.21.0.0/16","dev":"tun0"}]'
+STUB
+printf '#!/usr/bin/env bash\necho "64 bytes from $5: icmp_seq=1 ttl=64 time=1.5 ms"\n' >"$stubs/ping"
+chmod +x "$stubs/nmcli" "$stubs/ip" "$stubs/ping"
+network() { DESKTOP_NETWORKS_CONF="$sandbox/networks.conf" run network --json; }
+answer=$(network)
+net() { jq -r "$1" <<<"$answer"; }
+check "the link traffic leaves by is the one with the lowest metric" test "$(net '.links[0] | "\(.dev)|\(.primary)"')" = "eth0|true"
+check "the other link is listed, and is not the way out" test "$(net '.links[1] | "\(.dev)|\(.primary)"')" = "wlan0|false"
+check "a Wi-Fi name with a colon in it is read whole" test "$(net '.links[1].ssid')" = "home:net"
+check "with its signal and band" test "$(net '.links[1] | "\(.signal)|\(.band)"')" = "71|5 GHz"
+check "the router is the way out's, and how fast it answers" test "$(net '.router | "\(.address)|\(.ms)"')" = "10.1.2.254|1.5"
+check "a VPN is called by its own name, not its device's" test "$(net '.vpn[0] | "\(.connection)|\(.dev)"')" = "the-vpn|tun0"
+check "and says how many networks go through it" test "$(net '.vpn[0] | "\(.routes)|\(.all)"')" = "2|false"
+check "the tunnel is not counted among the links" test "$(net '.links | length')" = 2
+check "unnamed, the place is what NetworkManager calls it, and says so" test "$(net '.place | "\(.name)|\(.kind)"')" = "Wired|unknown"
+check "the same is said in sentences" grep -q "VPN the-vpn is up: 2 networks go through it" <<<"$(net '.lines[]')"
+printf '%s\n' '# mine' 'Office | work | domain=lan.example' 'Home | home | ssid=home:net' >"$sandbox/networks.conf"
+answer=$(network)
+check "a place is named by your own list" test "$(net '.place | "\(.name)|\(.kind)"')" = "Office|work"
+check "and says what gave it away" test "$(net '.place.why')" = "domain lan.example"
+check "the network is not a tab of its own" lacks -x network <<<"$(run tabs)"
+check "no address is looked up outside" lacks -E 'https?://' "$ROOT/bin/desktop-dash-network"
+check "the packets only travel while the page is looked at" grep -q 'visible: stretch.carries && page.active && page.heading === "network"' "$PAGES/InfraPage.qml"
+check "the network is only asked while infrastructure is on show" grep -q 'running: root.lookedAt && root.shown && root.key === "infra"' "$PAGES/Dashboard.qml"
+
+# --- the agents, a heading of the AI tab
+# Its numbers are other commands' answers put together, so those are the stubs: two
+# sessions, one of them waiting, and two agents with thirty days of tokens between them.
+printf '%s\n' '#!/usr/bin/env bash' 'echo '"'"'{"sessions":[{"agent":"claude","project":"repo","state":"waiting","for":"2m","target":"s:1.1","socket":"/tmp/s"},{"agent":"claude","project":"other","state":"ready","for":"1h"}]}'"'" >"$stubs/desktop-agent-sessions"
+printf '%s\n' '#!/usr/bin/env bash' 'echo '"'"'{"text":"5","tooltip":"2 claude, 3 codex"}'"'" >"$stubs/desktop-status-agents"
+printf '%s\n' '#!/usr/bin/env bash' 'echo '"'"'{"tasks":[{"repo":"repo","name":"fix","ahead":2,"dirty":1,"state":"","target":"s:2.1"}]}'"'" >"$stubs/desktop-worktree"
+printf '%s\n' '#!/usr/bin/env bash' 'echo '"'"'{"plan":"pro","limits":[{"name":"Weekly","percent":40,"resets":"Fri"}]}'"'" >"$stubs/desktop-status-claude"
+cat >"$stubs/desktop-agent-tokens" <<'STUB'
+#!/usr/bin/env python3
+import json
+def day(n, burned, read=0, answers=0):
+    return {"date": f"2026-09-{n:02d}", "input": burned, "cache_write": 0, "cache_read": read, "output": 0, "burned": burned, "answers": answers}
+claude = [day(n, 0) for n in range(1, 17)] + [day(n, 100) for n in range(17, 24)] + [day(n, 200, read=600, answers=10) for n in range(24, 31)]
+idle = [day(n, 0) for n in range(1, 31)]
+hours = [0] * 24
+hours[9] = 200
+print(json.dumps({"days": [d["date"] for d in claude], "window_hours": 5, "agents": [
+    {"id": "claude", "name": "Claude Code", "present": True, "days": claude, "today": claude[-1], "window": {"burned": 150}, "hours": hours},
+    {"id": "codex", "name": "Codex", "present": True, "days": idle, "today": idle[-1], "window": {"burned": 0}, "hours": [0] * 24}]}))
+STUB
+chmod +x "$stubs"/desktop-agent-sessions "$stubs"/desktop-status-agents "$stubs"/desktop-worktree "$stubs"/desktop-status-claude "$stubs"/desktop-agent-tokens
+answer=$(PATH="$stubs:$PATH" python3 "$ROOT/bin/desktop-dash-agents")
+ag() { jq -r "$1" <<<"$answer"; }
+check "every agent running is counted, the ones that report no state too" test "$(ag '.running')" = 5
+check "a session in no state it knows is open, not lost" test "$(ag '.states | "\(.waiting)|\(.open)|\(.working)"')" = "1|1|0"
+check "a session keeps what is needed to go to it" test "$(ag '.sessions[0] | "\(.project)|\(.target)|\(.socket)"')" = "repo|s:1.1|/tmp/s"
+check "the tasks and Claude's limits come along" test "$(ag '"\(.tasks[0].name)|\(.plan)|\(.limits[0].percent)"')" = "fix|pro|40"
+check "this week is the last seven days" test "$(ag '.agents[0].week')" = 1400
+check "set against the seven before them" test "$(ag '.agents[0] | "\(.before)|\(.change)"')" = "700|100"
+check "the average is over days in use, not over the calendar" test "$(ag '.agents[0] | "\(.active_days)|\(.average)"')" = "14|150"
+check "how much was read from the cache is a share of everything read" test "$(ag '.agents[0].cached')" = 67
+check "tokens an answer, over the week" test "$(ag '.agents[0].per_answer')" = 20
+check "the busiest hour of today" test "$(ag '.agents[0].busiest_hour')" = 9
+check "an agent with nothing in thirty days says so, and divides by nothing" test "$(ag '.agents[1] | "\(.present)|\(.average)|\(.change)|\(.best)"')" = "false|0|0|null"
+check "the month is every agent's, a day to a bar" test "$(ag '"\(.days | length)|\(.month)"')" = "30|2100"
+check "a month of bars is dated under its Mondays only" test "$(ag '[.days[] | select(.label != "")] | map(.label) | join(",")')" = "7 Sep,14 Sep,21 Sep,28 Sep"
+printf '#!/usr/bin/env bash\nexit 1\n' >"$stubs/desktop-agent-tokens"
+answer=$(PATH="$stubs:$PATH" python3 "$ROOT/bin/desktop-dash-agents")
+check "a command that fails leaves its part empty and the rest an answer" test "$(ag '"\(.agents | length)|\(.sessions | length)"')" = "0|2"
+check "the agents are not a tab of their own" lacks -x agents <<<"$(run tabs)"
+check "the agents' cards have left the start page" lacks -E 'title: "(Agents|Tasks|Claude)"' "$PAGES/StartPage.qml"
+check "the agents are only asked while the AI tab is on show" grep -q 'running: root.lookedAt && root.shown && root.key === "ai"' "$PAGES/Dashboard.qml"
 
 finish

@@ -69,6 +69,13 @@ tray) or runs a `desktop-*` command and reads its JSON:
 | Updates | `desktop-update-available` |
 | Tasks panel | `desktop-worktree tasks --json` |
 | Dashboard | `desktop-dash <tab> --json` |
+| Dashboard, AI tab | `desktop-dash ai` (the prompts), `desktop-dash agents` (sessions, limits, tokens) |
+| Dashboard, Infrastructure tab | `desktop-dash infra` (the clusters), `desktop-dash network` (where this machine is) |
+
+A dashboard tab can have headings of its own, changed with the up and down keys: the AI
+tab has Presence, Agents, Voice commands and Prompts, the Infrastructure tab Clusters and
+Network. A heading with a command of its own is asked more often than its tab, and only
+while the tab is on show. `Page Down` and `Page Up` scroll a page taller than the screen.
 
 Keeping the logic in a command is what lets it be tested in plain bash with stubs, without
 a compositor.

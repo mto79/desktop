@@ -43,7 +43,8 @@ Everything the desktop does is a `desktop-*` script in `bin/`, on `PATH` through
 | `desktop-agent-*` | Coding agents: running them, tracking them, laying out their windows |
 
 Most are bash. A few are Python where the work is parsing: `desktop-agent-tokens`,
-`desktop-tmux-sidebar`, `desktop-dash-news`, `desktop-voice-endpoint`,
+`desktop-tmux-sidebar`, `desktop-dash-news`, `desktop-dash-prompts`, `desktop-dash-agents`,
+`desktop-dash-network`, `desktop-voice-endpoint`,
 `desktop-privacy-check`. `jq` and `python3` are hard dependencies.
 
 ## What starts at login

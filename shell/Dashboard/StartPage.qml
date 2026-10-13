@@ -6,7 +6,9 @@ import qs.Ui
 import "../Commons/holidays.js" as Holidays
 
 // Start: what needs you. Every one of these has a panel of its own; this is all of them
-// already open. From desktop-dash start, which is desktop-brief.
+// already open. From desktop-dash start, which is desktop-brief. The agents, their tasks
+// and Claude's limits are not here: they have a heading of the AI tab to themselves, and
+// the line under the clock still says when one of them is waiting.
 GridLayout {
   id: page
 
@@ -18,95 +20,15 @@ GridLayout {
   columnSpacing: Style.overviewSpacing
   rowSpacing: Style.overviewSpacing
 
-  function stateText(session) {
-    var what = {
-      "waiting": "waiting for you",
-      "working": "working",
-      "done": "finished",
-      "ready": "open"
-    }[session.state] || session.state;
-    return session["for"] ? what + "  ·  " + session["for"] : what;
-  }
-
-  function stateGlyph(state) {
-    return state === "waiting" ? "\u{f0026}" : state === "done" ? "\u{f012c}" : state === "working" ? "\u{f06a9}" : "\u{f0765}";
-  }
-
-  function jump(target, socket) {
-    if (target)
-      Quickshell.execDetached(["desktop-menu-agents", "--jump", target, socket || ""]);
-  }
-
   function daysUntil(date) {
     var start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     var days = Math.round((date.getTime() - start.getTime()) / 86400000);
     return days === 0 ? "today" : days === 1 ? "tomorrow" : "in " + days + " days";
   }
 
-    // --- agents
-    Card {
-      order: 0
-      appear: page.active
-      icon: "\u{f06a9}"
-      title: "Agents"
-      figure: page.info ? String(page.info.agents.sessions.length) : ""
-      tone: page.info && page.info.agents.waiting > 0 ? Color.popupUrgent : Color.popupAccent
-
-      Repeater {
-        model: page.info ? page.info.agents.sessions.slice(0, 7) : []
-
-        delegate: PanelRow {
-          required property var modelData
-
-          width: parent.width
-          icon: page.stateGlyph(modelData.state)
-          label: modelData.project
-          sublabel: page.stateText(modelData)
-          active: modelData.state === "waiting"
-          accentColor: modelData.state === "waiting" ? Color.popupUrgent : Color.popupAccent
-          enabled: !!modelData.target
-          onClicked: page.jump(modelData.target, modelData.socket)
-        }
-      }
-      Quiet {
-        visible: !!page.info && page.info.agents.sessions.length === 0
-        text: "No agent is running."
-      }
-    }
-
-    // --- tasks
-    Card {
-      order: 1
-      appear: page.active
-      icon: "\u{f062c}"
-      title: "Tasks"
-      figure: page.info ? String(page.info.tasks.length) : ""
-      tone: Color.popupAccent
-
-      Repeater {
-        model: page.info ? page.info.tasks.slice(0, 7) : []
-
-        delegate: PanelRow {
-          required property var modelData
-
-          width: parent.width
-          icon: page.stateGlyph(modelData.state)
-          label: modelData.repo + "  ·  " + modelData.name
-          sublabel: (modelData.ahead === 0 ? "nothing committed yet" : modelData.ahead + (modelData.ahead === 1 ? " commit" : " commits")) + (modelData.dirty > 0 ? "  ·  " + modelData.dirty + " uncommitted" : "")
-          active: modelData.state === "waiting"
-          enabled: modelData.target !== ""
-          onClicked: page.jump(modelData.target, "")
-        }
-      }
-      Quiet {
-        visible: !!page.info && page.info.tasks.length === 0
-        text: "No task is open. prefix + T in tmux starts one."
-      }
-    }
-
     // --- the machine
     Card {
-      order: 2
+      order: 0
       appear: page.active
       icon: "\u{f0565}"
       title: "This machine"
@@ -158,70 +80,9 @@ GridLayout {
       }
     }
 
-    // --- Claude's limits
-    Card {
-      order: 3
-      appear: page.active
-      icon: "\u{f1719}"
-      title: "Claude"
-      figure: page.info && page.info.limits.length > 0 ? Math.max.apply(null, page.info.limits.map(function (l) {
-        return l.percent;
-      })) + "%" : ""
-      tone: Color.popupAccent
-
-      Repeater {
-        model: page.info ? page.info.limits : []
-
-        delegate: Column {
-          id: limit
-
-          required property var modelData
-
-          width: parent.width
-          spacing: 4
-          topPadding: 6
-
-          RowLayout {
-            width: parent.width
-
-            Text {
-              Layout.fillWidth: true
-              text: limit.modelData.name
-              color: Color.popupText
-              font.family: Style.fontFamily
-              font.pixelSize: Style.fontSize
-            }
-            Text {
-              text: limit.modelData.percent + "%  ·  resets " + limit.modelData.resets
-              color: Color.popupMuted
-              font.family: Style.fontFamily
-              font.pixelSize: Style.fontSize - 1
-            }
-          }
-          Rectangle {
-            width: parent.width
-            height: 5
-            radius: height / 2
-            color: Color.popupBorder
-
-            Rectangle {
-              width: Math.round(parent.width * Math.max(0, Math.min(100, limit.modelData.percent)) / 100)
-              height: parent.height
-              radius: parent.radius
-              color: limit.modelData.percent >= 90 ? Color.popupUrgent : Color.popupAccent
-            }
-          }
-        }
-      }
-      Quiet {
-        visible: !!page.info && page.info.limits.length === 0
-        text: "No usage report -- offline, or the login has expired."
-      }
-    }
-
     // --- notifications
     Card {
-      order: 4
+      order: 1
       appear: page.active
       icon: "\u{f009a}"
       title: "Notifications"
@@ -249,7 +110,7 @@ GridLayout {
 
     // --- the days ahead
     Card {
-      order: 5
+      order: 2
       appear: page.active
       icon: "\u{f00ed}"
       title: "Coming up"
@@ -270,4 +131,5 @@ GridLayout {
         }
       }
     }
+
 }

@@ -13,6 +13,11 @@ Item {
   property real ceiling: 0
   property color tone: Color.popupAccent
   property bool appear: true
+  // Many bars and a word under only a few of them: the words are then written at their
+  // full width, over the neighbours' empty places, where a slot's own width would cut
+  // "12 Oct" down to "1…".
+  property bool sparse: false
+  readonly property real gap: sparse ? 4 : 8
   // The bar to draw in full colour, by index; the rest are quieter. -1 for none.
   property int highlight: -1
 
@@ -27,7 +32,7 @@ Item {
 
   Row {
     anchors.fill: parent
-    spacing: 8
+    spacing: bars.gap
 
     Repeater {
       model: bars.values
@@ -40,7 +45,7 @@ Item {
 
         readonly property real amount: Number(modelData[bars.field]) || 0
 
-        width: (bars.width - 8 * (bars.values.length - 1)) / Math.max(1, bars.values.length)
+        width: (bars.width - bars.gap * (bars.values.length - 1)) / Math.max(1, bars.values.length)
         height: bars.height
 
         Rectangle {
@@ -64,11 +69,13 @@ Item {
         Text {
           id: name
 
-          anchors.horizontalCenter: parent.horizontalCenter
+          // Under the first bar a wide word starts at the edge; centred it would lose
+          // its first letters to the card.
+          anchors.horizontalCenter: bars.sparse && slot.index === 0 ? undefined : parent.horizontalCenter
           anchors.bottom: parent.bottom
-          width: parent.width
+          width: bars.sparse ? implicitWidth : parent.width
           horizontalAlignment: Text.AlignHCenter
-          elide: Text.ElideRight
+          elide: bars.sparse ? Text.ElideNone : Text.ElideRight
           text: slot.modelData.label !== undefined ? slot.modelData.label : (slot.modelData.day || slot.modelData.name || "")
           color: Color.popupMuted
           font.family: Style.fontFamily

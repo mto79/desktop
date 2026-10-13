@@ -318,6 +318,12 @@ home) cmd_home ;;
 health) from_file health ;;
 finance) from_file finance ;;
 news) cmd_news ;;
-tabs) printf '%s\n' start home infra health finance watch news ;;
-*) die "usage: desktop-dash <start|home|infra|health|finance|watch|news> [--json|--sample]" ;;
+# What you typed to the coding agents. Its own reader: three agents, three shapes.
+ai) desktop-dash-prompts ;;
+# Not tabs: a heading of the AI tab and one of the infrastructure tab, each asked for on
+# its own.
+agents) desktop-dash-agents ;;
+network) desktop-dash-network ;;
+tabs) printf '%s\n' start ai home infra health finance watch news ;;
+*) die "usage: desktop-dash <start|ai|home|infra|health|finance|watch|news> [--json|--sample]" ;;
 esac

@@ -120,6 +120,9 @@ and the installer copies it over whatever is deployed.
 | An employer's model service, or any other opencode provider of your own | `~/.config/opencode/local.json` | opencode, which merges it into `opencode.json` because `config/uwsm/env` sets `OPENCODE_CONFIG` |
 | The backup repository and its host | `~/.config/desktop/backup.conf` | `desktop-backup`, which writes it once with empty defaults |
 | Home Assistant's address and token | `~/.config/desktop/home.conf` and the secret service | `desktop-dash` |
+| A model on a network of your own, for voice commands | `~/.config/desktop/voice.conf` | `desktop-voice` |
+| Your own spoken phrases | `~/.config/desktop/voice.aliases` | `desktop-voice` |
+| The names of the networks you are on | `~/.config/desktop/networks.conf` | `desktop-dash-network` |
 
 None of these has to exist. Without `chat.conf` the key says no chat is set and the login
 opens one window fewer; without `local.json` opencode has the repository's providers only.
