@@ -57,7 +57,7 @@ head -c $((20 * 1024 * 1024)) /dev/zero >"$sandbox/boot/initramfs-$NEW.img"
 touch "$sandbox/dev/by-uuid/present"
 cat >"$sandbox/fstab" <<'FSTAB'
 UUID=present  /       btrfs  defaults  0 0
-192.168.2.153:/docs  /nas  nfs  _netdev,nofail,x-systemd.automount  0 0
+192.0.2.10:/docs  /nas  nfs  _netdev,nofail,x-systemd.automount  0 0
 FSTAB
 
 reboot_check() {

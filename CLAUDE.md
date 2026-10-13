@@ -55,3 +55,11 @@ rules and the launchers all have ways to be checked cheaply — see the `shell-d
 `visual-verification` and `install-scripts` skills.
 
 Marc's own uncommitted work is often in the tree. Stage precisely; never `git add -A`.
+
+**This repository is public.** `.githooks/pre-commit` runs `desktop-privacy-check` on what
+is staged and refuses a commit that adds a token, a real home directory, a MAC or email
+address, or anything on the deny list in `~/.config/desktop/privacy-deny`. Do not paste
+real command output into a comment or a fixture: use `192.0.2.x`, `00:00:5E:00:53:xx`,
+`host.example`, `/home/u`. Do not reach for `--no-verify`; see `docs/privacy.md`.
+
+`docs/` has a page per subject. Update the page when the subject changes.

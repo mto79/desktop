@@ -3,7 +3,7 @@
 # desktop-workspace-start: open the day's windows at login, each on its own workspace.
 #
 #   1  Brave
-#   2  Mattermost, Teams
+#   2  the chat, Teams
 #   3  tmux, attached to "home", with "llm-wiki" beside it under claude
 #   4  KeePassXC
 #   5  Obsidian
@@ -23,6 +23,13 @@ set -euo pipefail
 
 TIMEOUT="${DESKTOP_WORKSPACE_START_TIMEOUT:-60}"
 LLM_WIKI="$HOME/Data/MTO/Documents/llm-wiki"
+
+# Which chat is this machine's to know, not the repository's: see desktop-launch-chat.
+CHAT_URL=""
+# shellcheck source=/dev/null
+[[ -f "$HOME/.config/desktop/chat.conf" ]] && source "$HOME/.config/desktop/chat.conf"
+chat_host=${CHAT_URL#*://}
+chat_host=${chat_host%%/*}
 
 addresses_of() {
   hyprctl clients -j | jq -r --arg class "$1" '.[] | select(.class == $class) | .address' | sort
@@ -84,7 +91,9 @@ desktop-tmux-restore restore >/dev/null 2>&1 &
 # process, so those go in turn and the rest start together.
 {
   open_on 1 brave-browser uwsm app -- brave-browser
-  open_on 2 brave-chat.nationaalarchief.nl__-Default desktop-launch-webapp "https://chat.nationaalarchief.nl"
+  if [[ -n $CHAT_URL ]]; then
+    open_on 2 "brave-${chat_host}__-Default" desktop-launch-webapp "$CHAT_URL"
+  fi
   open_on 2 brave-teams.microsoft.com__-Default desktop-launch-webapp "https://teams.microsoft.com"
 } &
 open_on 3 com.mitchellh.ghostty uwsm app -- ghostty -e tmux attach-session -t home &

@@ -19,7 +19,7 @@ hl.bind("SUPER + T", hl.dsp.exec_cmd(terminal .. " -e btop"), { description = "A
 -- A # in a web app URL needs no doubling here, as it did in hyprland.conf: in Lua it is
 -- only ever part of the string.
 hl.bind("SUPER + ALT + C", hl.dsp.exec_cmd('desktop-launch-webapp "https://chatgpt.com"'), { description = "ChatGPT" })
-hl.bind("SUPER + ALT + M", hl.dsp.exec_cmd('desktop-launch-webapp "https://chat.nationaalarchief.nl"'), { description = "Mattermost" })
+hl.bind("SUPER + ALT + M", hl.dsp.exec_cmd("desktop-launch-chat"), { description = "Mattermost" })
 hl.bind("SUPER + ALT + T", hl.dsp.exec_cmd('desktop-launch-webapp "https://teams.microsoft.com"'), { description = "Teams" })
 
 -- Unbind and remap defaults

@@ -348,7 +348,7 @@ Item {
     // Chromium names itself, not the site. A Mattermost message arrives as
     //
     //   app_name "Brave"  summary "Direct Message"
-    //   body     "chat.nationaalarchief.nl\n\n@ivo: ..."
+    //   body     "chat.example.com\n\n@someone: ..."
     //
     // so the header read "Brave" for every tab that has ever asked for permission, and
     // the one thing identifying the sender was buried in the first line of the body.

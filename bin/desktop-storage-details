@@ -16,7 +16,7 @@
 # minutes, so each folder is printed as soon as it is measured, at idle priority, and the
 # whole answer is kept for an hour; a panel reopened within the hour gets it instantly.
 #
-#   {"id":"trash","label":"Trash","path":"/home/mto/.local/share/Trash","bytes":123456}
+#   {"id":"trash","label":"Trash","path":"/home/you/.local/share/Trash","bytes":123456}
 
 set -uo pipefail
 

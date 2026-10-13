@@ -2,8 +2,8 @@
 
 # desktop-vpn-details: Each VPN that is up, and what it is doing, as JSON.
 #
-#   [{"name":"nationaalarchief","type":"vpn","server":"vpn-tb.nationaalarchief.nl",
-#     "address":"10.8.32.94","iface":"tun0","full":false,"routes":19,
+#   [{"name":"work","type":"vpn","server":"vpn.example.nl",
+#     "address":"10.20.30.94","iface":"tun0","full":false,"routes":19,
 #     "since":1789714745,"rx":273173827,"tx":9637206,"dns":[]}]
 #
 # NetworkManager's profiles first -- vpn and wireguard -- then any openvpn started by

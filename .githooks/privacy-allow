@@ -1,0 +1,12 @@
+# What desktop-privacy-check finds and is fine. One extended regular expression a line,
+# matched whatever the case, against the thing found rather than the line it is on.
+#
+# For what cannot carry a `privacy: allow` comment of its own, or is not ours to edit.
+# What is private to you goes in ~/.config/desktop/privacy-deny instead, and never here.
+
+# Authors of what is vendored, in the headers they wrote themselves.
+adi1090x@gmail\.com
+justin\.zobel@gmail\.com
+
+# The uid of the key the AWS CLI is signed with, not a person.
+aws-cli@amazon\.com

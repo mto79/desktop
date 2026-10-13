@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# desktop-launch-chat: open the chat as a web app. SUPER + ALT + M.
+#
+# Which chat is this machine's to know. It is usually an employer's, and its address in a
+# public repository tells the world who that is and where they keep it. So it is read
+# from ~/.config/desktop/chat.conf, which is not in the repository:
+#
+#   CHAT_URL="https://chat.example.com"
+#
+# desktop-workspace-start reads the same file for the window it puts on workspace 2.
+
+CONF="${DESKTOP_CHAT_CONF:-$HOME/.config/desktop/chat.conf}"
+
+CHAT_URL=""
+# shellcheck source=/dev/null
+[[ -f $CONF ]] && source "$CONF"
+
+if [[ -z $CHAT_URL ]]; then
+  notify-send "Chat" "No chat is set. Put CHAT_URL=\"https://...\" in $CONF"
+  exit 1
+fi
+
+exec desktop-launch-webapp "$CHAT_URL"

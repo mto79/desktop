@@ -125,6 +125,11 @@ for noop in desktop-workspace-pin notify-send desktop-brief desktop-tmux-restore
 done
 chmod +x "$stubs"/* "$sandbox/.local/bin"/*
 
+# Which chat is the machine's own setting: its address was in the script once, and so in a
+# public repository, naming an employer.
+mkdir -p "$sandbox/.config/desktop"
+echo 'CHAT_URL="https://chat.example.com"' >"$sandbox/.config/desktop/chat.conf"
+
 CLIENTS="$clients" HYPRCTL_LOG="$log" TMUX_LOG="$sandbox/tmux.log" HOME="$sandbox" \
   LAYOUT_LOG="$sandbox/layout.log" \
   DESKTOP_WORKSPACE_START_TIMEOUT=5 DESKTOP_WORKSPACE_START_SETTLE=0 PATH="$stubs:$PATH" timeout 30 bash "$START"
@@ -136,7 +141,7 @@ moved_to() {
 }
 check "Brave is moved to workspace 1" moved_to 1 "brave-browser"
 check "tmux is moved to workspace 3" moved_to 3 "ghostty -e tmux attach-session -t home"
-check "Mattermost is moved to workspace 2" moved_to 2 "https://chat.nationaalarchief.nl"
+check "the chat this machine names is moved to workspace 2" moved_to 2 "https://chat.example.com"
 check "Teams is moved to workspace 2" moved_to 2 "https://teams.microsoft.com"
 check "KeePassXC is moved to workspace 4" moved_to 4 "keepassxc"
 check "Obsidian is moved to workspace 5" moved_to 5 "obsidian"
