@@ -45,6 +45,12 @@ From there you should be able to connect to your WiFi network using `iwctl`, and
 Desktop does not use the seamless login implemented, therefore once logged in, start Desktop using `desktop`.
 Stop Desktop by using the power menu or executing the bash command `uswm stop`.
 
+## Documentation
+
+[docs/](docs/README.md) has a page per subject: how the repository becomes a running session,
+install and update, Hyprland, the shell, agents and tmux, backups and security, voice,
+themes, testing, and [keeping private information out of a public repository](docs/privacy.md).
+
 ## Bluetooth headset
 
 A connected headset's battery shows beside the Bluetooth icon on the bar -- the lowest one,
