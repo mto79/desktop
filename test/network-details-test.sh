@@ -22,14 +22,14 @@ stub nmcli <<'STUB'
 #!/usr/bin/env bash
 case "$*" in
 "-t -f DEVICE,STATE device") printf 'eth9:connected\nwlan9:connected\nlo:connected (externally)\ntun0:connected (externally)\n' ;;
-"-t device show eth9") printf 'GENERAL.TYPE:ethernet\nGENERAL.HWADDR:28:00:AF:C5:28:CD\nGENERAL.MTU:1500\nGENERAL.CONNECTION:dock\nIP4.ADDRESS[1]:192.168.2.7/24\nIP4.GATEWAY:192.168.2.1\nIP4.DNS[1]:192.168.2.1\nIP4.DNS[2]:9.9.9.9\nIP6.ADDRESS[1]:fe80::1/64\nIP6.ADDRESS[2]:2001:db8::7/64\nIP6.GATEWAY:\n' ;;
+"-t device show eth9") printf 'GENERAL.TYPE:ethernet\nGENERAL.HWADDR:00:00:5E:00:53:01\nGENERAL.MTU:1500\nGENERAL.CONNECTION:dock\nIP4.ADDRESS[1]:192.168.2.7/24\nIP4.GATEWAY:192.168.2.1\nIP4.DNS[1]:192.168.2.1\nIP4.DNS[2]:9.9.9.9\nIP6.ADDRESS[1]:fe80::1/64\nIP6.ADDRESS[2]:2001:db8::7/64\nIP6.GATEWAY:\n' ;;
 "-t device show wlan9") printf 'GENERAL.TYPE:wifi\nGENERAL.CONNECTION:home\nIP4.ADDRESS[1]:192.168.2.48/24\nIP4.GATEWAY:192.168.2.1\n' ;;
-"-t device show tun0") printf 'GENERAL.TYPE:tun\nGENERAL.CONNECTION:tun0\nIP4.ADDRESS[1]:10.8.32.94/32\n' ;;
+"-t device show tun0") printf 'GENERAL.TYPE:tun\nGENERAL.CONNECTION:tun0\nIP4.ADDRESS[1]:10.20.30.94/32\n' ;;
 esac
 STUB
 stub iw <<'STUB'
 #!/usr/bin/env bash
-printf 'Connected to 60:22:32:ac:9a:2f (on wlan9)\n\tSSID: home "5G"\n\tfreq: 5220.0\n\tsignal: -44 dBm\n\ttx bitrate: 1200.9 MBit/s 80MHz HE-MCS 11 HE-NSS 2\n'
+printf 'Connected to 00:00:5e:00:53:02 (on wlan9)\n\tSSID: home "5G"\n\tfreq: 5220.0\n\tsignal: -44 dBm\n\ttx bitrate: 1200.9 MBit/s 80MHz HE-MCS 11 HE-NSS 2\n'
 STUB
 
 details() { env -i PATH="$sandbox/path" WIRED="${1:-eth9}" bash "$ROOT/bin/desktop-network-details"; }

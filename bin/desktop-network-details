@@ -12,7 +12,7 @@
 #
 #   {"primary":{"iface":"enp62s0u2u4","type":"ethernet","connection":"home-dell-wd19tb",
 #     "ipv4":["192.168.2.7/24"],"ipv6":[],"gateway":"192.168.2.1","dns":["192.168.2.1"],
-#     "mac":"28:00:AF:C5:28:CD","mtu":1500,"speed":1000,"wifi":null},
+#     "mac":"00:00:5E:00:53:01","mtu":1500,"speed":1000,"wifi":null},
 #    "others":[{"iface":"wlp3s0f0","type":"wifi","connection":"mto-home","ipv4":[...]}]}
 #
 # --public asks Cloudflare's trace endpoint -- the same edge the speed test uses -- and

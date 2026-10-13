@@ -21,13 +21,13 @@ case "$*" in
 "-t connection show work")
   printf 'connection.timestamp:1789714745\nipv4.never-default:yes\n'
   printf 'vpn.data:auth = SHA256, ca = /home/u/.cert/work-ca.pem, cert-pass-flags = 1, remote = vpn.example.nl:1194:udp, username = secretuser\n'
-  printf 'IP4.ADDRESS[1]:10.8.32.94/32\nIP4.DNS[1]:10.8.32.1\n'
-  printf 'IP4.ROUTE[1]:dst = 10.8.32.93/32\nIP4.ROUTE[2]:dst = 10.8.32.1/32\nIP4.ROUTE[3]:dst = 10.25.160.0/24\nIP4.ROUTE[4]:dst = 10.100.0.0/16\n' ;;
+  printf 'IP4.ADDRESS[1]:10.20.30.94/32\nIP4.DNS[1]:10.20.30.1\n'
+  printf 'IP4.ROUTE[1]:dst = 10.20.30.93/32\nIP4.ROUTE[2]:dst = 10.20.30.1/32\nIP4.ROUTE[3]:dst = 10.40.0.0/24\nIP4.ROUTE[4]:dst = 10.50.0.0/16\n' ;;
 esac
 STUB
 stub ip <<'STUB'
 #!/usr/bin/env bash
-echo '[{"ifname":"enp1","addr_info":[{"local":"192.168.2.7"}]},{"ifname":"tun0","addr_info":[{"local":"10.8.32.94"}]}]'
+echo '[{"ifname":"enp1","addr_info":[{"local":"192.168.2.7"}]},{"ifname":"tun0","addr_info":[{"local":"10.20.30.94"}]}]'
 STUB
 stub pgrep <<'STUB'
 #!/usr/bin/env bash
@@ -42,6 +42,6 @@ check "nothing else from vpn.data comes out" lacks -E "cert|secretuser|SHA256|pe
 check "a split tunnel is split, and its own host routes are not counted" \
   test "$(jq -c '.[0] | [.full, .routes]' <<<"$out")" = '[false,2]'
 check "the device is the one holding the tunnel's address" test "$(jq -r '.[0].iface' <<<"$out")" = tun0
-check "DNS through the tunnel is named" test "$(jq -c '.[0].dns' <<<"$out")" = '["10.8.32.1"]'
+check "DNS through the tunnel is named" test "$(jq -c '.[0].dns' <<<"$out")" = '["10.20.30.1"]'
 
 finish

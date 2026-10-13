@@ -47,12 +47,15 @@ write_default_config() {
 # desktop-backup configuration. Written once, never overwritten -- edit freely.
 
 # Where the backups go. restic's own sftp transport, so it needs an SSH key that
-# reaches the NAS unprompted; `ssh <host>` working is the whole prerequisite.
-BACKUP_REPOSITORY="sftp:mto@192.168.2.153:/mnt/tank/backups/desktop-na"
+# reaches the NAS unprompted; `ssh <host>` working is the whole prerequisite. Empty until
+# it is filled in, and nothing is backed up until then:
+#   BACKUP_REPOSITORY="sftp:you@nas.example:/srv/backups/desktop"
+BACKUP_REPOSITORY=""
 
 # The host desktop-backup probes before trying, so an absent NAS is a clean skip
 # rather than a hung restic. Leave empty to always attempt the backup.
-BACKUP_HOST="192.168.2.153"
+#   BACKUP_HOST="nas.example"
+BACKUP_HOST=""
 BACKUP_PORT=22
 
 # Mode 0600, on an already-encrypted disk. Losing this file loses every backup in the

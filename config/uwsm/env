@@ -17,3 +17,8 @@ desktop-cmd-present mise && eval "$(mise activate bash)"
 
 # Update user dirs
 desktop-cmd-present xdg-user-dirs-update && xdg-user-dirs-update --quiet
+
+# opencode merges this file into ~/.config/opencode/opencode.json. It holds the providers
+# that are this machine's own -- an employer's model service, say -- which the repository,
+# being public, does not carry. It need not exist.
+export OPENCODE_CONFIG=$HOME/.config/opencode/local.json

@@ -14,21 +14,6 @@
           "name": "Qwen3 8B"
         }
       }
-    },
-    "anthropic-compat": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Het NA",
-      "options": {
-        "baseURL": "https://llm-service-edepot-test-ai.apps.ocp302.nationaalarchief.net",
-        "apiKey": "{file:~/.config/opencode/na-llm.key}"
-      },
-      "models": {
-        "Qwen/Qwen3.8-27B": {
-          "name": "Qwen/Qwen3.8-27B",
-          "reasoning": true,
-          "tool_call": true
-        }
-      }
     }
   }
 }
