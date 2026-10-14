@@ -29,8 +29,12 @@ QtObject {
   onWantedChanged: if (!wanted)
     levels = []
 
-  // `12;480;1000;...;` -- the trailing delimiter leaves an empty last field.
+  // `12;480;1000;...;` -- the trailing delimiter leaves an empty last field. cava sets
+  // the terminal title before its first frame, escape code and all, on stdout; a line
+  // that is not all numbers keeps the last reading rather than becoming one.
   function parse(line) {
+    if (!/^[0-9;]+$/.test(line))
+      return levels;
     var fields = line.split(";");
     var out = [];
     for (var i = 0; i < fields.length; i++)
