@@ -30,7 +30,7 @@ magick /tmp/shot.png -crop 1000x76+2840+0 +repage -filter point -resize 200% /tm
 `hyprctl clients` and `hyprctl monitors` report **logical** coordinates. `grim` output is
 physical. For a window on a monitor with origin `(mx, my)` and `scale`:
 
-```
+```text
 physical_x = (logical_x - mx) * scale
 physical_y = (logical_y - my) * scale
 width      = logical_w * scale

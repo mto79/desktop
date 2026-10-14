@@ -83,6 +83,7 @@ This software is provided "AS IS" with absolutely **no guarantees**.
 Use it entirely at **your own risk**.
 
 The author takes **zero responsibility** for:
+
 - broken systems
 - lost data
 - security issues

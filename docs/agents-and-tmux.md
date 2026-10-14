@@ -136,9 +136,9 @@ It asks every host glab, gh and tea are logged in to, read from their own config
 at each run: GitLab through glab, GitHub through gh, Forgejo and Gitea -- Codeberg among
 them -- through tea. A new instance needs only a `glab auth login` or a `tea login add`,
 and no host is named in this repository. tea is installed by `install/packaging/tea.sh`,
-one pinned version checked against a checksum written there. A host that does not answer, because it is only reachable over the
-VPN, is skipped without a message, and what it already showed is kept; only a host that
-answered can say a request is gone. The first check of a host gives one popup with the
-number already waiting and a link to the list, and more than five new requests at once
-are one popup as well. What has been shown is kept per host under
-`~/.local/state/desktop/reviews/`.
+one pinned version checked against a checksum written there. A host that does not
+answer, because it is only reachable over the VPN, is skipped without a message, and
+what it already showed is kept; only a host that answered can say a request is gone. The
+first check of a host gives one popup with the number already waiting and a link to the
+list, and more than five new requests at once are one popup as well. What has been shown
+is kept per host under `~/.local/state/desktop/reviews/`.

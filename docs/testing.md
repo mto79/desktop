@@ -55,6 +55,15 @@ removable", not "test_removable_3".
 | `window-rules-test.sh` | The floating rules match the titles the launchers pass |
 | `privacy-test.sh` | The commit hook stops what it should and lets through what it should |
 
+## Markdown
+
+    npx markdownlint-cli2
+
+checks every Markdown file against `.markdownlint-cli2.jsonc`: prose wraps at 90 columns,
+tables and code blocks are left as wide as they need, and the vendored tmux plugin manager
+and yazi flavour are skipped. It needs Node and the network, so it is not part of
+`./test/all`; run it when a page changes.
+
 ## Checking the running system
 
 Passing tests show the logic holds. They do not show the bar looks right.
