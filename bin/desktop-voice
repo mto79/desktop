@@ -104,12 +104,19 @@ stays_home() { # the sentence
   return 1
 }
 
-remote_reachable() {
-  [[ $(mode) != local ]] || return 1
-  [[ -n $REMOTE_URL && -n $REMOTE_MODEL && $MODEL != off ]] || return 1
+# Whether the model on your own network is there to be asked, whatever the mode: the
+# buttons show it as available or not, and "not available" must not mean "not chosen".
+remote_there() {
+  [[ -n $REMOTE_URL && -n $REMOTE_MODEL ]] || return 1
   local host=${REMOTE_URL#*://}
   host=${host%%[:/]*}
   getent hosts "$host" >/dev/null 2>&1
+}
+
+# Whether a sentence would go there: it is there, and the mode lets it.
+remote_reachable() {
+  [[ $(mode) != local && $MODEL != off ]] || return 1
+  remote_there
 }
 
 # Which model a sentence goes to, where everybody can see it: the cards read this file.
@@ -214,7 +221,7 @@ state_json() {
   jq -cn --arg mode "$(mode)" --arg name "$name" --arg where "$where" \
     --argjson key "$([[ -n $(cloud_key) ]] && echo true || echo false)" \
     --argjson vpn "$([[ -n $REMOTE_URL ]] && echo true || echo false)" \
-    --argjson reachable "$(remote_reachable && echo true || echo false)" \
+    --argjson reachable "$(remote_there && echo true || echo false)" \
     --arg remote "$REMOTE_MODEL" --arg cloud "$CLOUD_MODEL" --arg local "$MODEL" \
     --rawfile learned <(cat "$LEARNED" 2>/dev/null) --rawfile missed <(cat "$MISSED" 2>/dev/null) \
     --rawfile aliases <(grep -v '^[[:space:]]*#' "$ALIASES" 2>/dev/null | grep '=') '

@@ -405,4 +405,9 @@ check "the lit button is the model in use, not the one asked for" \
   test "$(grep -l 'chosen: Speech.modeInUse' "$ROOT"/shell/Bar/panels/AiPanel.qml "$ROOT"/shell/Dashboard/AiPage.qml "$ROOT"/shell/Dashboard/Dashboard.qml | wc -l)" = 3
 check "and nowhere the other way round" lacks -rE 'chosen: Speech\.mode$' "$ROOT/shell"
 
+# In local mode the VPN's model was reported as unreachable, so its button was dimmed
+# with the VPN up -- and looked like something that could not be chosen.
+check "whether the VPN model is there does not depend on the mode" \
+  grep -q 'argjson reachable "$(remote_there ' "$ROOT/bin/desktop-voice"
+
 finish

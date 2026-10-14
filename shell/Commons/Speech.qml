@@ -88,7 +88,7 @@ QtObject {
     }
   ]
   // What the chosen way comes to when it cannot be had.
-  readonly property string modeNote: mode === "cloud" && !cloudKey ? "no key yet: desktop-voice key" : mode === "vpn" && !vpnConfigured ? "no VPN model set up" : mode === "vpn" && !vpnReachable ? "VPN is down, so local until it is back" : ""
+  readonly property string modeNote: mode === "cloud" && !cloudKey ? "no key yet: desktop-voice key" : mode === "vpn" && !vpnConfigured ? "no VPN model set up" : mode === "vpn" && !vpnReachable ? "VPN is down, so local until it is back" : mode === "local" && vpnConfigured && vpnReachable ? "VPN is up: click VPN to use its model" : ""
 
   function setMode(name) {
     root.mode = name;
