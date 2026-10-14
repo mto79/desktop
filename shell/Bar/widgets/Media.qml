@@ -2,7 +2,11 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// What is playing, from MPRIS. Absent entirely when nothing is.
+// That something is playing, from MPRIS. Absent entirely when nothing is.
+//
+// No title on the bar: it is a long string that changes every few minutes and is read
+// almost never. The equalizer says that music is on, the tooltip says what, and the card
+// that comes up when a track starts says the rest.
 //
 // The player itself is chosen by the Media singleton, so this and the panel cannot
 // disagree about which one "the" player is.
@@ -10,7 +14,6 @@ BarItem {
   id: root
 
   readonly property var player: Media.active
-  readonly property int maxWidth: (widgetConfig && widgetConfig.maxWidth) ? widgetConfig.maxWidth : 240
 
   panelId: "media"
 
@@ -20,8 +23,6 @@ BarItem {
   // A glyph for identity, not for action -- the transport buttons live in the panel,
   // and a play triangle sitting in the bar reads as one.
   readonly property string icon: ""
-
-  readonly property string label: Media.label(player)
 
   tooltip: {
     if (!player)
@@ -52,44 +53,16 @@ BarItem {
   onScrolledUp: step(0.05)
   onScrolledDown: step(-0.05)
 
-  // Elided off-tree rather than by giving the label a width: IconLabel sizes itself
-  // from its text, so a width there would make the widget's width depend on the width
-  // it is meant to produce. TextMetrics hands back the shortened string instead.
-  TextMetrics {
-    id: metrics
-
-    font.family: Style.fontFamily
-    font.pixelSize: Style.fontSize
-    elide: Text.ElideRight
-    elideWidth: root.maxWidth
-    text: root.label
-  }
-
-  // Measured separately from the label because, while the equalizer stands in for the
-  // glyph, going compact empties the label's text -- and what compact gives back has to
-  // stay the same whether it is compact or not, or the bar's fitting never settles.
-  TextMetrics {
-    id: shown
-
-    font.family: Style.fontFamily
-    font.pixelSize: Style.fontSize
-    text: metrics.elidedText
-  }
-
   // Playing, the equalizer takes the glyph's place: it says "sound is coming out" better
   // than a breathing note does. Paused, or with no cava to listen through, the glyph
   // comes back.
-  Row {
+  Item {
     id: content
 
     readonly property bool dancing: !!root.player && root.player.isPlaying && Spectrum.live
 
-    // BarItem hands `compact` to whichever child has compactSaving, so this row stands
-    // in for the label it holds.
-    property bool compact: false
-    readonly property real compactSaving: dancing ? shown.advanceWidth + spacing : label.compactSaving
-
-    spacing: dancing && label.text !== "" ? 7 : 0
+    implicitWidth: dancing ? equalizer.implicitWidth : glyph.implicitWidth
+    implicitHeight: Style.barSize
 
     Equalizer {
       id: equalizer
@@ -104,14 +77,13 @@ BarItem {
     }
 
     IconLabel {
-      id: label
+      id: glyph
 
       anchors.verticalCenter: parent.verticalCenter
-      icon: content.dancing ? "" : root.icon
-      text: content.dancing && content.compact ? "" : metrics.elidedText
-      compact: content.compact
+      visible: !content.dancing
+      icon: root.icon
       color: (root.player && root.player.isPlaying) ? Color.barAccent : Color.barMuted
-      lively: !!root.player && root.player.isPlaying && !content.dancing
+      lively: !!root.player && root.player.isPlaying
     }
   }
 }
