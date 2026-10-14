@@ -70,6 +70,7 @@ BarItem {
 
     icon: root.icon
     text: metrics.elidedText
-    color: (root.player && root.player.isPlaying) ? Color.barText : Color.barMuted
+    color: (root.player && root.player.isPlaying) ? Color.barAccent : Color.barMuted
+    lively: !!root.player && root.player.isPlaying
   }
 }

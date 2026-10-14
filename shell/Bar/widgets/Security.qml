@@ -55,6 +55,6 @@ BarItem {
   IconLabel {
     icon: root.bad > 0 ? "\u{f0565}" : (root.findings.length > 0 ? "\u{f0e1e}" : "\u{f0565}")
     text: root.findings.length > 0 ? String(root.findings.length) : ""
-    color: root.bad > 0 ? Color.barUrgent : (root.findings.length > 0 ? Color.barAccent : Color.barMuted)
+    color: root.bad > 0 ? Color.barUrgent : (root.findings.length > 0 ? Color.barAttention : Color.barMuted)
   }
 }

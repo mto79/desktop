@@ -19,6 +19,8 @@ BarItem {
     return icons[index];
   }
 
+  readonly property bool playing: Sound.playing
+
   // Without this the node's volume properties stay unbound and always read zero.
   PwObjectTracker {
     objects: root.sink ? [root.sink] : []
@@ -52,6 +54,7 @@ BarItem {
   IconLabel {
     icon: root.icon
     text: root.muted ? "" : root.volume + "%"
-    color: root.muted ? Color.barMuted : Color.barText
+    color: root.muted ? Color.barMuted : (root.playing ? Color.barAccent : Color.barText)
+    lively: root.playing && !root.muted
   }
 }

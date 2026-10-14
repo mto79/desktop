@@ -4,7 +4,7 @@ import qs.Commons
 import qs.Ui
 
 // Default source volume. A microphone at full volume and not muted is the unremarkable
-// case, so it is the icon alone, dimmed: waybar showed "100%" permanently, which was mostly
+// case, so it is the icon alone: waybar showed "100%" permanently, which was mostly
 // noise. The number appears when it is turned down, and "Muted" when it is muted.
 //
 // It used to be hidden altogether in that case. Plugging in a USB microphone, which
@@ -21,7 +21,11 @@ BarItem {
     objects: root.source ? [root.source] : []
   }
 
-  readonly property bool unremarkable: !muted && volume >= 100
+  // Something is recording: a call, a dictation, a meeting capture. Which program is
+  // the panel's to say.
+  readonly property bool inUse: Sound.recording
+
+  readonly property bool unremarkable: !muted && volume >= 100 && !inUse
   visible: source !== null
   implicitWidth: visible ? label.implicitWidth + Style.itemPaddingH * 2 : 0
 
@@ -29,7 +33,7 @@ BarItem {
     if (!source)
       return "No input device";
     var name = source.description || source.nickname || source.name;
-    return name + "\n" + (muted ? "muted" : volume + "%");
+    return name + "\n" + (muted ? "muted" : volume + "%") + (inUse ? "\nin use" : "");
   }
 
   // Same gestures as the speaker widget: left click opens the microphone panel, right
@@ -54,6 +58,7 @@ BarItem {
 
     icon: ""
     text: root.muted ? "Muted" : (root.unremarkable ? "" : root.volume + "%")
-    color: root.muted ? Color.barUrgent : (root.unremarkable ? Color.barMuted : Color.barText)
+    color: root.muted ? Color.barUrgent : (root.inUse ? Color.barAccent : Color.barText)
+    lively: root.inUse && !root.muted
   }
 }

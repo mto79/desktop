@@ -127,7 +127,7 @@
           "icon": "󱁉",
           "colors": {
             "critical": "urgent",
-            "warning": "accent",
+            "warning": "attention",
             "busy": "accent",
             "waiting": "urgent",
             "done": "good",
@@ -169,7 +169,7 @@
             "stale": "urgent",
             "never": "urgent",
             "running": "accent",
-            "unconfigured": "accent",
+            "unconfigured": "attention",
             "unreachable": "muted"
           },
           "panel": "backup"

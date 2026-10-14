@@ -47,6 +47,7 @@ BarItem {
     readonly property color muted: Color.barMuted
     readonly property color accent: Color.barAccent
     readonly property color urgent: Color.barUrgent
+    readonly property color attention: Color.barAttention
     readonly property string fontFamily: Style.fontFamily
     readonly property int fontSize: Style.fontSize
     readonly property int barSize: Style.barSize

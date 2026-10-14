@@ -110,6 +110,9 @@ Popup {
     voiceChoose.running = true;
   }
   property int waitingCount: 0
+  readonly property int workingCount: sessions.filter(function (session) {
+    return session.state === "working";
+  }).length
 
   // Claude processes with no state recorded: open, but idle since the hooks were wired --
   // a session picks the hooks up, but only reports on its next event. Named rather than
@@ -344,6 +347,17 @@ Popup {
 
       icon: "\u{f1049}"
       iconColor: root.waitingCount > 0 ? Color.popupUrgent : Color.popupText
+      // The bar's flat network, larger: still while nothing works, moving while an agent does.
+      art: Component {
+        Orb {
+          simple: true
+          tint: root.waitingCount > 0 ? Color.popupUrgent : Color.popupText
+          spark: Color.good
+          awake: root.workingCount > 0
+          lively: root.workingCount > 0
+          running: root.workingCount > 0 && root.visible
+        }
+      }
       title: "Claude Code"
       status: {
         var parts = [];

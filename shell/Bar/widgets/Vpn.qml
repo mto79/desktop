@@ -44,7 +44,7 @@ BarItem {
         return root.names[0];
       return root.names.length > 1 ? String(root.names.length) : "";
     }
-    color: root.connected ? Color.barText : Color.barMuted
+    color: root.connected ? Color.barGood : Color.barMuted
   }
 
   Process {

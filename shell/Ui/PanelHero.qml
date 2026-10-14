@@ -23,6 +23,9 @@ Item {
   property bool spinning: false
   // The icon as a button: the speaker that mutes, the microphone that mutes.
   property bool iconClickable: false
+  // A drawing in place of the glyph, at the glyph's size: the AI panel shows the same
+  // neural network the bar does, so the panel is plainly what the bar icon opened.
+  property Component art: null
 
   signal iconClicked
 
@@ -35,10 +38,18 @@ Item {
     anchors.left: parent.left
     anchors.leftMargin: 6
     anchors.verticalCenter: parent.verticalCenter
-    text: root.icon
+    text: root.art ? "" : root.icon
     color: root.iconColor
     font.family: Style.fontFamily
     font.pixelSize: Style.iconSize * 2.4
+    width: root.art ? font.pixelSize : implicitWidth
+    height: root.art ? font.pixelSize : implicitHeight
+
+    Loader {
+      anchors.fill: parent
+      active: root.art !== null
+      sourceComponent: root.art
+    }
 
     RotationAnimation on rotation {
       running: root.spinning

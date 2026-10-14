@@ -79,6 +79,6 @@ BarItem {
     id: content
 
     icon: ""
-    color: Color.barAccent
+    color: Color.barAttention
   }
 }

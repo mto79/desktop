@@ -93,6 +93,8 @@ BarItem {
       return Color.barAccent;
     if (role === "good")
       return Color.barGood;
+    if (role === "attention")
+      return Color.barAttention;
     return Color.barText;
   }
 

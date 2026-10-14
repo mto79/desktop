@@ -172,4 +172,45 @@ check "and Hyprland is only asked again while it is open" \
   test -n "$(grep -A3 'interval: 400' "$overview" | grep 'running: root.open')"
 # The scratchpad has a negative id and no place among the screens.
 check "special workspaces are left out" grep -q 'if (space.id <= 0)' "$overview"
+# --- icons that show they are in use
+# One look for "working", kept in the component every widget's icon is: a widget says
+# when, never how, so the microphone and the processor cannot come to breathe differently.
+ICON="$ROOT/shell/Ui/IconLabel.qml"
+check "an icon in use breathes only while it is on show" grep -q 'readonly property bool on: root.lively && glyph.visible && root.visible' "$ICON"
+check "and the light goes out when it stops" grep -q 'running: !glow.on' "$ICON"
+check "no widget animates an icon of its own" lacks -l 'Animation on scale' "$ROOT"/shell/Bar/widgets/Microphone.qml "$ROOT"/shell/Bar/widgets/Audio.qml "$ROOT"/shell/Bar/widgets/Cpu.qml "$ROOT"/shell/Bar/widgets/Network.qml
+check "a muted microphone does not look as if it is listening" grep -q 'lively: root.inUse && !root.muted' "$ROOT/shell/Bar/widgets/Microphone.qml"
+
+# The microphone once asked for "a stream that is not a sink", which is a playback stream,
+# so it lit up for music and the speaker -- asking a media player -- stayed dark for a call
+# in a browser. Both now ask which links are carrying sound, and of what kind of stream.
+SOUND="$ROOT/shell/Commons/Sound.qml"
+check "the speaker lights for any stream that is playing" grep -q 'playing: flowing(groups, "source", PwNodeType.AudioOutStream)' "$SOUND"
+check "the microphone for any stream that is recording" grep -q 'recording: flowing(groups, "target", PwNodeType.AudioInStream)' "$SOUND"
+check "a stream gone quiet is not sound" grep -q 'group.state === PwLinkState.Active' "$SOUND"
+check "the links are tracked, or their state is never known" grep -q 'objects: root.groups' "$SOUND"
+check "both widgets ask it" grep -q 'Sound.playing' "$ROOT/shell/Bar/widgets/Audio.qml"
+check "  the microphone too" grep -q 'Sound.recording' "$ROOT/shell/Bar/widgets/Microphone.qml"
+check "Sound is a registered singleton" grep -q '^singleton Sound 1.0 Sound.qml$' "$ROOT/shell/Commons/qmldir"
+
+# Memory and processor were drawn as the same chip, side by side.
+check "memory is not drawn as a chip" lacks -q 'f035b' "$ROOT/shell/Bar/widgets/Memory.qml"
+check "memory lights up from three quarters used" grep -q 'lively: root.percent >= 75' "$ROOT/shell/Bar/widgets/Memory.qml"
+check "the disk lights up while it is busy" grep -q 'lively: root.busy' "$ROOT/shell/Bar/widgets/Disk.qml"
+check "  counting whole disks, not their partitions twice" grep -qF '^(nvme\d+n\d+|sd[a-z]+' "$ROOT/shell/Bar/widgets/Disk.qml"
+
+# Blue meant "busy" on one icon and "look at this" on the next. Now: blue is working, the
+# attention colour wants you.
+check "there is a colour for attention, from the theme's caution" grep -q 'barAttention = pick(bar, "attention", caution)' "$ROOT/shell/Commons/Color.qml"
+for widget in NotificationBell SystemUpdate Security Battery; do
+  check "$widget asks for attention in the attention colour" grep -q 'Color.barAttention' "$ROOT/shell/Bar/widgets/$widget.qml"
+done
+check "a command widget can ask for attention too" grep -q 'role === "attention"' "$ROOT/shell/Bar/widgets/CommandWidget.qml"
+check "the microphone at rest looks like the speaker at rest" grep -q 'root.inUse ? Color.barAccent : Color.barText' "$ROOT/shell/Bar/widgets/Microphone.qml"
+
+# The AI panel opens on the network the bar shows, not on a robot.
+check "a panel's header can show a drawing in place of its glyph" grep -q 'property Component art: null' "$ROOT/shell/Ui/PanelHero.qml"
+check "the AI panel's header is the bar's network" grep -A3 -q 'art: Component {' "$ROOT/shell/Bar/panels/AiPanel.qml"
+check "  which moves only while the panel is open and an agent works" grep -q 'running: root.workingCount > 0 && root.visible' "$ROOT/shell/Bar/panels/AiPanel.qml"
+
 finish

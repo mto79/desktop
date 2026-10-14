@@ -15,7 +15,46 @@ BarItem {
   property string size: ""
   property string usedPercent: ""
 
-  tooltip: free === "" ? "" : free + " free of " + size + " (" + usedPercent + " used)\non " + path
+  // Megabytes a second read and written, over every whole disk: which one / is on is not
+  // worth working out for a light that says "the disks are busy".
+  property real rate: 0
+  property real lastBytes: -1
+  property real lastTime: 0
+  readonly property bool busy: rate >= 10
+  readonly property bool full: parseInt(usedPercent, 10) >= 90
+
+  function sample(text) {
+    var bytes = 0;
+    var lines = text.split("\n");
+    for (var i = 0; i < lines.length; i++) {
+      var f = lines[i].trim().split(/\s+/);
+      // Whole disks only: a partition's sectors are its disk's too.
+      if (f.length > 9 && /^(nvme\d+n\d+|sd[a-z]+|vd[a-z]+|mmcblk\d+)$/.test(f[2]))
+        bytes += ((parseInt(f[5], 10) || 0) + (parseInt(f[9], 10) || 0)) * 512;
+    }
+    var now = Date.now();
+    if (lastBytes >= 0 && now > lastTime)
+      rate = (bytes - lastBytes) / 1048576 / ((now - lastTime) / 1000);
+    lastBytes = bytes;
+    lastTime = now;
+  }
+
+  FileView {
+    id: diskstats
+
+    path: "/proc/diskstats"
+    onLoaded: root.sample(text())
+  }
+
+  Timer {
+    interval: 2000
+    running: true
+    repeat: true
+    triggeredOnStart: true
+    onTriggered: diskstats.reload()
+  }
+
+  tooltip: free === "" ? "" : free + " free of " + size + " (" + usedPercent + " used)\non " + path + (busy ? "\n" + Math.round(rate) + " MB/s read and written" : "")
 
   // Left click opens the storage panel, which says where the space went and carries
   // the usage analyzer; right click still opens the file manager on the filesystem.
@@ -57,6 +96,8 @@ BarItem {
   IconLabel {
     icon: root.icon
     text: root.free
-    color: Color.barText
+    // Nearly full is a warning whatever the disks are doing; busy is only worth the light.
+    color: root.full ? Color.barUrgent : (root.busy ? Color.barAccent : Color.barText)
+    lively: root.busy
   }
 }

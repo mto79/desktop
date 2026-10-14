@@ -23,11 +23,19 @@ BarItem {
     return null;
   }
 
+  // The wired device that is connected, when one is: a dock adds a second wired device
+  // beside the laptop's own, and the first in the list is not always the one with the
+  // cable in it -- which showed Wi-Fi on a machine that was on the cable.
   readonly property var wiredDevice: {
+    var first = null;
     for (var i = 0; i < devices.length; i++)
-      if (devices[i].type === DeviceType.Wired)
-        return devices[i];
-    return null;
+      if (devices[i].type === DeviceType.Wired) {
+        if (devices[i].connected)
+          return devices[i];
+        if (!first)
+          first = devices[i];
+      }
+    return first;
   }
 
   // The connected network is in the model whether or not a scan is running, so this
@@ -79,6 +87,11 @@ BarItem {
   readonly property bool showSsid: !!(widgetConfig && widgetConfig.showSsid)
   readonly property bool showSignal: !!(widgetConfig && widgetConfig.showSignal)
   readonly property bool showSpeed: !(widgetConfig && widgetConfig.showSpeed === false)
+
+  // The speeds are what this widget is for, and they are also the widest text on the bar,
+  // so on a narrow screen they were the first thing dropped. Asked last instead, unless
+  // shell.json says {"keepText": false}.
+  compactOrder: widgetConfig && widgetConfig.keepText === false ? 0 : 1
 
   // Binary units, matching what the disk and memory widgets beside it already print.
   //
@@ -160,8 +173,9 @@ BarItem {
 
   readonly property var wifiIcons: ["󰤯", "󰤟", "󰤢", "󰤥", "󰤨"]
   readonly property string icon: {
+    // A cable, which nobody takes for the Wi-Fi fan at a glance.
     if (kind === "ethernet")
-      return "󰲝";
+      return "\u{f0200}";
     if (kind === "disconnected")
       return "󰖪";
     var index = Math.min(wifiIcons.length - 1, Math.max(0, Math.floor(activeWifi.signalStrength * 4.999)));
@@ -193,6 +207,10 @@ BarItem {
 
   // Left click opens the network panel; right click keeps impala one gesture away,
   // since joining a new secured network still needs its passphrase prompt.
+  // More than a trickle either way: a download, an upload, a call. The idle chatter of a
+  // connected machine stays under this and leaves the icon still.
+  readonly property bool busy: kind !== "disconnected" && (rxRate + txRate) > 256 * 1024
+
   panelId: "network"
 
   onClicked: if (popups)
@@ -202,6 +220,7 @@ BarItem {
   IconLabel {
     icon: root.icon
     text: root.label
-    color: root.kind === "disconnected" ? Color.barMuted : Color.barText
+    color: root.kind === "disconnected" ? Color.barMuted : (root.busy ? Color.barAccent : Color.barText)
+    lively: root.busy
   }
 }

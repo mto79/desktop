@@ -12,11 +12,16 @@ BarItem {
   property real usedGb: 0
   property real totalGb: 0
 
-  // nf-md-memory. Override with {"id": "memory", "icon": "..."} -- any glyph the bar
-  // font has, pasted straight into shell.json.
-  readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : "\u{f035b}"
+  // nf-fa-memory, a memory module seen from the side. nf-md-memory was a chip, and beside
+  // the processor's chip the two read as one. Override with {"id": "memory", "icon": "..."}
+  // -- any glyph the bar font has, pasted straight into shell.json.
+  readonly property string icon: (widgetConfig && widgetConfig.icon) ? widgetConfig.icon : "\uefc5"
 
-  tooltip: totalGb > 0 ? usedGb.toFixed(1) + "G used of " + totalGb.toFixed(1) + "G" : ""
+  // Three quarters spoken for is when it is worth a look; nine tenths is when the kernel
+  // starts to make room by throwing cache out and swapping.
+  readonly property int percent: totalGb > 0 ? Math.round(usedGb / totalGb * 100) : 0
+
+  tooltip: totalGb > 0 ? usedGb.toFixed(1) + "G used of " + totalGb.toFixed(1) + "G (" + percent + "%)" : ""
 
   // The headline number is the alarming one -- it counts cache as used. The panel is
   // where that gets broken down into what is actually spoken for.
@@ -54,8 +59,10 @@ BarItem {
     onLoaded: root.parse(text())
   }
 
+  // /proc/meminfo is the kernel answering, not a file read off a disk: cheap enough to ask
+  // as often as the processor is asked, so the light comes on while it matters.
   Timer {
-    interval: 30000
+    interval: 5000
     running: true
     repeat: true
     triggeredOnStart: true
@@ -65,6 +72,7 @@ BarItem {
   IconLabel {
     icon: root.icon
     text: root.usedGb.toFixed(1) + "G"
-    color: Color.barText
+    color: root.percent >= 90 ? Color.barUrgent : (root.percent >= 75 ? Color.barAccent : Color.barText)
+    lively: root.percent >= 75
   }
 }

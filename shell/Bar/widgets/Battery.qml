@@ -15,6 +15,8 @@ BarItem {
   readonly property int percent: device ? Math.round((device.percentage || 0) * 100) : 0
   readonly property bool discharging: present && UPower.onBattery && device.state === UPowerDeviceState.Discharging
   readonly property bool charging: present && !discharging
+  // Taking charge, as opposed to full and on the cable.
+  readonly property bool filling: present && device.state === UPowerDeviceState.Charging
 
   // Nerd-font ramps, carried over from the waybar config so the bar looks unchanged.
   readonly property var dischargingIcons: ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"]
@@ -56,6 +58,7 @@ BarItem {
     icon: root.icon
     text: root.percent + "%"
     // waybar coloured this by `states`; same thresholds.
-    color: !root.discharging ? Color.barText : (root.percent <= 10 ? Color.barUrgent : (root.percent <= 20 ? Color.barAccent : Color.barText))
+    color: !root.discharging ? (root.filling ? Color.barGood : Color.barText) : (root.percent <= 10 ? Color.barUrgent : (root.percent <= 20 ? Color.barAttention : Color.barText))
+    lively: root.filling
   }
 }

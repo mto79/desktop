@@ -31,6 +31,6 @@ BarItem {
   IconLabel {
     icon: Inbox.doNotDisturb ? "\u{f009b}" : (root.count > 0 ? "\u{f009a}" : "\u{f009c}")
     text: root.count > 0 ? String(root.count) : ""
-    color: Inbox.doNotDisturb ? Color.barMuted : (root.count > 0 ? Color.barAccent : Color.barMuted)
+    color: Inbox.doNotDisturb ? Color.barMuted : (root.count > 0 ? Color.barAttention : Color.barMuted)
   }
 }

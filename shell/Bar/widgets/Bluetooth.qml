@@ -58,6 +58,10 @@ BarItem {
     // A battery says more than a count, and only a connected device has one to
     // report; the count stays for a desk of things that report nothing.
     text: root.battery >= 0 ? root.battery + "%" : (root.connected > 0 ? String(root.connected) : "")
-    color: !root.powered ? Color.barMuted : (root.battery >= 0 && root.battery <= BluetoothBattery.threshold ? Color.barUrgent : Color.barText)
+    // Connected to something is the adapter in use; switched on with nothing connected
+    // is only ready.
+    color: !root.powered ? Color.barMuted : (root.battery >= 0 && root.battery <= BluetoothBattery.threshold ? Color.barUrgent : (root.connected > 0 ? Color.barAccent : Color.barText))
+    // Looking for devices is the one thing it visibly works at.
+    lively: root.powered && !!root.adapter && root.adapter.discovering
   }
 }

@@ -39,6 +39,10 @@ QtObject {
   property color barAccent: accent
   property color barUrgent: urgent
   property color barGood: good
+  // Blue is for something working right now. "Look at this" -- an unread notification,
+  // an update, a finding, a battery running low -- is its own colour, so that a blue
+  // icon always means busy and a yellow one always means it wants you.
+  property color barAttention: caution
   property color barActiveWorkspace: accent
   // The filled box behind each workspace number. Derived from barText rather than named
   // as a hex the way waybar's #1e1e2e was: a fixed colour is only right for one theme,
@@ -119,6 +123,7 @@ QtObject {
     barAccent = pick(bar, "accent", accent);
     barUrgent = pick(bar, "urgent", urgent);
     barGood = pick(bar, "good", good);
+    barAttention = pick(bar, "attention", caution);
     barActiveWorkspace = pick(bar, "activeWorkspace", barAccent);
     barHover = Qt.rgba(barText.r, barText.g, barText.b, 0.1);
     barWorkspaceBackground = pick(bar, "workspaceBackground", Qt.rgba(barText.r, barText.g, barText.b, 0.08));

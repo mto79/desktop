@@ -80,6 +80,50 @@ while the tab is on show. `Page Down` and `Page Up` scroll a page taller than th
 Keeping the logic in a command is what lets it be tested in plain bash with stubs, without
 a compositor.
 
+## What the colours on the bar mean
+
+One meaning each, so a colour can be read without knowing the widget:
+
+| Colour | Role | Means | For example |
+|---|---|---|---|
+| White | `barText` | A value at rest | free disk, volume, battery on the way down |
+| Grey | `barMuted` | Off, paused, nothing there | VPN down, media paused, no notifications |
+| Blue | `barAccent` | Working right now, with the light behind it | sound playing, a recording, disk busy |
+| Yellow | `barAttention` | Wants you | unread notifications, updates, a security finding, battery at 20% |
+| Red | `barUrgent` | Something is wrong | battery at 10%, disk 90% full, microphone muted |
+| Green | `barGood` | Something went well | VPN up, battery charging |
+
+The microphone is red when muted and the speaker grey: a muted speaker is quiet on
+purpose, while a muted microphone in a call is you talking to nobody. A theme sets the
+yellow with `bar.attention` in its `shell.json`, or leaves it to its `caution` colour. A
+command widget names it as `"attention"` in its `colors`.
+
+## Icons that are in use
+
+An icon on the bar shows when its thing is working, the way the AI orb does: it takes a
+colour and a soft light breathes behind it. `IconLabel` draws it, from one property,
+`lively`; a widget only says when.
+
+| Widget | In use when |
+|---|---|
+| Microphone | A program is recording from it |
+| Sound | Something is playing, a call in a browser as much as music |
+| Media | A player is playing |
+| Bluetooth | A device is connected (colour); it is searching (light) |
+| VPN | A tunnel is up (green) |
+| Network | More than a trickle is going through |
+| Battery | It is taking charge |
+| Disk | More than 10 MB/s is being read or written; red when 90% full |
+| Memory | 75% or more is used; red from 90% |
+| CPU | 60% or more; red from 90% |
+
+The speaker and the microphone ask `Sound` (`shell/Commons/Sound.qml`), which looks at
+PipeWire's links rather than at its streams: a browser keeps a stream for every tab that
+ever played, and it is the link that goes inactive when a stream is quiet.
+
+Dimming a whole module, which the AI widget does when an agent waits, means "look here"
+and is kept for that.
+
 ## Adding a panel
 
 1. A `Popup` in `shell/Bar/panels/` with `readonly property string panelId`.
