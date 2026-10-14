@@ -49,5 +49,5 @@ the theme each time it runs.
 
 ## Adding a theme
 
-Copy an existing directory and change the colours. Both `hyprland.conf` and `hyprland.lua` are needed:
-`test/hypr-lua-test.sh` verifies the Lua config once per theme.
+Copy an existing directory and change the colours. Both `hyprland.conf` and
+`hyprland.lua` are needed: `test/hypr-lua-test.sh` verifies the Lua config once per theme.

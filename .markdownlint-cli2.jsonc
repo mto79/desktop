@@ -1,0 +1,18 @@
+// markdownlint-cli2 configuration. Run with:
+//   npx markdownlint-cli2
+{
+  "config": {
+    // Prose here wraps at about 90 columns. Tables and code blocks run as wide
+    // as their content needs; wrapping them breaks them.
+    "MD013": { "line_length": 90, "tables": false, "code_blocks": false },
+    // CHANGELOG.md repeats Added/Changed/Fixed under every month.
+    "MD024": { "siblings_only": true }
+  },
+  "globs": ["**/*.md"],
+  "ignores": [
+    // Vendored: tmux plugin manager and a yazi flavour, kept as upstream ships them.
+    "config/tmux/plugins/tpm/**",
+    "config/yazi/flavors/**",
+    "node_modules/**"
+  ]
+}
