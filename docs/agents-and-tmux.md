@@ -114,3 +114,31 @@ The git stash is shared between a repository and all its worktrees. Do not use a
 | `desktop-agent-prompt` (`SUPER + A`) | Ask for an agent and a prompt, then run it |
 | `desktop-menu-agents` | List the running sessions and jump to one |
 | `desktop-git-commit` | Commit what is staged with a message Claude writes from the diff; lazygit's `C` |
+
+## Review requests
+
+`desktop-reviews` pops up a notification when a merge request or pull request starts
+waiting for you: open, someone else's, with you as a reviewer or the assignee. The popup
+is headed by the forge (GitLab, GitHub, Forgejo, or Codeberg for codeberg.org), says who
+asks and the subject, with the project and number under it, and a click opens the
+request in the browser. It is also said aloud through `desktop-say` -- "On GitLab, Bob
+asks for your review: fix the login" -- with a commit-style prefix such as `feat(helm):`
+left out of what is read. `speak = no` in `~/.config/desktop/reviews.conf` keeps the
+popups and drops the voice; `desktop-say --mute` silences everything.
+
+`desktop-reviews.timer` runs it every five minutes. `desktop-reviews --list` prints, host
+by host, what is waiting or why a host said nothing (not reachable, did not answer), and
+notifies nobody. `desktop-reviews --example` pops up and says one made-up request from
+each forge you are logged in to, exactly as a real one would look; a click on one opens
+that host's real list.
+
+It asks every host glab, gh and tea are logged in to, read from their own configuration
+at each run: GitLab through glab, GitHub through gh, Forgejo and Gitea -- Codeberg among
+them -- through tea. A new instance needs only a `glab auth login` or a `tea login add`,
+and no host is named in this repository. tea is installed by `install/packaging/tea.sh`,
+one pinned version checked against a checksum written there. A host that does not answer, because it is only reachable over the
+VPN, is skipped without a message, and what it already showed is kept; only a host that
+answered can say a request is gone. The first check of a host gives one popup with the
+number already waiting and a link to the list, and more than five new requests at once
+are one popup as well. What has been shown is kept per host under
+`~/.local/state/desktop/reviews/`.

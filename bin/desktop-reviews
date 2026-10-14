@@ -1,0 +1,288 @@
+#!/usr/bin/env bash
+
+# desktop-reviews: a popup when a merge request or pull request starts waiting for you.
+#
+#   desktop-reviews              check every host, notify about what is new
+#   desktop-reviews --list       what is waiting now, host by host, nothing notified
+#   desktop-reviews --example    a made-up request from each forge, popped up and said
+#
+# "Waiting for you" is: open, someone else's, and you are a reviewer or the assignee. The
+# hosts are whichever glab, gh and tea are logged in to -- every GitLab instance in glab's
+# config that has a token, every GitHub host in gh's, every Forgejo or Gitea instance in
+# tea's (Codeberg is one) -- so a new instance is a `glab auth login` or `tea login add`
+# away and no host name has to be written down here.
+#
+# Some instances are only reachable over the VPN. A host that does not answer is passed
+# over without a word, and what was already seen there is kept, so the VPN coming up does
+# not bring back every request that was shown before it went down. Only a host that
+# answered can say a request is gone.
+#
+# Each popup names the forge, who asks and the subject, and clicking it opens the
+# request. It is said aloud as well, through desktop-say, unless reviews.conf has
+# "speak = no". The first
+# check of a host does not pop up everything already waiting there, but says how many,
+# with a click to the list.
+#
+# Run by desktop-reviews.timer every five minutes.
+
+set -uo pipefail
+
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/reviews"
+GLAB_CONFIG="${GLAB_CONFIG_DIR:-$HOME/.config/glab-cli}/config.yml"
+GH_HOSTS="${GH_CONFIG_DIR:-$HOME/.config/gh}/hosts.yml"
+CONF="${DESKTOP_REVIEWS_CONF:-$HOME/.config/desktop/reviews.conf}"
+# More than this in one check is a backlog, not news: one popup says how many.
+MOST=5
+WAIT=20
+
+case ":$PATH:" in
+*":$HOME/.local/bin:"*) ;;
+*) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
+# The keys directly under "hosts:" in glab's config.
+gitlab_hosts() {
+  [[ -n ${DESKTOP_REVIEWS_GITLAB+x} ]] && { tr ' ' '\n' <<<"$DESKTOP_REVIEWS_GITLAB" | grep .; return; }
+  command -v glab >/dev/null 2>&1 && [[ -f $GLAB_CONFIG ]] || return 0
+  awk '/^hosts:/ {in_hosts = 1; next}
+       /^[^ ]/ {in_hosts = 0}
+       in_hosts && /^    [^ ].*:$/ {sub(/^ +/, ""); sub(/:$/, ""); host = $0}
+       in_hosts && host != "" && /^        token: ./ {print host; host = ""}' "$GLAB_CONFIG"
+}
+
+# The top-level keys of gh's hosts file.
+github_hosts() {
+  [[ -n ${DESKTOP_REVIEWS_GITHUB+x} ]] && { tr ' ' '\n' <<<"$DESKTOP_REVIEWS_GITHUB" | grep .; return; }
+  command -v gh >/dev/null 2>&1 && [[ -f $GH_HOSTS ]] || return 0
+  grep -E '^[^ #][^:]*:$' "$GH_HOSTS" | tr -d ':'
+}
+
+# The host of every tea login: Forgejo and Gitea instances.
+forgejo_hosts() {
+  [[ -n ${DESKTOP_REVIEWS_FORGEJO+x} ]] && { tr ' ' '\n' <<<"$DESKTOP_REVIEWS_FORGEJO" | grep .; return; }
+  command -v tea >/dev/null 2>&1 || return 0
+  (cd / && tea logins list --output json 2>/dev/null) | jq -r '.[].url | sub("^[a-z]+://"; "") | sub("[:/].*$"; "")' 2>/dev/null
+}
+
+# Answers at all: a name that does not resolve off the VPN is the cheap no.
+reachable() {
+  [[ -n ${DESKTOP_REVIEWS_OFFLINE:-} && " $DESKTOP_REVIEWS_OFFLINE " == *" $1 "* ]] && return 1
+  [[ -n ${DESKTOP_REVIEWS_GITLAB+x}${DESKTOP_REVIEWS_GITHUB+x}${DESKTOP_REVIEWS_FORGEJO+x} ]] && return 0
+  getent hosts "$1" >/dev/null 2>&1
+}
+
+# One request per line, tab-separated: key, who asks, subject, where, url. Fails when the
+# host does not answer, which is different from answering with nothing.
+gitlab_requests() {
+  local host=$1 me out
+  me=$(timeout "$WAIT" glab api --hostname "$host" user 2>/dev/null | jq -r '.username // empty') || return 1
+  [[ -n $me ]] || return 1
+  out=$(
+    {
+      timeout "$WAIT" glab api --hostname "$host" "merge_requests?scope=all&state=opened&reviewer_username=$me&per_page=50" &&
+        timeout "$WAIT" glab api --hostname "$host" "merge_requests?scope=assigned_to_me&state=opened&per_page=50"
+    } 2>/dev/null
+  ) || return 1
+  jq -rs --arg me "$me" --arg host "$host" '
+    add | unique_by(.id) | .[] | select(.author.username != $me)
+    | ["gitlab:\($host):\(.id)", (.author.name // .author.username), .title,
+       (.references.full // "!\(.iid)"), .web_url] | @tsv' <<<"$out"
+}
+
+github_requests() {
+  local host=$1 out query
+  out=$(
+    for query in "review-requested:@me" "assignee:@me"; do
+      timeout "$WAIT" gh api --hostname "$host" -X GET search/issues \
+        -f q="is:pr is:open archived:false -author:@me $query" -f per_page=50 || exit 1
+    done 2>/dev/null
+  ) || return 1
+  jq -rs --arg host "$host" '
+    map(.items) | add | unique_by(.id) | .[]
+    | ["github:\($host):\(.id)", .user.login, .title,
+       ((.repository_url | split("/") | .[-2:] | join("/")) + "#\(.number)"), .html_url] | @tsv' <<<"$out"
+}
+
+# tea is asked from / so that it does not take the repository it is run in for the one
+# meant: it reads the current directory's remotes for context.
+forgejo_requests() {
+  local host=$1 login me out filter
+  login=$(cd / && tea logins list --output json 2>/dev/null |
+    jq -r --arg host "$host" 'map(select(.url | sub("^[a-z]+://"; "") | sub("[:/].*$"; "") == $host)) | first // empty | "\(.name)\t\(.user)"')
+  [[ -n $login ]] || return 1
+  me=${login#*$'\t'} login=${login%%$'\t'*}
+  out=$(
+    cd / || exit 1
+    for filter in review_requested assigned; do
+      timeout "$WAIT" tea api --login "$login" "/repos/issues/search?type=pulls&state=open&$filter=true&limit=50" || exit 1
+    done 2>/dev/null
+  ) || return 1
+  jq -rs --arg me "$me" --arg host "$host" '
+    add | unique_by(.id) | .[] | select(.user.login != $me)
+    | ["forgejo:\($host):\(.id)", (if (.user.full_name // "") != "" then .user.full_name else .user.login end), .title,
+       "\(.repository.full_name)#\(.number)", .html_url] | @tsv' <<<"$out"
+}
+
+# Which forge, as the popup's heading and in what is said: GitLab, GitHub, Forgejo.
+forge() {
+  case $1 in
+  gitlab) echo GitLab ;;
+  github) echo GitHub ;;
+  forgejo) [[ $2 == codeberg.org ]] && echo Codeberg || echo Forgejo ;;
+  esac
+}
+
+# Where the requests waiting for you are listed on a host: what a click on a popup that
+# stands for several of them opens.
+waiting_list() {
+  case $1 in
+  gitlab) echo "https://$2/dashboard/merge_requests?reviewer_username=$(timeout "$WAIT" glab api --hostname "$2" user 2>/dev/null | jq -r '.username // empty')" ;;
+  github) echo "https://$2/pulls/review-requested" ;;
+  forgejo) echo "https://$2/pulls?type=review_requested&state=open" ;;
+  esac
+}
+
+# Speaking is on unless ~/.config/desktop/reviews.conf says "speak = no". desktop-say
+# keeps its own switch and its own sense of when not to talk -- during a call, say -- so
+# this is only whether reviews are worth hearing at all.
+speaking() {
+  ! grep -qiE '^[[:space:]]*speak[[:space:]]*=[[:space:]]*(no|off|false)' "$CONF" 2>/dev/null
+}
+
+# A subject as it reads aloud: "feat(helm): add the chart" is "add the chart".
+spoken_subject() {
+  sed -E 's/^[a-z]+(\([^)]*\))?!?: *//' <<<"$1"
+}
+
+# toast <forge> <url> <summary> <body> [<said>]: a popup whose click opens the url, and
+# the same news said aloud. notify-send waits for the click, so it runs as a unit of its
+# own: the check that sent it is a oneshot that would otherwise take the waiting popup
+# down with it when it finishes.
+toast() {
+  local forge=$1 url=$2 summary=$3 body=$4 said=${5:-}
+  if [[ -n ${DESKTOP_REVIEWS_SEND:-} ]]; then
+    printf '%s\t%s\t%s\t%s\n' "$url" "$summary" "${body//$'\n'/ | }" "$forge" >>"$DESKTOP_REVIEWS_SEND"
+    [[ -n $said ]] && speaking && printf '%s\n' "$said" >>"$DESKTOP_REVIEWS_SEND.said"
+    return
+  fi
+  systemd-run --user --quiet --collect --unit="desktop-review-$(date +%s%N)" \
+    "$0" --toast "$forge" "$url" "$summary" "$body" >/dev/null 2>&1 ||
+    setsid -f "$0" --toast "$forge" "$url" "$summary" "$body" </dev/null >/dev/null 2>&1
+  [[ -n $said ]] && speaking && setsid -f desktop-say "$said" </dev/null >/dev/null 2>&1
+  return 0
+}
+
+show() {
+  local forge=$1 url=$2 summary=$3 body=$4 chosen
+  # A day is long enough for a popup in the notification list to still be clicked.
+  chosen=$(timeout 1d notify-send --app-name="$forge" --icon=vcs-merge-request \
+    --action=default=Open --wait "$summary" "$body")
+  [[ $chosen == default && -n $url ]] && exec xdg-open "$url"
+}
+
+# One request, popped up and said: the line as a *_requests function writes it.
+announce() {
+  local key who subject where url kind host forge
+  IFS=$'\t' read -r key who subject where url <<<"$1"
+  kind=${key%%:*} host=${key#*:} host=${host%:*}
+  forge=$(forge "$kind" "$host")
+  toast "$forge" "$url" "$who asks for your review" "$subject"$'\n'"$forge · $where" \
+    "On $forge, $who asks for your review: $(spoken_subject "$subject")."
+}
+
+check() {
+  mkdir -p "$STATE"
+  local kind host file requests fresh=() line count forge
+  for kind in gitlab github forgejo; do
+    while read -r host; do
+      [[ -n $host ]] || continue
+      reachable "$host" || continue
+      requests=$("${kind}_requests" "$host") || continue
+      file="$STATE/${kind}-${host//[^A-Za-z0-9.-]/_}"
+      if [[ ! -f $file ]]; then
+        count=$(grep -c . <<<"$requests")
+        if ((count > 0)); then
+          forge=$(forge "$kind" "$host")
+          toast "$forge" "$(waiting_list "$kind" "$host")" "$count waiting for your review" \
+            "on $forge, $host. Click for the list." "$count requests wait for your review on $forge."
+        fi
+      else
+        while IFS=$'\t' read -r key _ _ _ _; do
+          [[ -n $key ]] && ! grep -qxF "$key" "$file" && fresh+=("$(grep -F "$key"$'\t' <<<"$requests" | head -1)")
+        done <<<"$requests"
+      fi
+      # What is open now is what has been seen: a request that closes and opens again,
+      # or is asked of you a second time, is news again.
+      cut -f1 <<<"$requests" | grep . >"$file.new"
+      mv "$file.new" "$file"
+    done < <("${kind}_hosts")
+  done
+
+  if ((${#fresh[@]} > MOST)); then
+    toast "Reviews" "" "${#fresh[@]} new requests for your review" \
+      "$(printf '%s\n' "${fresh[@]}" | cut -f2,3 | head -3 | sed 's/\t/: /')" \
+      "${#fresh[@]} new requests wait for your review."
+    return
+  fi
+  for line in "${fresh[@]}"; do
+    announce "$line"
+  done
+}
+
+# What is waiting, host by host, and why a host has nothing to say: an empty answer and
+# an unanswered question look the same otherwise.
+list() {
+  local kind host forge requests count any=""
+  for kind in gitlab github forgejo; do
+    forge=$(forge "$kind" "")
+    while read -r host; do
+      [[ -n $host ]] || continue
+      any=1
+      forge=$(forge "$kind" "$host")
+      if ! reachable "$host"; then
+        printf '%-9s %-28s not reachable (VPN off?)\n' "$forge" "$host"
+      elif ! requests=$("${kind}_requests" "$host"); then
+        printf '%-9s %-28s did not answer\n' "$forge" "$host"
+      else
+        count=$(grep -c . <<<"$requests")
+        if ((count == 0)); then
+          printf '%-9s %-28s nothing waiting for you\n' "$forge" "$host"
+        else
+          printf '%-9s %-28s %s waiting for you\n' "$forge" "$host" "$count"
+          while IFS=$'\t' read -r _ who subject where url; do
+            printf '          %s: %s\n          %s  %s\n' "$who" "$subject" "$where" "$url"
+          done <<<"$requests"
+        fi
+      fi
+    done < <("${kind}_hosts")
+  done
+  [[ -n $any ]] || echo "No host to ask: log in with glab auth login, gh auth login or tea login add."
+  command -v tea >/dev/null 2>&1 && [[ -z $(forgejo_hosts) ]] &&
+    echo "Forgejo   (none)                       tea is not logged in anywhere: tea login add"
+  return 0
+}
+
+# One made-up request per forge you are logged in to, popped up and said exactly as a
+# real one would be. A click opens that host's real list of what waits for you.
+example() {
+  local kind host
+  for kind in gitlab github forgejo; do
+    host=$("${kind}_hosts" | head -1)
+    [[ -n $host ]] || continue
+    case $kind in
+    gitlab) announce "gitlab:$host:0"$'\t'"Example Person"$'\t'"feat(helm): add the monitoring chart"$'\t'"team/charts!42"$'\t'"$(waiting_list gitlab "$host")" ;;
+    github) announce "github:$host:0"$'\t'"example-person"$'\t'"Fix the login redirect"$'\t'"org/app#7"$'\t'"$(waiting_list github "$host")" ;;
+    forgejo) announce "forgejo:$host:0"$'\t'"Example Person"$'\t'"Typo in the README"$'\t'"someone/notes#3"$'\t'"$(waiting_list forgejo "$host")" ;;
+    esac
+    # One at a time, so the voice says one before the next arrives.
+    [[ -n ${DESKTOP_REVIEWS_SEND:-} ]] || sleep 4
+  done
+}
+
+case "${1:-}" in
+--toast) shift; show "$@" ;;
+--list) list ;;
+--example) example ;;
+"") check ;;
+*) echo "usage: desktop-reviews [--list | --example]" >&2; exit 2 ;;
+esac
