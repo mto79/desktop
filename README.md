@@ -69,6 +69,7 @@ firmware.
 session, install and update, Hyprland, the shell, agents and tmux, backups, security,
 network, audio and Bluetooth, voice, themes, testing, and
 [keeping private information out of a public repository](docs/privacy.md).
+[CHANGELOG.md](CHANGELOG.md) has what changed, month by month.
 
 ## Contributing
 
