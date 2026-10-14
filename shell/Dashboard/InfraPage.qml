@@ -156,12 +156,13 @@ ColumnLayout {
   readonly property var blue: Scans.bluetooth
 
   // Nearness for the radar, 0 in the middle to 1 at the edge, on a log scale: 1 ms and
-  // 10 ms are as far apart as 10 ms and 100 ms.
+  // 10 ms are as far apart as 10 ms and 100 ms. What answered stays inside 0.85, so the
+  // outer ring is left to what did not, and the two never sit on top of each other.
   function nearMs(ms) {
-    return Math.log(ms + 1) / Math.log(201);
+    return Math.min(0.85, 0.85 * Math.log(ms + 1) / Math.log(1001));
   }
   function nearMetres(m) {
-    return Math.log(m + 1) / Math.log(41);
+    return Math.min(0.85, 0.85 * Math.log(m + 1) / Math.log(41));
   }
 
   function deviceName(d) {
@@ -394,7 +395,6 @@ ColumnLayout {
     property color tone: Color.popupText
     property bool lit: false
 
-    width: parent ? parent.width : 0
     bottomPadding: 6
 
     Text {
@@ -999,15 +999,11 @@ ColumnLayout {
       Radar {
         id: netRadar
 
-        width: Math.min(420, parent.width * 0.42)
-        height: 360
+        width: Math.min(400, parent.width * 0.4)
+        height: 340
         points: page.netPoints
         tone: page.placeTone
         rings: [
-          {
-            "at": page.nearMs(1),
-            "label": "1 ms"
-          },
           {
             "at": page.nearMs(10),
             "label": "10 ms"
@@ -1017,24 +1013,35 @@ ColumnLayout {
             "label": "100 ms"
           },
           {
+            "at": page.nearMs(1000),
+            "label": "1 s"
+          },
+          {
             "at": 1,
             "label": "quiet"
           }
         ]
       }
 
-      Column {
+      // Two columns where there is room for them, so a busy network does not run a long
+      // way down the page beside a radar that stopped long before.
+      Grid {
         id: netList
 
         anchors.left: netRadar.right
         anchors.leftMargin: Style.sectionSpacing * 2
         anchors.right: parent.right
+        columns: width > 900 ? 2 : 1
+        columnSpacing: Style.sectionSpacing * 2
+        readonly property real cell: (width - columnSpacing * (columns - 1)) / columns
 
         Repeater {
           model: page.scan && page.scan.devices ? page.scan.devices : []
 
           delegate: DeviceLine {
             required property var modelData
+
+            width: netList.cell
 
             title: page.deviceName(modelData) + (modelData.gateway && page.deviceName(modelData) !== "Router" ? "  ·  router" : "") + (modelData.private ? "  ·  private address" : "")
             detail: modelData.ip + "  ·  " + (modelData.mac || "no MAC") + (modelData.vendor && modelData.vendor !== "private address" ? "  ·  " + modelData.vendor : "") + (modelData.me ? "" : "  ·  " + (modelData.ms !== null && modelData.ms !== undefined ? modelData.ms + " ms" : page.scan.swept ? "no answer to ping" : "not pinged"))
@@ -1058,31 +1065,60 @@ ColumnLayout {
     title: "Wi-Fi around"
     figure: page.scan && page.scan.wifi ? String(page.scan.wifi.length) : ""
 
-    Bars {
-      width: parent.width
-      height: 150
-      values: page.scan && page.scan.wifi ? page.scan.wifi.slice(0, 16).map(function (a) {
-        return {
-          "label": a.ssid,
-          "value": a.signal
-        };
-      }) : []
-      ceiling: 100
-      appear: page.active && page.heading === "network"
-      highlight: page.scan && page.scan.wifi ? page.scan.wifi.findIndex(function (a) {
-        return a.current;
-      }) : -1
+    Quiet {
+      visible: Sharing.active
+      text: "Hidden while the screen is shared: the names and addresses of the networks around."
     }
 
-    Repeater {
-      model: page.scan && page.scan.wifi && !Sharing.active ? page.scan.wifi.slice(0, 16) : []
+    // A bar for each network's signal, and what is known of it beside it, in as many
+    // columns as fit: one list rather than a chart and the same networks again under it.
+    Grid {
+      id: wifiList
 
-      delegate: Quiet {
-        required property var modelData
+      width: parent.width
+      columns: Math.max(1, Math.floor((width + columnSpacing) / (560 + columnSpacing)))
+      columnSpacing: Style.sectionSpacing * 2
+      rowSpacing: 4
+      readonly property real cell: (width - columnSpacing * (columns - 1)) / columns
 
-        width: parent ? parent.width : 0
-        text: modelData.signal + "%  " + modelData.ssid + (modelData.current ? "  (this one)" : "") + "  ·  " + modelData.band + " ch " + modelData.channel + "  ·  " + modelData.security + "  ·  " + modelData.bssid
-        color: modelData.current ? page.placeTone : Color.popupMuted
+      Repeater {
+        model: page.scan && page.scan.wifi && !Sharing.active ? page.scan.wifi.slice(0, 18) : []
+
+        delegate: Row {
+          id: air
+
+          required property var modelData
+          readonly property color tone: modelData.current ? page.placeTone : Color.popupMuted
+
+          width: wifiList.cell
+          spacing: Style.sectionSpacing
+
+          Rectangle {
+            anchors.verticalCenter: parent.verticalCenter
+            width: 80
+            height: 6
+            radius: 3
+            color: Qt.rgba(Color.popupText.r, Color.popupText.g, Color.popupText.b, 0.08)
+
+            Rectangle {
+              width: parent.width * Math.max(0.04, air.modelData.signal / 100)
+              height: parent.height
+              radius: parent.radius
+              color: air.modelData.current ? page.placeTone : Color.popupAccent
+              opacity: air.modelData.current ? 1 : 0.55
+            }
+          }
+          Text {
+            width: air.width - 80 - air.spacing
+            anchors.verticalCenter: parent.verticalCenter
+            text: air.modelData.signal + "%  " + air.modelData.ssid + (air.modelData.current ? "  (this one)" : "") + "  ·  " + air.modelData.band + " ch " + air.modelData.channel + "  ·  " + air.modelData.security + "  ·  " + air.modelData.bssid
+            textFormat: Text.PlainText
+            color: air.tone
+            font.family: Style.fontFamily
+            font.pixelSize: Style.fontSize
+            elide: Text.ElideRight
+          }
+        }
       }
     }
   }
@@ -1130,8 +1166,8 @@ ColumnLayout {
       Radar {
         id: btRadar
 
-        width: Math.min(460, parent.width * 0.45)
-        height: 400
+        width: Math.min(420, parent.width * 0.4)
+        height: 380
         points: page.btPoints
         rings: [
           {
@@ -1153,18 +1189,25 @@ ColumnLayout {
         ]
       }
 
-      Column {
+      // Two columns where there is room for them, so a busy network does not run a long
+      // way down the page beside a radar that stopped long before.
+      Grid {
         id: btList
 
         anchors.left: btRadar.right
         anchors.leftMargin: Style.sectionSpacing * 2
         anchors.right: parent.right
+        columns: width > 900 ? 2 : 1
+        columnSpacing: Style.sectionSpacing * 2
+        readonly property real cell: (width - columnSpacing * (columns - 1)) / columns
 
         Repeater {
           model: page.blue && page.blue.devices ? page.blue.devices : []
 
           delegate: DeviceLine {
             required property var modelData
+
+            width: btList.cell
 
             title: (modelData.name || modelData.doing || modelData.maker || "Nameless") + (modelData.connected ? "  ·  connected" : modelData.paired ? "  ·  paired" : "")
             detail: (modelData.near ? "about " + modelData.metres + " m  ·  " + modelData.rssi + " dBm" : "not heard this time") + "  ·  " + modelData.kind + (modelData.maker ? "  ·  " + modelData.maker : "") + (modelData.battery !== null && modelData.battery !== undefined ? "  ·  battery " + modelData.battery + "%" : "")

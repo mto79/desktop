@@ -119,6 +119,7 @@ check "Bluetooth is a heading of the infrastructure tab" grep -q '"clusters", "n
 check "the panel and the dashboard share one scan" grep -q 'Scans.scanNetwork' "$ROOT/shell/Bar/panels/NetworkPanel.qml"
 check "  which never starts by itself" lacks -q 'Timer' "$ROOT/shell/Commons/Scans.qml"
 check "the devices are hidden while the screen is shared, in the panel too" grep -q '!Sharing.active ? Scans.network.devices' "$ROOT/shell/Bar/panels/NetworkPanel.qml"
+check "  and so are the Wi-Fi networks around" grep -q 'page.scan.wifi && !Sharing.active' "$PAGE"
 check "names from the network are never rendered as HTML" grep -q 'textFormat: Text.PlainText' "$ROOT/shell/Dashboard/Quiet.qml"
 check "  nor a Wi-Fi network's name under its bar" grep -q 'textFormat: Text.PlainText' "$ROOT/shell/Dashboard/Bars.qml"
 check "the shell knows Scans" grep -q '^singleton Scans 1.0 Scans.qml$' "$ROOT/shell/Commons/qmldir"

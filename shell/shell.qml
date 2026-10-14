@@ -233,7 +233,8 @@ ShellRoot {
       return dashboard.newsSection(name) ? "ok" : "unknown";
     }
 
-    // A heading of the dashboard's AI tab: "presence", "agents", "voice" or "prompts".
+    // A heading of the dashboard's Infrastructure tab: "clusters", "network" or
+    // "bluetooth".
     function infraSection(name: string): string {
       return dashboard.infraSection(name) ? "ok" : "unknown";
     }
@@ -253,6 +254,7 @@ ShellRoot {
       return Scans.scanBluetooth() ? "ok" : "busy";
     }
 
+    // A heading of the dashboard's AI tab: "presence", "agents", "voice" or "prompts".
     function aiSection(name: string): string {
       return dashboard.aiSection(name) ? "ok" : "unknown";
     }

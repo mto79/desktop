@@ -71,8 +71,9 @@ Item {
     delegate: Text {
       required property var modelData
 
+      // Under the middle, inside each ring: a name beside a dot is drawn above them.
       x: radar.cx + 4
-      y: radar.cy - modelData.at * radar.radius - height
+      y: radar.cy + modelData.at * radar.radius - height - 1
       text: modelData.label
       textFormat: Text.PlainText
       color: Color.popupMuted
@@ -89,14 +90,25 @@ Item {
     radius: 7
     color: radar.tone
   }
-  Text {
-    x: radar.cx - width / 2
-    y: radar.cy + 10
-    text: radar.centre
-    textFormat: Text.PlainText
-    color: Color.popupMuted
-    font.family: Style.fontFamily
-    font.pixelSize: Style.fontSize - 2
+  // What the middle is, in the corner: under the dot it would sit on the nearest devices'
+  // names, which is where the radar is busiest.
+  Row {
+    spacing: 6
+
+    Rectangle {
+      anchors.verticalCenter: parent.verticalCenter
+      width: 8
+      height: 8
+      radius: 4
+      color: radar.tone
+    }
+    Text {
+      text: radar.centre
+      textFormat: Text.PlainText
+      color: Color.popupMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 2
+    }
   }
 
   Repeater {
@@ -107,7 +119,7 @@ Item {
 
       required property var modelData
       readonly property real a: radar.angle(modelData.key)
-      readonly property real r: Math.max(0.12, Math.min(1, modelData.near)) * radar.radius
+      readonly property real r: Math.max(0.16, Math.min(1, modelData.near)) * radar.radius
       readonly property bool lit: radar.hovered === modelData.key || dotArea.containsMouse
 
       x: radar.cx + Math.cos(a) * r - 6
@@ -136,9 +148,18 @@ Item {
       }
 
       Text {
-        // The name beside the dot, on the side away from the middle.
-        x: Math.cos(point.a) >= 0 ? 16 : -width - 4
+        id: name
+
+        // The name beside the dot, on the side away from the middle -- unless that side has
+        // less room than the other, near the edge, where the name would be cut off.
+        readonly property real wanted: Math.min(implicitWidth, 160)
+        readonly property real roomRight: radar.width - point.x - 16
+        readonly property real roomLeft: point.x - 4
+        readonly property bool toRight: Math.cos(point.a) >= 0 ? (roomRight >= wanted || roomRight >= roomLeft) : !(roomLeft >= wanted || roomLeft >= roomRight)
+
+        x: toRight ? 16 : -width - 4
         y: -2
+        z: 1
         text: point.modelData.label
         textFormat: Text.PlainText
         color: point.lit ? Color.popupText : Color.popupMuted
@@ -146,7 +167,7 @@ Item {
         font.pixelSize: Style.fontSize - 2
         visible: point.lit || radar.points.length <= 14
         elide: Text.ElideRight
-        width: Math.min(implicitWidth, 160)
+        width: Math.max(0, Math.min(wanted, toRight ? roomRight : roomLeft))
       }
 
       MouseArea {
