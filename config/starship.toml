@@ -1,5 +1,11 @@
 "$schema" = 'https://starship.rs/config-schema.json'
 
+# Starship gives up scanning the directory after 30 ms and says so above the prompt. A
+# terminal that starts cold, or a dozen tmux panes coming back at once after login, goes
+# over that in a home directory that takes 25 ms when nothing else is running. A slow
+# prompt once in a while is better than a warning every time.
+scan_timeout = 200
+
 format = """
 $time\
 $shlvl\
