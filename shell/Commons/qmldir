@@ -7,5 +7,6 @@ singleton Inbox 1.0 Inbox.qml
 singleton Media 1.0 Media.qml
 singleton Style 1.0 Style.qml
 singleton Shortcuts 1.0 Shortcuts.qml
+singleton Spectrum 1.0 Spectrum.qml
 singleton Speech 1.0 Speech.qml
 singleton Sound 1.0 Sound.qml

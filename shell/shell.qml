@@ -11,6 +11,7 @@ import "Overview"
 import "Power"
 import "Voice"
 import "Notifications"
+import "NowPlaying"
 import "Osd"
 
 // Entry point for the desktop shell.
@@ -166,6 +167,12 @@ ShellRoot {
       return osdOverlay.show(kind) ? "ok" : "unknown";
     }
 
+    // The now-playing card, for the track already playing: it otherwise only comes up
+    // when a new one starts. "ok", or "none" when nothing is playing.
+    function nowPlaying(): string {
+      return nowPlayingCard.present() ? "ok" : "none";
+    }
+
     function dismissNotification(): void {
       notifications.dismissLatest();
     }
@@ -293,6 +300,12 @@ ShellRoot {
     id: notifications
 
     config: (shell.config && shell.config.notifications) ? shell.config.notifications : ({})
+  }
+
+  NowPlaying {
+    id: nowPlayingCard
+
+    config: (shell.config && shell.config.nowPlaying) ? shell.config.nowPlaying : ({})
   }
 
   Osd {

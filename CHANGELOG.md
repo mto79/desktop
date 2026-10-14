@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- An equalizer in place of the media widget's glyph while music plays, from cava, and a
+  card under the bar when a new track starts: the cover, the track, and the artist's
+  albums from MusicBrainz with the one playing lit. cava is installed.
 - A popup, said aloud, when a merge or pull request waits for your review, from every
   GitLab, GitHub, Forgejo and Gitea host that glab, gh or tea is logged in to. tea is
   installed, pinned to a version and checksum.
