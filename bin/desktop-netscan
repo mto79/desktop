@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+
+# desktop-netscan: which devices share this network, and which Wi-Fi networks are near.
+#
+#   desktop-netscan scan            look, the way the network allows (below); one JSON object
+#   desktop-netscan scan --sweep    send a ping to every address, even where it is not yours
+#   desktop-netscan last            the last answer again, without looking
+#
+# Two ways of looking. The quiet one sends nothing: it reads what the kernel already knows
+# of its neighbours (`ip neigh`), what devices announce of themselves over mDNS, and the
+# Wi-Fi networks NetworkManager hears. The sweep pings every address of the subnet as well,
+# which finds the devices that keep quiet until spoken to.
+#
+# On a network named home in ~/.config/desktop/networks.conf the sweep is what a scan
+# does. Anywhere else -- the office, a hotel, a network with no name of yours -- a scan is
+# quiet unless --sweep is given: a ping to every address is ordinary traffic, but on a
+# network you do not run it can read as probing, and an office may have something that
+# watches for exactly that. It is never sent into the VPN, only along the link this
+# machine is on, and a subnet wider than a /24 is swept for its own /24 only.
+#
+# No root, no raw sockets, no ports: ping, ip, avahi-browse, getent and nmcli. Vendors come
+# from the IEEE list hwdata ships. The answer is kept in ~/.local/state/desktop/netscan,
+# readable by you alone, since a list of a network's devices is not for everyone.
+
+import concurrent.futures
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "desktop", "netscan")
+LAST = os.path.join(STATE, "last.json")
+OUI_FILES = [os.environ.get("DESKTOP_OUI", ""), "/usr/share/hwdata/oui.txt", "/usr/share/nmap/nmap-mac-prefixes"]
+
+
+def run(*command, wait=10):
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=wait).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+
+
+def fields(line):
+    return [part.replace("\\:", ":") for part in re.split(r"(?<!\\):", line)]
+
+
+def vendors():
+    """MAC prefix (AABBCC) -> organisation, from whichever list is there."""
+    table = {}
+    for path in OUI_FILES:
+        if not path or not os.path.exists(path):
+            continue
+        with open(path, errors="replace") as f:
+            for line in f:
+                hit = re.match(r"^([0-9A-Fa-f]{2})-([0-9A-Fa-f]{2})-([0-9A-Fa-f]{2})\s+\(hex\)\s+(.+)$", line) \
+                    or re.match(r"^([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})\s+(.+)$", line)
+                if hit:
+                    table.setdefault("".join(hit.group(1, 2, 3)).upper(), hit.group(4).strip())
+        if table:
+            break
+    return table
+
+
+def private_mac(mac):
+    """A locally administered address: a phone or laptop that hides its own, per network."""
+    try:
+        return bool(int(mac.split(":")[0], 16) & 0x02)
+    except (ValueError, IndexError):
+        return False
+
+
+def where():
+    """The link this machine is on, from desktop-dash-network: never the VPN's."""
+    try:
+        net = json.loads(run("desktop-dash-network", wait=15) or "{}")
+    except ValueError:
+        net = {}
+    link = next((l for l in net.get("links", []) if l.get("primary")), None) or (net.get("links") or [None])[0]
+    place = net.get("place", {})
+    if not link or not link.get("address"):
+        return None, place
+    iface = ipaddress.ip_interface(link["address"])
+    return {"dev": link["dev"], "kind": link["kind"], "address": str(iface.ip), "cidr": str(iface.network),
+            "gateway": link.get("gateway", ""), "connection": link.get("connection", "")}, place
+
+
+def targets(link):
+    """The addresses a sweep pings: the whole subnet up to a /24, else this machine's /24."""
+    net = ipaddress.ip_network(link["cidr"], strict=False)
+    if net.prefixlen < 24:
+        net = ipaddress.ip_network(f"{link['address']}/24", strict=False)
+        mode = "own /24 of a wider subnet"
+    else:
+        mode = "whole subnet"
+    return [str(h) for h in net.hosts() if str(h) != link["address"]], str(net), mode
+
+
+def ping(address):
+    out = run("ping", "-n", "-c", "1", "-W", "1", address, wait=3)
+    hit = re.search(r"time[=<]([\d.]+) ?ms", out)
+    return address, (round(float(hit.group(1)), 1) if hit else None)
+
+
+def neighbours(dev):
+    out = {}
+    try:
+        table = json.loads(run("ip", "-j", "-4", "neigh", "show", "dev", dev) or "[]")
+    except ValueError:
+        table = []
+    for entry in table:
+        state = entry.get("state", [])
+        if entry.get("lladdr") and "FAILED" not in state and "INCOMPLETE" not in state:
+            out[entry["dst"]] = {"mac": entry["lladdr"].lower(), "state": "/".join(state).lower()}
+    return out
+
+
+def announced(dev):
+    """What devices say of themselves over mDNS: address -> name and the services offered."""
+    out = {}
+    for line in run("avahi-browse", "--all", "--resolve", "--parsable", "--terminate", wait=8).splitlines():
+        part = line.split(";")
+        if len(part) < 9 or part[0] != "=" or part[2] != "IPv4" or part[1] != dev:
+            continue
+        # avahi writes a space as \032: three decimal digits after a backslash.
+        name = re.sub(r"\\(\d{3})", lambda m: chr(int(m.group(1))), part[3])
+        entry = out.setdefault(part[7], {"name": "", "host": "", "services": []})
+        entry["name"] = entry["name"] or name
+        entry["host"] = entry["host"] or part[6]
+        service = part[4].strip("_").split("._")[0]
+        if service not in entry["services"]:
+            entry["services"].append(service)
+    return out
+
+
+def reverse(address):
+    out = run("getent", "hosts", address, wait=2).split()
+    name = out[1] if len(out) > 1 else ""
+    # systemd-resolved answers "_gateway" for the router: a placeholder, not a name.
+    return address, ("" if name == "_gateway" else name)
+
+
+def own_addresses():
+    """Every IPv4 address this machine has, on whichever link: a laptop on cable and Wi-Fi
+    at once is in the subnet twice, and is not two devices."""
+    try:
+        # Not -4: that leaves out each link's own hardware address.
+        links = json.loads(run("ip", "-j", "addr", "show") or "[]")
+    except ValueError:
+        links = []
+    return {a["local"]: link.get("address", "") for link in links for a in link.get("addr_info", [])
+            if a.get("local") and a.get("family", "inet") == "inet"}
+
+
+def wifi_around():
+    out = []
+    listing = run("nmcli", "-t", "-f", "IN-USE,BSSID,SSID,CHAN,FREQ,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "auto", wait=20)
+    for line in listing.splitlines():
+        p = fields(line)
+        if len(p) < 7:
+            continue
+        mhz = int(re.sub(r"\D", "", p[4]) or 0)
+        out.append({"current": p[0] == "*", "bssid": p[1].lower(), "ssid": p[2] or "(hidden)", "channel": int(p[3] or 0),
+                    "band": "6 GHz" if mhz >= 5925 else "5 GHz" if mhz >= 4900 else "2.4 GHz",
+                    "signal": int(p[5] or 0), "security": p[6] or "open"})
+    out.sort(key=lambda a: -a["signal"])
+    return out
+
+
+def scan(sweep_asked):
+    started = time.time()
+    link, place = where()
+    kind = place.get("kind", "unknown")
+    answer = {"checked": int(started), "place": place.get("name", ""), "kind": kind, "link": link,
+              "devices": [], "wifi": wifi_around(), "swept": False, "why": ""}
+    if not link:
+        answer["why"] = "no network to look at"
+        return answer
+
+    sweep = kind == "home" or sweep_asked
+    latency = {}
+    if sweep:
+        hosts, scope, mode = targets(link)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as pool:
+            latency = dict(pool.map(ping, hosts))
+        answer.update({"swept": True, "scope": scope, "mode": mode})
+    else:
+        answer["why"] = ("not a network of yours: only what is already known was read, nothing was sent. "
+                         "Scan anyway to ping every address.")
+
+    neigh = neighbours(link["dev"])
+    names = announced(link["dev"])
+    mine = own_addresses()
+    subnet = ipaddress.ip_network(link["cidr"], strict=False)
+    found = set(neigh) | set(names) | {a for a, ms in latency.items() if ms is not None} | {link["address"]}
+    # This machine's other links in the same subnet: there whether they answered or not.
+    found |= {a for a in mine if ipaddress.ip_address(a) in subnet}
+    if link.get("gateway"):
+        found.add(link["gateway"])
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        rdns = dict(pool.map(reverse, sorted(found)))
+    oui = vendors()
+
+    for address in sorted(found, key=lambda a: ipaddress.ip_address(a)):
+        mac = neigh.get(address, {}).get("mac", "")
+        me = address == link["address"] or address in mine
+        if me:
+            mac = (mine.get(address) or mac).lower()
+        how = [w for w, there in (("ping", latency.get(address) is not None), ("neighbour", address in neigh), ("mDNS", address in names)) if there]
+        answer["devices"].append({
+            "ip": address,
+            "mac": mac,
+            "vendor": "" if not mac else ("private address" if private_mac(mac) else oui.get(mac.replace(":", "")[:6].upper(), "")),
+            "private": private_mac(mac) if mac else False,
+            "name": names.get(address, {}).get("name", ""),
+            "host": names.get(address, {}).get("host", ""),
+            "services": names.get(address, {}).get("services", [])[:6],
+            "rdns": rdns.get(address, ""),
+            "ms": None if me else latency.get(address),
+            "me": me,
+            "gateway": address == link.get("gateway"),
+            "found": ["this machine"] if me else how,
+        })
+    answer["took"] = round(time.time() - started, 1)
+    return answer
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "scan"
+    if command == "last":
+        try:
+            with open(LAST) as f:
+                sys.stdout.write(f.read())
+        except OSError:
+            print("{}")
+        return
+    if command != "scan":
+        print("usage: desktop-netscan scan [--sweep] | last", file=sys.stderr)
+        sys.exit(2)
+    answer = scan("--sweep" in sys.argv[2:])
+    text = json.dumps(answer, separators=(",", ":"))
+    os.makedirs(STATE, mode=0o700, exist_ok=True)
+    fd = os.open(LAST + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text + "\n")
+    os.replace(LAST + ".new", LAST)
+    print(text)
+
+
+if __name__ == "__main__":
+    main()

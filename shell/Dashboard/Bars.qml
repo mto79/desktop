@@ -69,6 +69,8 @@ Item {
         Text {
           id: name
 
+          // A label can be someone else's words -- a Wi-Fi network's name -- and is never HTML.
+          textFormat: Text.PlainText
           // Under the first bar a wide word starts at the edge; centred it would lose
           // its first letters to the card.
           anchors.horizontalCenter: bars.sparse && slot.index === 0 ? undefined : parent.horizontalCenter

@@ -12,6 +12,13 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A scan of who else is on the network and which Wi-Fi networks are near, and of the
+  Bluetooth devices near, each drawn as a radar on the dashboard, with a Bluetooth
+  heading under Infrastructure and the devices in the network panel. A scan only pings
+  on a network marked home, never into the VPN, and nothing is shown while the screen
+  is shared.
+- The boxes of the dashboard's network picture open their details: addresses, name
+  servers, and the routes on each link and through the VPN.
 - A popup, said aloud, when a merge or pull request waits for your review, from every
   GitLab, GitHub, Forgejo and Gitea host that glab, gh or tea is logged in to. tea is
   installed, pinned to a version and checksum.

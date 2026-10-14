@@ -813,6 +813,62 @@ Popup {
       onClicked: root.runSpeedtest()
     }
 
+    // Who else is on this network: the same scan as the dashboard's (Commons/Scans), so a
+    // scan started here shows there and the other way round. Only when asked, only along
+    // this link, and quiet -- nothing sent -- on a network not marked as yours.
+    PanelSection {
+      title: "Devices on this network"
+      value: Scans.network && Scans.network.devices ? String(Scans.network.devices.length) : ""
+      rule: true
+    }
+
+    PanelRow {
+      icon: "\u{f0f86}"
+      label: Scans.scanningNetwork ? "Scanning..." : (Scans.network ? "Scan again" : "Scan this network")
+      sublabel: {
+        var n = Scans.network;
+        if (!n)
+          return "Pings this subnet on a network of yours; elsewhere only listens";
+        return (n.swept ? "pinged " + (n.scope || "") : "quiet: nothing sent") + "  ·  " + (n.took ? n.took + " s" : "");
+      }
+      active: Scans.scanningNetwork
+      enabled: !Scans.scanningNetwork
+      onClicked: Scans.scanNetwork(false)
+    }
+
+    Repeater {
+      model: Scans.network && Scans.network.devices && !Sharing.active ? Scans.network.devices.filter(function (d) {
+        return !d.me;
+      }).slice(0, 8) : []
+
+      delegate: PanelRow {
+        required property var modelData
+
+        icon: modelData.gateway ? "\u{f0469}" : modelData.private ? "\u{f011c}" : "\u{f0379}"
+        label: modelData.gateway ? (modelData.name || "Router") : (modelData.name || modelData.host || modelData.rdns || (modelData.vendor && modelData.vendor !== "private address" ? modelData.vendor : modelData.ip))
+        sublabel: modelData.ip + (modelData.vendor && modelData.vendor !== "private address" ? "  ·  " + modelData.vendor : modelData.private ? "  ·  private address" : "") + (modelData.ms !== null && modelData.ms !== undefined ? "  ·  " + modelData.ms + " ms" : "")
+        onClicked: root.copy("ip", modelData.ip)
+      }
+    }
+
+    PanelRow {
+      visible: Sharing.active && !!Scans.network
+      icon: "\u{f0209}"
+      label: "Hidden while the screen is shared"
+      enabled: false
+    }
+
+    PanelRow {
+      visible: !!Scans.network
+      icon: "\u{f0aa9}"
+      label: "All of it in the dashboard"
+      sublabel: "Every device, the Wi-Fi around, and a radar of who is near"
+      onClicked: {
+        root.close();
+        Quickshell.execDetached(["bash", "-c", "desktop-shell shell dashboardTab infra; desktop-shell shell infraSection network; hyprctl dispatch workspace 6"]);
+      }
+    }
+
     PanelSection {
       title: "Advanced"
       rule: true

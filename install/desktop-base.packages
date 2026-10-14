@@ -1,7 +1,9 @@
 atuin
+avahi-tools
 bat
 bc
 bind-utils
+bluez
 bolt
 brightnessctl
 btop
@@ -42,6 +44,7 @@ gum
 gvfs-mtp
 gvfs-smb
 hplip
+hwdata
 hypridle
 hyprland
 hyprland-guiutils

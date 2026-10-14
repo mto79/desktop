@@ -287,7 +287,7 @@ esac
 STUB
 cat >"$stubs/ip" <<'STUB'
 #!/usr/bin/env bash
-echo '[{"dst":"default","gateway":"10.1.2.254","dev":"eth0","metric":100},{"dst":"default","gateway":"192.0.2.1","dev":"wlan0","metric":600},{"dst":"10.1.2.0/24","dev":"eth0"},{"dst":"172.20.0.0/16","dev":"tun0"},{"dst":"172.21.0.0/16","dev":"tun0"}]'
+echo '[{"dst":"default","gateway":"10.1.2.254","dev":"eth0","metric":100},{"dst":"default","gateway":"192.0.2.1","dev":"wlan0","metric":600},{"dst":"10.1.2.0/24","dev":"eth0"},{"dst":"198.51.100.7","gateway":"10.1.2.254","dev":"eth0","protocol":"static","metric":50},{"dst":"172.21.0.0/16","gateway":"172.16.0.1","dev":"tun0","metric":50},{"dst":"172.20.0.0/16","gateway":"172.16.0.1","dev":"tun0","metric":50},{"dst":"172.3.0.0/16","gateway":"172.16.0.1","dev":"tun0","metric":50}]'
 STUB
 printf '#!/usr/bin/env bash\necho "64 bytes from $5: icmp_seq=1 ttl=64 time=1.5 ms"\n' >"$stubs/ping"
 chmod +x "$stubs/nmcli" "$stubs/ip" "$stubs/ping"
@@ -300,14 +300,26 @@ check "a Wi-Fi name with a colon in it is read whole" test "$(net '.links[1].ssi
 check "with its signal and band" test "$(net '.links[1] | "\(.signal)|\(.band)"')" = "71|5 GHz"
 check "the router is the way out's, and how fast it answers" test "$(net '.router | "\(.address)|\(.ms)"')" = "10.1.2.254|1.5"
 check "a VPN is called by its own name, not its device's" test "$(net '.vpn[0] | "\(.connection)|\(.dev)"')" = "the-vpn|tun0"
-check "and says how many networks go through it" test "$(net '.vpn[0] | "\(.routes)|\(.all)"')" = "2|false"
+check "and says how many networks go through it" test "$(net '.vpn[0] | "\(.routes)|\(.all)"')" = "3|false"
 check "the tunnel is not counted among the links" test "$(net '.links | length')" = 2
 check "unnamed, the place is what NetworkManager calls it, and says so" test "$(net '.place | "\(.name)|\(.kind)"')" = "Wired|unknown"
-check "the same is said in sentences" grep -q "VPN the-vpn is up: 2 networks go through it" <<<"$(net '.lines[]')"
+check "the same is said in sentences" grep -q "VPN the-vpn is up: 3 networks go through it" <<<"$(net '.lines[]')"
 printf '%s\n' '# mine' 'Office | work | domain=lan.example' 'Home | home | ssid=home:net' >"$sandbox/networks.conf"
 answer=$(network)
 check "a place is named by your own list" test "$(net '.place | "\(.name)|\(.kind)"')" = "Office|work"
 check "and says what gave it away" test "$(net '.place.why')" = "domain lan.example"
+# A box in the picture opens what lies behind it, and the VPN's is every network it takes.
+check "every network behind the VPN is listed, not the first eight" test "$(net '.vpn[0].route_list | length')" -eq 3
+check "  in address order, as a person reads them" test "$(net '[.vpn[0].route_list[].dst] | join(" ")')" = "172.3.0.0/16 172.20.0.0/16 172.21.0.0/16"
+check "  with the gateway they share said once" test "$(net '.vpn[0].gateways | join(" ")')" = "172.16.0.1"
+check "the route the VPN keeps to its own server is named" test "$(net '[.links[0].route_list[] | select(.vpn_server) | .dst] | join(" ")')" = "198.51.100.7"
+check "the ways out are listed, the one taken first" test "$(net '[.defaults[].dev] | join(" ")')" = "eth0 wlan0"
+check "each connection says all its addresses" test "$(net '.links[0].addresses | join(" ")')" = "10.1.2.3/24"
+check "every box in the picture opens its details" test "$(grep -cE 'key: "(machine|router|internet|vpn)"' "$PAGES/InfraPage.qml")" -eq 5
+check "  and a shell command opens them too, for voice" grep -q 'function networkDetails(key: string)' "$ROOT/shell/shell.qml"
+check "the details are not shown while the screen is shared" grep -q 'model: page.details && !Sharing.active ? page.details.routes' "$PAGES/InfraPage.qml"
+check "  which Hyprland says on its event socket" grep -q 'event.name === "screencast"' "$ROOT/shell/Commons/Sharing.qml"
+check "  and the shell knows Sharing" grep -q '^singleton Sharing 1.0 Sharing.qml$' "$ROOT/shell/Commons/qmldir"
 check "the network is not a tab of its own" lacks -x network <<<"$(run tabs)"
 check "no address is looked up outside" lacks -E 'https?://' "$ROOT/bin/desktop-dash-network"
 check "the packets only travel while the page is looked at" grep -q 'visible: stretch.carries && page.active && page.heading === "network"' "$PAGES/InfraPage.qml"

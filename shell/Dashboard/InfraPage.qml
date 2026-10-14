@@ -18,10 +18,11 @@ ColumnLayout {
   property var net: null
   property bool active: false
 
-  readonly property var headings: ["clusters", "network"]
+  readonly property var headings: ["clusters", "network", "bluetooth"]
   readonly property var titles: ({
       "clusters": "Clusters",
-      "network": "Network"
+      "network": "Network",
+      "bluetooth": "Bluetooth"
     })
   property int section: 0
   readonly property string heading: headings[section]
@@ -49,6 +50,165 @@ ColumnLayout {
     return kind === "home" ? Color.good : kind === "work" ? Color.popupAccent : kind === "away" ? Color.caution : kind === "none" ? Color.popupUrgent : Color.popupText;
   }
 
+  // The box whose details are open under the picture: "machine", "router", "internet" or
+  // "vpn" ("Behind the VPN" opens the same). Clicking it again closes them. Kept across the
+  // refreshes every ten seconds, which is why it is a name and not the box's data.
+  property string chosen: ""
+  onHeadingChanged: chosen = ""
+
+  function pick(key) {
+    chosen = chosen === key ? "" : key;
+  }
+
+  // What the open box says about itself: facts as label and value, and a list of routes
+  // where there is one. Everything here is what NetworkManager and the routing table
+  // already hold; nothing is looked up to fill it.
+  readonly property var details: {
+    var n = net;
+    if (!n || chosen === "")
+      return null;
+    function route(r) {
+      return r.dst + (r.via ? "  via " + r.via : "") + (r.metric ? "  ·  " + r.metric : "") + (r.vpn_server ? "  ·  the VPN server" : "");
+    }
+    if (chosen === "machine") {
+      var facts = [];
+      var all = n.links.concat(n.vpn);
+      for (var i = 0; i < all.length; i++) {
+        var l = all[i];
+        facts.push([l.dev, (l.kind === "vpn" ? "VPN " : l.kind === "wifi" ? "Wi-Fi " : "cable ") + l.connection + (l.primary ? "  ·  the way out" : "")]);
+        facts.push(["", (l.addresses && l.addresses.length ? l.addresses.join("  ") : "no address")]);
+      }
+      return {
+        "icon": "\u{f0322}",
+        "title": "This machine",
+        "tone": placeTone,
+        "facts": facts,
+        "routesTitle": "",
+        "routes": []
+      };
+    }
+    if (chosen === "router") {
+      var l2 = link;
+      var f2 = [["Router", n.router.address || "none"], ["Answers", n.router.ms !== null && n.router.ms !== undefined ? n.router.ms + " ms" : "not to a ping"]];
+      if (l2) {
+        f2.push(["Over", (l2.kind === "wifi" ? "Wi-Fi " + (l2.ssid || l2.connection) : "cable  ·  " + l2.connection) + "  ·  " + l2.dev]);
+        if (l2.kind === "wifi" && l2.signal)
+          f2.push(["Signal", l2.signal + "%" + (l2.band ? "  ·  " + l2.band : "")]);
+        f2.push(["This machine", l2.address || "no address"]);
+        f2.push(["Name servers", l2.dns.length ? l2.dns.join("  ") : "none given"]);
+        if (l2.domains.length)
+          f2.push(["Search domains", l2.domains.join("  ")]);
+      }
+      return {
+        "icon": "\u{f0469}",
+        "title": "Router",
+        "tone": placeTone,
+        "facts": f2,
+        "routesTitle": l2 ? "Routes on " + l2.dev : "",
+        "routes": l2 ? l2.route_list.map(route) : []
+      };
+    }
+    if (chosen === "internet") {
+      var f3 = [["Internet", online ? "reachable" : n.online === "portal" ? "behind a login page" : n.online === "none" ? "no connection" : "not reachable"]];
+      f3.push(["Name servers", n.dns.length ? n.dns.join("  ") : "none"]);
+      if (n.domains.length)
+        f3.push(["Search domains", n.domains.join("  ")]);
+      if (tunnel)
+        f3.push(["VPN", tunnel.all ? "takes all traffic" : "takes " + tunnel.routes + " networks; the rest goes out directly"]);
+      return {
+        "icon": "\u{f01e7}",
+        "title": "Internet",
+        "tone": online ? Color.good : Color.popupUrgent,
+        "facts": f3,
+        "routesTitle": "Ways out, the first is taken",
+        "routes": (n.defaults || []).map(function (d) {
+          return "default  via " + (d.via || "-") + "  ·  " + d.dev + "  ·  metric " + d.metric;
+        })
+      };
+    }
+    if (chosen === "vpn" && tunnel) {
+      var f4 = [["Connection", tunnel.connection], ["Device", tunnel.dev], ["Address", tunnel.address || "none"], ["Traffic", tunnel.all ? "all of it" : tunnel.routes + " networks; the rest goes out directly"]];
+      if (tunnel.gateways && tunnel.gateways.length)
+        f4.push(["Through", tunnel.gateways.join("  ")]);
+      f4.push(["Name servers", tunnel.dns.length ? tunnel.dns.join("  ") : "the ones of the link"]);
+      if (tunnel.domains.length)
+        f4.push(["Search domains", tunnel.domains.join("  ")]);
+      // One gateway for all: said once above, not on every line.
+      var single = tunnel.gateways && tunnel.gateways.length === 1;
+      return {
+        "icon": "\u{f099d}",
+        "title": "VPN " + tunnel.connection,
+        "tone": Color.popupAccent,
+        "facts": f4,
+        "routesTitle": (tunnel.route_list ? tunnel.route_list.length : 0) + " routes through " + tunnel.dev,
+        "routes": (tunnel.route_list || []).map(function (r) {
+          return single ? r.dst : route(r);
+        })
+      };
+    }
+    return null;
+  }
+
+  // --- scans: who else is on the network, and what is near over Bluetooth ---------------
+  // Both are Scans' (shell/Commons/Scans.qml), shared with the network panel. Nothing scans
+  // by itself; the buttons do.
+  readonly property var scan: Scans.network
+  readonly property var blue: Scans.bluetooth
+
+  // Nearness for the radar, 0 in the middle to 1 at the edge, on a log scale: 1 ms and
+  // 10 ms are as far apart as 10 ms and 100 ms.
+  function nearMs(ms) {
+    return Math.log(ms + 1) / Math.log(201);
+  }
+  function nearMetres(m) {
+    return Math.log(m + 1) / Math.log(41);
+  }
+
+  function deviceName(d) {
+    if (d.me)
+      return "This machine" + (scan && scan.link && d.ip !== scan.link.address ? " (its other link)" : "");
+    if (d.gateway)
+      return d.name || "Router";
+    return d.name || d.host || d.rdns || (d.vendor && d.vendor !== "private address" ? d.vendor : d.ip);
+  }
+
+  readonly property var netPoints: {
+    if (!scan || !scan.devices)
+      return [];
+    return scan.devices.filter(function (d) {
+      return !d.me;
+    }).map(function (d) {
+      return {
+        "key": d.mac || d.ip,
+        "label": page.deviceName(d),
+        "near": d.ms !== null && d.ms !== undefined ? page.nearMs(d.ms) : 1,
+        "ring": d.ms === null || d.ms === undefined,
+        "tone": d.gateway ? page.placeTone : d.private ? Color.caution : d.vendor ? Color.popupAccent : Color.popupText
+      };
+    });
+  }
+
+  readonly property var btPoints: {
+    if (!blue || !blue.devices)
+      return [];
+    return blue.devices.map(function (d) {
+      return {
+        "key": d.address,
+        "label": d.name || d.doing || d.maker || (d.random ? "random address" : d.address),
+        "near": d.metres !== null && d.metres !== undefined ? page.nearMetres(d.metres) : 1,
+        "ring": !d.near,
+        "tone": d.connected ? Color.good : d.paired ? Color.popupAccent : d.random ? Color.caution : Color.popupText
+      };
+    });
+  }
+
+  function ago(stamp) {
+    if (!stamp)
+      return "";
+    var s = Math.max(0, Math.round(Date.now() / 1000 - stamp));
+    return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago";
+  }
+
   function linkWords(link) {
     if (!link)
       return "no link";
@@ -67,12 +227,25 @@ ColumnLayout {
     property string extra: ""
     property color tone: Color.popupText
     property bool reached: true
+    // Which details a click opens; "" for a box with nothing more to say.
+    property string key: ""
+    readonly property bool picked: key !== "" && page.chosen === key
 
     radius: Style.radius
-    color: Color.popupBackground
-    border.width: reached ? 2 : 1
-    border.color: reached ? tone : Color.popupBorder
-    opacity: reached ? 1 : 0.55
+    color: picked ? Qt.rgba(tone.r, tone.g, tone.b, 0.14) : press.containsMouse && key !== "" ? Color.popupHover : Color.popupBackground
+    border.width: picked ? 3 : reached ? 2 : 1
+    border.color: reached || picked ? tone : Color.popupBorder
+    opacity: reached || picked ? 1 : 0.55
+
+    MouseArea {
+      id: press
+
+      anchors.fill: parent
+      enabled: stop.key !== ""
+      hoverEnabled: true
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: page.pick(stop.key)
+    }
 
     Column {
       anchors.centerIn: parent
@@ -171,6 +344,78 @@ ColumnLayout {
         duration: Style.motionBreath
         easing.type: Easing.InOutSine
       }
+    }
+  }
+
+  // A button on a card: start a scan. Busy, it says so and cannot be pressed again.
+  component Act: Rectangle {
+    id: act
+
+    property string text: ""
+    property bool busy: false
+    property color tone: Color.popupAccent
+    signal pressed
+
+    implicitWidth: actLabel.implicitWidth + 28
+    implicitHeight: actLabel.implicitHeight + 12
+    radius: height / 2
+    color: busy ? Qt.rgba(tone.r, tone.g, tone.b, 0.12) : actArea.containsMouse ? Qt.rgba(tone.r, tone.g, tone.b, 0.22) : "transparent"
+    border.width: 1
+    border.color: tone
+
+    Text {
+      id: actLabel
+
+      anchors.centerIn: parent
+      text: act.busy ? "Scanning…" : act.text
+      textFormat: Text.PlainText
+      color: act.tone
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize
+    }
+    MouseArea {
+      id: actArea
+
+      anchors.fill: parent
+      hoverEnabled: true
+      enabled: !act.busy
+      cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: act.pressed()
+    }
+  }
+
+  // One device in a list: what it is called, and everything else known of it underneath.
+  component DeviceLine: Column {
+    id: line
+
+    property string title: ""
+    property string detail: ""
+    property string more: ""
+    property color tone: Color.popupText
+    property bool lit: false
+
+    width: parent ? parent.width : 0
+    bottomPadding: 6
+
+    Text {
+      width: parent.width
+      text: line.title
+      textFormat: Text.PlainText
+      color: line.lit ? Color.popupText : line.tone
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize + 1
+      font.weight: Style.barLabelWeight
+      font.underline: line.lit
+      elide: Text.ElideRight
+    }
+    Quiet {
+      width: parent.width
+      text: line.detail
+    }
+    Quiet {
+      width: parent.width
+      visible: line.more !== ""
+      text: line.more
     }
   }
 
@@ -377,7 +622,7 @@ ColumnLayout {
         font.weight: Style.barLabelWeight
       }
       Text {
-        text: !page.net ? "" : (page.net.place.kind === "home" ? "home" : page.net.place.kind === "work" ? "work" : page.net.place.kind === "away" ? "away" : page.net.place.kind === "none" ? "offline" : "a network without a name of yours") + "  ·  known by " + page.net.place.why
+        text: !page.net ? "" : (page.net.place.kind === "home" ? "home" : page.net.place.kind === "work" ? "work" : page.net.place.kind === "away" ? "away" : page.net.place.kind === "none" ? "offline" : "a network without a name of yours") + "  ·  known by " + page.net.place.why + "  ·  click a box for its details"
         textFormat: Text.PlainText
         color: Color.popupMuted
         font.family: Style.fontFamily
@@ -398,6 +643,7 @@ ColumnLayout {
 
         width: picture.box
         height: picture.tall
+        key: "machine"
         icon: "\u{f0322}"
         name: "This machine"
         detail: page.link && page.link.address ? page.link.address : "no address"
@@ -419,6 +665,7 @@ ColumnLayout {
         x: (path.width - width) / 2
         width: picture.box
         height: picture.tall
+        key: "router"
         icon: "\u{f0469}"
         name: "Router"
         detail: page.net && page.net.router.address ? page.net.router.address : "none"
@@ -440,6 +687,7 @@ ColumnLayout {
         x: path.width - width
         width: picture.box
         height: picture.tall
+        key: "internet"
         icon: "\u{f01e7}"
         name: "Internet"
         detail: !page.net ? "" : page.online ? "reachable" : page.net.online === "portal" ? "behind a login page" : "not reachable"
@@ -476,6 +724,7 @@ ColumnLayout {
         y: picture.tall + picture.gap
         width: picture.box
         height: picture.tall
+        key: "vpn"
         icon: "\u{f099d}"
         name: page.tunnel ? "VPN " + page.tunnel.connection : ""
         detail: page.tunnel ? (page.tunnel.address || page.tunnel.dev) : ""
@@ -499,12 +748,116 @@ ColumnLayout {
         y: vpn.y
         width: picture.box
         height: picture.tall
+        key: "vpn"
         icon: "\u{f0991}"
         name: "Behind the VPN"
         detail: page.tunnel && page.tunnel.reaches.length > 0 ? page.tunnel.reaches.slice(0, 2).join("  ") : ""
         extra: page.tunnel && page.tunnel.reaches.length > 2 ? "and " + (page.tunnel.routes - 2) + " more" : ""
         tone: Color.popupAccent
       }
+    }
+  }
+
+  // What the open box has to say. The routes are laid out in as many columns as fit, in
+  // address order, so eighty networks behind a VPN are a page to scan, not a list to scroll.
+  Card {
+    id: detailCard
+
+    visible: page.heading === "network" && page.details !== null
+    appear: visible
+    Layout.fillWidth: true
+    icon: page.details ? page.details.icon : ""
+    title: page.details ? page.details.title : ""
+    tone: page.details ? page.details.tone : Color.popupText
+    figure: page.details && page.details.routes.length ? String(page.details.routes.length) : ""
+
+    // While the screen is shared the box still opens, but says why it shows nothing: the
+    // addresses and routes are a map of a network, and a call is no place to hand it out.
+    Quiet {
+      visible: Sharing.active
+      text: "Hidden while the screen is shared. Stop sharing to see the addresses and routes."
+    }
+
+    Repeater {
+      model: page.details && !Sharing.active ? page.details.facts : []
+
+      delegate: Row {
+        id: factRow
+
+        required property var modelData
+        spacing: Style.sectionSpacing
+
+        Text {
+          width: 170
+          text: factRow.modelData[0]
+          textFormat: Text.PlainText
+          color: Color.popupMuted
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize
+        }
+        Text {
+          width: detailCard.width - 170 - Style.sectionSpacing - Style.popupPadding * 2
+          text: factRow.modelData[1]
+          textFormat: Text.PlainText
+          color: Color.popupText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize + 1
+          wrapMode: Text.WrapAnywhere
+        }
+      }
+    }
+
+    Text {
+      visible: page.details !== null && page.details.routesTitle !== "" && !Sharing.active
+      topPadding: Style.popupPadding
+      bottomPadding: 4
+      text: page.details ? page.details.routesTitle : ""
+      textFormat: Text.PlainText
+      color: Color.popupMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize - 1
+      font.bold: true
+      font.letterSpacing: 1
+      font.capitalization: Font.AllUppercase
+    }
+
+    Grid {
+      id: routeGrid
+
+      // As wide as the longest line, so none is cut short; the font is monospaced.
+      readonly property real cell: {
+        var longest = 0;
+        var routes = page.details ? page.details.routes : [];
+        for (var i = 0; i < routes.length; i++)
+          longest = Math.max(longest, routes[i].length);
+        return Math.max(160, longest * Style.fontSize * 0.62 + columnSpacing + 8);
+      }
+      width: detailCard.width - Style.popupPadding * 2
+      columns: Math.max(1, Math.floor(width / cell))
+      columnSpacing: Style.sectionSpacing
+      rowSpacing: 2
+      flow: Grid.TopToBottom
+      rows: page.details && !Sharing.active ? Math.ceil(page.details.routes.length / columns) : 0
+
+      Repeater {
+        model: page.details && !Sharing.active ? page.details.routes : []
+
+        delegate: Text {
+          required property string modelData
+
+          width: routeGrid.cell - routeGrid.columnSpacing
+          text: modelData
+          textFormat: Text.PlainText
+          color: Color.popupText
+          font.family: Style.fontFamily
+          font.pixelSize: Style.fontSize
+          elide: Text.ElideRight
+        }
+      }
+    }
+
+    Quiet {
+      text: "Click the box again to close this."
     }
   }
 
@@ -586,6 +939,242 @@ ColumnLayout {
       Quiet {
         visible: !!page.net && page.net.domains.length > 0
         text: page.net ? "Search domains: " + page.net.domains.join(", ") : ""
+      }
+    }
+  }
+
+  // --- network: who else is on it, and the Wi-Fi around ---------------------------------
+  Card {
+    id: netCard
+
+    visible: page.heading === "network"
+    appear: page.active && page.heading === "network"
+    Layout.fillWidth: true
+    order: 2
+    icon: "\u{f0f86}"
+    title: "Devices on this network"
+    figure: page.scan && page.scan.devices ? String(page.scan.devices.length) : ""
+    tone: page.placeTone
+
+    Row {
+      spacing: Style.sectionSpacing
+
+      Act {
+        text: page.scan ? "Scan again" : "Scan"
+        busy: Scans.scanningNetwork
+        onPressed: Scans.scanNetwork(false)
+      }
+      // Only offered where a scan stayed quiet: a network that is not marked as yours.
+      Act {
+        visible: !!page.scan && !page.scan.swept && !!page.scan.link && !Scans.scanningNetwork
+        text: "Ping every address"
+        tone: Color.caution
+        onPressed: Scans.scanNetwork(true)
+      }
+      Quiet {
+        width: implicitWidth
+        anchors.verticalCenter: parent.verticalCenter
+        text: !page.scan ? "Nothing scanned yet. A scan touches only the link this machine is on, never the VPN." : (page.scan.swept ? "Pinged " + (page.scan.scope || "") + "  ·  " + page.scan.mode : "Quiet: nothing was sent") + "  ·  " + page.ago(page.scan.checked) + (page.scan.took ? "  ·  took " + page.scan.took + " s" : "")
+      }
+    }
+
+    Quiet {
+      visible: !!page.scan && !page.scan.swept && page.scan.why !== ""
+      width: parent.width
+      wrapMode: Text.WordWrap
+      color: Color.caution
+      text: page.scan ? page.scan.why + " Mark it as home in ~/.config/desktop/networks.conf to sweep it by default." : ""
+    }
+
+    Quiet {
+      visible: Sharing.active
+      text: "Hidden while the screen is shared: names, addresses and makers of the devices here."
+    }
+
+    Item {
+      visible: !!page.scan && !Sharing.active
+      width: parent.width
+      height: Math.max(netRadar.height, netList.implicitHeight)
+
+      Radar {
+        id: netRadar
+
+        width: Math.min(420, parent.width * 0.42)
+        height: 360
+        points: page.netPoints
+        tone: page.placeTone
+        rings: [
+          {
+            "at": page.nearMs(1),
+            "label": "1 ms"
+          },
+          {
+            "at": page.nearMs(10),
+            "label": "10 ms"
+          },
+          {
+            "at": page.nearMs(100),
+            "label": "100 ms"
+          },
+          {
+            "at": 1,
+            "label": "quiet"
+          }
+        ]
+      }
+
+      Column {
+        id: netList
+
+        anchors.left: netRadar.right
+        anchors.leftMargin: Style.sectionSpacing * 2
+        anchors.right: parent.right
+
+        Repeater {
+          model: page.scan && page.scan.devices ? page.scan.devices : []
+
+          delegate: DeviceLine {
+            required property var modelData
+
+            title: page.deviceName(modelData) + (modelData.gateway && page.deviceName(modelData) !== "Router" ? "  ·  router" : "") + (modelData.private ? "  ·  private address" : "")
+            detail: modelData.ip + "  ·  " + (modelData.mac || "no MAC") + (modelData.vendor && modelData.vendor !== "private address" ? "  ·  " + modelData.vendor : "") + (modelData.me ? "" : "  ·  " + (modelData.ms !== null && modelData.ms !== undefined ? modelData.ms + " ms" : page.scan.swept ? "no answer to ping" : "not pinged"))
+            more: [modelData.host && modelData.host !== page.deviceName(modelData) ? modelData.host : "", modelData.rdns && modelData.rdns !== modelData.host ? modelData.rdns : "", modelData.services.length ? "offers " + modelData.services.join(", ") : "", modelData.me ? "" : "seen by " + modelData.found.join(", ")].filter(function (x) {
+              return x !== "";
+            }).join("  ·  ")
+            tone: modelData.me ? page.placeTone : modelData.private ? Color.caution : Color.popupText
+            lit: netRadar.hovered !== "" && netRadar.hovered === (modelData.mac || modelData.ip)
+          }
+        }
+      }
+    }
+  }
+
+  Card {
+    visible: page.heading === "network" && !!page.scan && !!page.scan.wifi && page.scan.wifi.length > 0
+    appear: page.active && page.heading === "network"
+    Layout.fillWidth: true
+    order: 3
+    icon: "\u{f05a9}"
+    title: "Wi-Fi around"
+    figure: page.scan && page.scan.wifi ? String(page.scan.wifi.length) : ""
+
+    Bars {
+      width: parent.width
+      height: 150
+      values: page.scan && page.scan.wifi ? page.scan.wifi.slice(0, 16).map(function (a) {
+        return {
+          "label": a.ssid,
+          "value": a.signal
+        };
+      }) : []
+      ceiling: 100
+      appear: page.active && page.heading === "network"
+      highlight: page.scan && page.scan.wifi ? page.scan.wifi.findIndex(function (a) {
+        return a.current;
+      }) : -1
+    }
+
+    Repeater {
+      model: page.scan && page.scan.wifi && !Sharing.active ? page.scan.wifi.slice(0, 16) : []
+
+      delegate: Quiet {
+        required property var modelData
+
+        width: parent ? parent.width : 0
+        text: modelData.signal + "%  " + modelData.ssid + (modelData.current ? "  (this one)" : "") + "  ·  " + modelData.band + " ch " + modelData.channel + "  ·  " + modelData.security + "  ·  " + modelData.bssid
+        color: modelData.current ? page.placeTone : Color.popupMuted
+      }
+    }
+  }
+
+  // --- bluetooth: what is near ----------------------------------------------------------
+  Card {
+    id: btCard
+
+    visible: page.heading === "bluetooth"
+    appear: page.active && page.heading === "bluetooth"
+    Layout.fillWidth: true
+    order: 0
+    icon: "\u{f00af}"
+    title: "Bluetooth near"
+    figure: page.blue && page.blue.devices ? String(page.blue.devices.filter(function (d) {
+      return d.near;
+    }).length) : ""
+    tone: Color.popupAccent
+
+    Row {
+      spacing: Style.sectionSpacing
+
+      Act {
+        text: page.blue ? "Listen again" : "Listen"
+        busy: Scans.scanningBluetooth
+        onPressed: Scans.scanBluetooth()
+      }
+      Quiet {
+        width: implicitWidth
+        anchors.verticalCenter: parent.verticalCenter
+        text: !page.blue ? "Twelve seconds of listening for what devices announce; nothing is asked of them." : page.blue.powered === false ? "Bluetooth is off. It is left off: turn it on to listen." : "Listened " + page.blue.seconds + " s  ·  " + page.ago(page.blue.checked) + "  ·  the distance is a guess from the signal, and walls shorten it"
+      }
+    }
+
+    Quiet {
+      visible: Sharing.active
+      text: "Hidden while the screen is shared: names and addresses of the devices near."
+    }
+
+    Item {
+      visible: !!page.blue && !!page.blue.devices && page.blue.devices.length > 0 && !Sharing.active
+      width: parent.width
+      height: Math.max(btRadar.height, btList.implicitHeight)
+
+      Radar {
+        id: btRadar
+
+        width: Math.min(460, parent.width * 0.45)
+        height: 400
+        points: page.btPoints
+        rings: [
+          {
+            "at": page.nearMetres(1),
+            "label": "1 m"
+          },
+          {
+            "at": page.nearMetres(3),
+            "label": "3 m"
+          },
+          {
+            "at": page.nearMetres(10),
+            "label": "10 m"
+          },
+          {
+            "at": 1,
+            "label": "known, not heard"
+          }
+        ]
+      }
+
+      Column {
+        id: btList
+
+        anchors.left: btRadar.right
+        anchors.leftMargin: Style.sectionSpacing * 2
+        anchors.right: parent.right
+
+        Repeater {
+          model: page.blue && page.blue.devices ? page.blue.devices : []
+
+          delegate: DeviceLine {
+            required property var modelData
+
+            title: (modelData.name || modelData.doing || modelData.maker || "Nameless") + (modelData.connected ? "  ·  connected" : modelData.paired ? "  ·  paired" : "")
+            detail: (modelData.near ? "about " + modelData.metres + " m  ·  " + modelData.rssi + " dBm" : "not heard this time") + "  ·  " + modelData.kind + (modelData.maker ? "  ·  " + modelData.maker : "") + (modelData.battery !== null && modelData.battery !== undefined ? "  ·  battery " + modelData.battery + "%" : "")
+            more: [modelData.address + (modelData.random ? " (random, changes)" : ""), modelData.doing && modelData.name ? modelData.doing : "", modelData.services.length ? modelData.services.join(", ") : ""].filter(function (x) {
+              return x !== "";
+            }).join("  ·  ")
+            tone: modelData.connected ? Color.good : modelData.paired ? Color.popupAccent : modelData.near ? Color.popupText : Color.popupMuted
+            lit: btRadar.hovered === modelData.address
+          }
+        }
       }
     }
   }

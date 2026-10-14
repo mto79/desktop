@@ -147,6 +147,15 @@ Item {
     return infra.choose(name);
   }
 
+  // The details of one box in the network picture: "machine", "router", "internet", "vpn";
+  // "" closes them.
+  function networkDetails(key) {
+    if (["", "machine", "router", "internet", "vpn"].indexOf(key) === -1 || !infraSection("network"))
+      return false;
+    infra.chosen = key;
+    return true;
+  }
+
   // And of the AI tab: "presence", "agents", "voice", "prompts".
   function aiSection(name) {
     refresh("agents");

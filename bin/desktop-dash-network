@@ -22,6 +22,7 @@
 # colour. The first line that matches wins. Without the file the place is called after
 # the Wi-Fi network or the connection, which is what NetworkManager calls it.
 
+import ipaddress
 import json
 import os
 import re
@@ -101,6 +102,25 @@ def routes():
         return []
 
 
+def network_key(route):
+    """Routes in address order: 10.2.0.0/16 before 10.10.0.0/16, as a person reads them."""
+    dst = route.get("dst", "")
+    try:
+        net = ipaddress.ip_network(dst if "/" in dst else dst + "/32", strict=False)
+        return (0, int(net.network_address), net.prefixlen)
+    except ValueError:
+        return (1, 0, 0)
+
+
+def route_list(table, dev):
+    """Every route on one device, as the details under a box list them."""
+    out = []
+    for r in sorted((r for r in table if r.get("dev") == dev and r.get("dst") != "default"), key=network_key):
+        out.append({"dst": r.get("dst", ""), "via": r.get("gateway", ""), "metric": r.get("metric", 0),
+                    "how": r.get("protocol", ""), "scope": r.get("scope", "")})
+    return out
+
+
 def ping(address):
     """Milliseconds to the router, or None when it does not answer one ping in a second."""
     if not address:
@@ -178,6 +198,8 @@ def main():
             "dns": info["dns"],
             "domains": info["domains"],
             "primary": dev == out_dev,
+            "addresses": info["addresses"],
+            "route_list": route_list(table, dev),
         }
         if kind == "wifi" and radio:
             link.update(radio)
@@ -190,7 +212,10 @@ def main():
             through = [r for r in table if r.get("dev") == dev and r.get("dst") != "default"]
             link["routes"] = len(through)
             link["all"] = dev == out_dev
-            link["reaches"] = [r["dst"] for r in through][:8]
+            link["reaches"] = [r["dst"] for r in sorted(through, key=network_key)][:8]
+            # One gateway for all of them is the usual case, and worth saying once.
+            gateways = sorted({r.get("gateway", "") for r in through if r.get("gateway")})
+            link["gateways"] = gateways
             tunnels.append(link)
         else:
             links.append(link)
@@ -199,8 +224,17 @@ def main():
         for connection in up:
             if connection["type"] in ("vpn", "wireguard") and connection["dev"] not in [t["dev"] for t in tunnels]:
                 tunnels.append({"dev": connection["dev"], "kind": "vpn", "connection": connection["name"], "address": "",
-                                "gateway": "", "dns": [], "domains": [], "primary": False, "routes": 0, "all": False, "reaches": []})
+                                "gateway": "", "dns": [], "domains": [], "primary": False, "routes": 0, "all": False, "reaches": [],
+                                "addresses": [], "route_list": [], "gateways": []})
     links.sort(key=lambda l: (not l["primary"], l["kind"]))
+
+    # A VPN reaches its own server around itself: a route to that one address, through
+    # the router, that the VPN put there. Worth naming, or it is a stray line in the list.
+    if tunnels:
+        for link in links:
+            for route in link["route_list"]:
+                if route["how"] == "static" and route["via"] and route["dst"].count(".") == 3 and "/" not in route["dst"]:
+                    route["vpn_server"] = True
 
     # Behind a VPN that takes everything, the link that carries it is still where you are.
     carrier = next((l for l in links if l["primary"]), None) or (links[0] if links else None)
@@ -217,6 +251,8 @@ def main():
     place = place_of(carrier, radio)
     answer = {
         "connected": True,
+        # Every way out, the one the kernel takes first: what the Internet box is asked about.
+        "defaults": [{"dev": r.get("dev", ""), "via": r.get("gateway", ""), "metric": r.get("metric", 0)} for r in defaults],
         "checked": int(time.time()),
         "place": place,
         "online": online,

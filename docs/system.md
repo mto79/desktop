@@ -59,6 +59,18 @@ For keeping private information out of the repository itself, see
 | `desktop-speedtest` | Latency, download and upload against Cloudflare |
 | `desktop-launch-wifi` | `impala` in a floating terminal |
 | `desktop-setup-dns` | Choose DNS: Cloudflare, what DHCP hands out, or your own |
+| `desktop-netscan scan [--sweep]` | The devices on this network and the Wi-Fi around, as JSON; `last` gives the last answer |
+
+`desktop-netscan` looks only when asked: from the network panel, the dashboard's Network
+heading, or "scan the network" by voice. On a network marked `home` in
+`~/.config/desktop/networks.conf` a scan pings every address of the subnet (a /24 at most;
+of a wider one, this machine's own /24). Anywhere else it sends nothing: it reads the
+kernel's neighbour table, what devices announce over mDNS and the Wi-Fi networks
+NetworkManager hears, and offers "Ping every address" as a separate button. It never
+scans through the VPN and knocks on no ports. Each device gets its address, MAC, the maker
+from the IEEE list in `hwdata` (a private, per-network MAC is said to be one), its mDNS
+name and services, reverse DNS and latency. This machine's other links in the subnet are
+this machine, not strangers.
 
 ## Storage
 
@@ -90,6 +102,15 @@ answering" and shows the battery only.
 
 `desktop-launch-bluetooth` opens `bluetui`; `desktop-restart-bluetooth` restarts the
 service.
+
+`desktop-btscan scan [seconds]` listens for what devices near announce, twelve seconds by
+default, through the adapter's ordinary discovery; it pairs, trusts and connects nothing,
+and leaves Bluetooth that is off off. Each device gets its signal (RSSI), a distance
+guessed from it (in the open air; walls shorten it), its kind, its maker from the
+manufacturer data it sends, what an Apple device is doing (AirPods, Find My, an iPhone
+nearby), its services, battery and pairing. Phones and watches announce themselves under
+random addresses that change every few minutes, so one phone can show twice. It is the
+dashboard's Infrastructure, Bluetooth heading, or "what Bluetooth devices are near".
 
 ## Power and battery
 

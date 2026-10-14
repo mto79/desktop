@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+
+# desktop-btscan: the Bluetooth devices near this machine, and roughly how near.
+#
+#   desktop-btscan scan [seconds]   listen for that long (default 12); one JSON object
+#   desktop-btscan last             the last answer again, without listening
+#
+# A scan is the adapter's own discovery, the same the Bluetooth panel starts: it listens
+# for what devices announce and asks nothing of them, and it stops when the time is up.
+# Bluetooth that is off is left off -- the answer then says so.
+#
+# Signal strength (RSSI) is only reported while discovery runs, so it is read from what
+# bluetoothctl prints during the scan; the rest -- name, kind, maker, pairing -- from
+# `bluetoothctl info` afterwards. The distance is a guess from the signal, in the open air,
+# and walls halve it: near, in the room, further.
+#
+# Many phones and watches announce themselves under a random address that changes every
+# few minutes. Those are listed as such, and one phone can appear twice in a scan.
+#
+# The answer is kept in ~/.local/state/desktop/btscan, readable by you alone.
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "desktop", "btscan")
+LAST = os.path.join(STATE, "last.json")
+MAC = r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}"
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x01|\x02")
+
+# The Bluetooth SIG's company numbers for the makers one meets most, from the
+# manufacturer data a device announces. Not the whole list: an unknown number is shown as
+# the number.
+COMPANIES = {
+    0x0006: "Microsoft", 0x000F: "Broadcom", 0x001D: "Qualcomm", 0x004C: "Apple", 0x0059: "Nordic Semiconductor",
+    0x0075: "Samsung", 0x0087: "Garmin", 0x009E: "Bose", 0x00E0: "Google", 0x010F: "Huawei", 0x012D: "Sony",
+    0x0131: "Cypress", 0x0157: "Huami", 0x0171: "Amazon", 0x01DA: "Logitech", 0x02E5: "Espressif",
+    0x038F: "Xiaomi", 0x0499: "Ruuvi", 0x05A7: "Sonos", 0x0822: "Withings", 0x07D0: "Tile",
+    0x0310: "SGL Italia", 0x0002: "Intel", 0x000A: "Qualcomm (CSR)", 0x0046: "MediaTek", 0x0A12: "Fitbit",
+}
+
+# What Apple's manufacturer data says the device is doing, by its first byte.
+APPLE = {0x02: "iBeacon", 0x05: "AirDrop", 0x07: "AirPods", 0x09: "AirPlay", 0x0C: "Handoff", 0x0F: "Nearby action",
+         0x10: "iPhone, iPad or Mac nearby", 0x12: "Find My", 0x16: "Find My"}
+
+
+def run(*command, wait=10):
+    try:
+        out = subprocess.run(command, capture_output=True, text=True, timeout=wait).stdout
+    except (OSError, subprocess.TimeoutExpired) as gone:
+        out = getattr(gone, "stdout", "") or ""
+        if isinstance(out, bytes):
+            out = out.decode(errors="replace")
+    return ANSI.sub("", out)
+
+
+def powered():
+    return "Powered: yes" in run("bluetoothctl", "show", wait=5)
+
+
+def rssi_of(text):
+    hit = re.search(r"\((-?\d+)\)", text) or re.search(r"(-?\d+)", text)
+    return int(hit.group(1)) if hit else None
+
+
+def listen(seconds):
+    """What discovery hears: address -> the strongest RSSI and the TX power, if given.
+
+    bluez prints a device's RSSI only when it changes, so one that holds steady says
+    nothing after its first report. Each device's info is therefore also read near the end,
+    while discovery still runs and the RSSI is still part of it.
+    """
+    heard = {}
+    try:
+        discovery = subprocess.Popen(["bluetoothctl", "--timeout", str(seconds), "scan", "on"],
+                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return heard
+    time.sleep(max(1, seconds - 2))
+    while_on = {}
+    for address in re.findall(rf"Device ({MAC})", run("bluetoothctl", "devices", wait=5)):
+        text = run("bluetoothctl", "info", address, wait=5)
+        for key in ("RSSI", "TxPower"):
+            hit = re.search(rf"^\s*{key}: (.+)$", text, re.M)
+            if hit and rssi_of(hit.group(1)) is not None:
+                while_on.setdefault(address.upper(), {})["rssi" if key == "RSSI" else "tx"] = rssi_of(hit.group(1))
+    try:
+        out, _ = discovery.communicate(timeout=seconds + 10)
+    except subprocess.TimeoutExpired:
+        discovery.kill()
+        out, _ = discovery.communicate()
+    for line in ANSI.sub("", out or "").splitlines():
+        hit = re.search(rf"Device ({MAC}) (RSSI|TxPower): (.+)$", line)
+        if hit and rssi_of(hit.group(3)) is not None:
+            entry = heard.setdefault(hit.group(1).upper(), {})
+            key = "rssi" if hit.group(2) == "RSSI" else "tx"
+            entry[key] = max(entry.get(key, -999), rssi_of(hit.group(3)))
+        hit = re.search(rf"\[NEW\] Device ({MAC})", line)
+        if hit:
+            heard.setdefault(hit.group(1).upper(), {})
+    for address, values in while_on.items():
+        entry = heard.setdefault(address, {})
+        for key, value in values.items():
+            entry[key] = max(entry.get(key, -999), value)
+    return heard
+
+
+def info(address):
+    text = run("bluetoothctl", "info", address, wait=5)
+    d = {"address": address, "random": "(random)" in text.split("\n", 1)[0], "services": []}
+    data_key, data_lines, in_data = None, [], False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("ManufacturerData.Key:"):
+            hit = re.search(r"0x([0-9a-fA-F]+)", s)
+            data_key = int(hit.group(1), 16) if hit else None
+            in_data = False
+            continue
+        if s.startswith("ManufacturerData.Value:"):
+            in_data = True
+            continue
+        if in_data and re.match(r"^([0-9a-f]{2} )+", s):
+            data_lines.append(s.split("  ")[0])
+            continue
+        in_data = False
+        key, _, value = s.partition(": ")
+        if key in ("Name", "Alias", "Icon", "Class", "Paired", "Connected", "Trusted", "RSSI", "TxPower"):
+            d[key.lower()] = value
+        elif key == "UUID":
+            name = value.split("(")[0].strip()
+            if name and name not in d["services"] and name != "Unknown" and not name.startswith("Vendor specific"):
+                d["services"].append(name)
+        elif key == "Battery Percentage":
+            hit = re.search(r"\((\d+)\)", value)
+            d["battery"] = int(hit.group(1)) if hit else None
+    if data_key is not None:
+        d["maker"] = COMPANIES.get(data_key, f"company {data_key:#06x}")
+        first = data_lines[0].split()[0] if data_lines else ""
+        if data_key == 0x004C and first:
+            d["doing"] = APPLE.get(int(first, 16), "")
+    return d
+
+
+def distance(rssi, tx):
+    """Metres, roughly: free-space loss with an indoor exponent. TX power at one metre is
+    taken as -59 dBm when the device does not say."""
+    if rssi is None:
+        return None
+    reference = tx if tx is not None and -100 < tx < 0 else -59
+    return round(10 ** ((reference - rssi) / (10 * 2.5)), 1)
+
+
+def kind(d):
+    icon = d.get("icon", "")
+    for word, said in (("phone", "phone"), ("computer", "computer"), ("headset", "headphones"), ("headphone", "headphones"),
+                       ("audio", "audio"), ("watch", "watch"), ("input-keyboard", "keyboard"), ("input-mouse", "mouse"),
+                       ("input-gaming", "game controller"), ("camera", "camera"), ("printer", "printer"), ("video", "TV")):
+        if word in icon:
+            return said
+    if d.get("doing", "").startswith("AirPods"):
+        return "headphones"
+    if d.get("doing", "").startswith("iPhone"):
+        return "phone"
+    return "unknown"
+
+
+def scan(seconds):
+    started = time.time()
+    answer = {"checked": int(started), "seconds": seconds, "powered": powered(), "devices": []}
+    if not answer["powered"]:
+        answer["why"] = "Bluetooth is off"
+        return answer
+    heard = listen(seconds)
+    known = {m.upper() for m in re.findall(rf"Device ({MAC})", run("bluetoothctl", "devices", wait=5))}
+    for address in sorted(set(heard) | known):
+        d = info(address)
+        signal = heard.get(address, {})
+        rssi = signal.get("rssi")
+        tx = signal.get("tx")
+        name = d.get("name") or ""
+        alias = d.get("alias", "")
+        # bluez fills Alias with the address, dashes for colons, when there is no name.
+        if not name and alias and alias.replace("-", ":").upper() != address:
+            name = alias
+        answer["devices"].append({
+            "address": address,
+            "name": name,
+            "random": d["random"],
+            "kind": kind(d),
+            "maker": d.get("maker", ""),
+            "doing": d.get("doing", ""),
+            "services": d["services"][:6],
+            "paired": d.get("paired") == "yes",
+            "connected": d.get("connected") == "yes",
+            "battery": d.get("battery"),
+            "rssi": rssi,
+            "tx": tx,
+            "metres": distance(rssi, tx),
+            "near": address in heard and rssi is not None,
+        })
+    answer["devices"].sort(key=lambda x: (not x["near"], -(x["rssi"] if x["rssi"] is not None else -999)))
+    answer["took"] = round(time.time() - started, 1)
+    return answer
+
+
+def main():
+    command = sys.argv[1] if len(sys.argv) > 1 else "scan"
+    if command == "last":
+        try:
+            with open(LAST) as f:
+                sys.stdout.write(f.read())
+        except OSError:
+            print("{}")
+        return
+    if command != "scan":
+        print("usage: desktop-btscan scan [seconds] | last", file=sys.stderr)
+        sys.exit(2)
+    seconds = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 12
+    text = json.dumps(scan(max(3, min(seconds, 60))), separators=(",", ":"))
+    os.makedirs(STATE, mode=0o700, exist_ok=True)
+    fd = os.open(LAST + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text + "\n")
+    os.replace(LAST + ".new", LAST)
+    print(text)
+
+
+if __name__ == "__main__":
+    main()

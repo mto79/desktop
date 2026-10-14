@@ -9,3 +9,5 @@ singleton Style 1.0 Style.qml
 singleton Shortcuts 1.0 Shortcuts.qml
 singleton Speech 1.0 Speech.qml
 singleton Sound 1.0 Sound.qml
+singleton Sharing 1.0 Sharing.qml
+singleton Scans 1.0 Scans.qml

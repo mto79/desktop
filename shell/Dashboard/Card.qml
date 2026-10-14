@@ -101,6 +101,7 @@ Rectangle {
     }
     Text {
       Layout.fillWidth: true
+      textFormat: Text.PlainText
       text: card.title
       color: Color.popupMuted
       font.family: Style.fontFamily

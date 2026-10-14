@@ -600,6 +600,22 @@ interpret() { # the sentence
     shell_call dashboardTab ai
     shell_call aiSection "$heading"
     hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "AI: $heading"
+  elif is '^(scan|sweep)( the| my)? network$|^(who|what) (else )?is on (the|my|this) network$'; then
+    # A scan, the way the network allows: quiet off a network of yours.
+    shell_call dashboardTab infra
+    shell_call infraSection network
+    shell_call scanNetwork quiet
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Scanning the network"
+  elif is '^(scan|look|listen)( for)? bluetooth( devices)?$|^(scan|look) for bluetooth devices$|^what bluetooth devices are (near|around|here)$|^which bluetooth devices are (near|around|here)$'; then
+    shell_call dashboardTab infra
+    shell_call infraSection bluetooth
+    shell_call scanBluetooth
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Listening for Bluetooth devices"
+  elif is '^(show|open)?( me)?( the| my)? ?(vpn routes|vpn networks|routes( through| of)?( the)? vpn|what (goes|is) (through|behind) the vpn)$'; then
+    # The network picture with the VPN's box open: every network it takes.
+    shell_call dashboardTab infra
+    shell_call networkDetails vpn
+    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Infrastructure: the VPN's routes"
   elif is '^(show|open)?( me)?( the| my)? ?(network|which network( am i (on|in))?|where am i)$'; then
     # A heading of the dashboard's infrastructure tab.
     shell_call dashboardTab infra

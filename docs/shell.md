@@ -77,6 +77,26 @@ tab has Presence, Agents, Voice commands and Prompts, the Infrastructure tab Clu
 Network. A heading with a command of its own is asked more often than its tab, and only
 while the tab is on show. `Page Down` and `Page Up` scroll a page taller than the screen.
 
+Under the picture, Devices on this network draws who else is on it as a radar -- the
+faster a device answers, the nearer the middle; one that keeps quiet on the outer ring,
+hollow -- with everything known of each device beside it, and Wi-Fi around gives the
+networks in range by signal. The Bluetooth heading does the same for what is near over
+Bluetooth, the rings in metres. A device keeps its direction on the radar from one scan to
+the next. Both scans are `shell/Commons/Scans.qml`'s, shared with the network panel, which
+lists the devices too; nothing scans by itself. `desktop-shell shell scanNetwork` and
+`scanBluetooth` start one from outside.
+
+The boxes of the network picture open their details under it, and a second click closes
+them. This machine lists every connection and its addresses; Router the link, the Wi-Fi
+signal, the name servers and the routes on that link, the one the VPN keeps to its own
+server named as such; Internet the ways out, the one the kernel takes first; the VPN, and
+Behind the VPN, every network the tunnel takes, in address order, with the gateway they
+share said once. All of it is what NetworkManager and the routing table already hold.
+`desktop-shell shell networkDetails vpn` opens a box from outside, which is what "show the
+VPN routes" says to voice. While the screen is shared the details card says so and shows
+nothing: Hyprland announces a share on its event socket, and `shell/Commons/Sharing.qml`
+keeps track. A share that started before the shell did is only noticed when it ends.
+
 Keeping the logic in a command is what lets it be tested in plain bash with stubs, without
 a compositor.
 

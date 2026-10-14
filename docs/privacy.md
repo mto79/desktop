@@ -144,6 +144,24 @@ rewriting history. For new commits, set the address for this repository alone:
 
 and put the other domain in the deny list, so the hook refuses a commit made under it.
 
+## On the screen
+
+The check covers the repository; a shared screen is the other way a private detail gets
+out. The dashboard's network details are a map of every network the VPN reaches, so they
+are not drawn while Hyprland says the screen is being shared (`shell/Commons/Sharing.qml`):
+the box still opens, and says why it is empty. Anything else that lists internal
+addresses should ask `Sharing.active` the same way, and the network and Bluetooth scans do:
+the devices on a network and the devices near are hidden in the dashboard and in the
+network panel while the screen is shared.
+
+What a scan found is kept in `~/.local/state/desktop/netscan` and `btscan`, mode 600.
+Names from other people's devices and Wi-Fi networks are shown as plain text everywhere on
+the dashboard, never as HTML: a device can call itself anything.
+
+A sweep of a network is a ping to every address. It is ordinary traffic, but on a network
+that is not yours it can read as probing, so it happens by itself only on a network marked
+`home`, and elsewhere only by a separate button, never by voice.
+
 ## What the check does not do
 
 It reads text. It does not see a screenshot with a hostname in it, a private detail in

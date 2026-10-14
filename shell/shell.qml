@@ -231,6 +231,21 @@ ShellRoot {
       return dashboard.infraSection(name) ? "ok" : "unknown";
     }
 
+    // desktop-shell shell networkDetails vpn: the Network heading with that box open.
+    function networkDetails(key: string): string {
+      return dashboard.networkDetails(key) ? "ok" : "unknown";
+    }
+
+    // A scan of the network ("sweep" to ping every address even off a network of yours)
+    // or of what is near over Bluetooth; "busy" when one is running already.
+    function scanNetwork(how: string): string {
+      return Scans.scanNetwork(how === "sweep") ? "ok" : "busy";
+    }
+
+    function scanBluetooth(): string {
+      return Scans.scanBluetooth() ? "ok" : "busy";
+    }
+
     function aiSection(name: string): string {
       return dashboard.aiSection(name) ? "ok" : "unknown";
     }
