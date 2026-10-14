@@ -64,6 +64,16 @@ is where an employer's model service goes.
 `desktop-agent <agent>` is the wrapper the panes run. A clean exit says nothing; a crash
 sends a notification naming the project.
 
+opencode is the exception to that. Its renderer dies of SIGILL when the display scale
+under it changes, as when a window moves between the laptop screen (scale 2) and a
+monitor at scale 1, and logging in docked does that to every agent pane at once
+([anomalyco/opencode#42094](https://github.com/anomalyco/opencode/issues/42094)). The
+wrapper starts it again with `--continue`, so the pane goes back into its conversation.
+It passes no `--continue` when another opencode runs in the same directory, whose session
+could be the last one there, and none when the pane was started on a `--session` of its
+own. A crash in the first five seconds, or a fourth one within ten minutes, is not
+restarted and gets the notification.
+
 `desktop-agent-tokens` counts tokens per local day per agent from what each one leaves on
 disk. `desktop-status-claude` reports Claude Code's usage limits.
 

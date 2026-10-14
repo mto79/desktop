@@ -23,11 +23,15 @@ esac
 AGENT="${1:?usage: desktop-agent <claude|opencode> [args...]}"
 shift
 
-# Bun's JavaScriptCore JIT can emit an illegal instruction in some OpenCode builds.
-# Keep OpenCode in the interpreter so a SIGILL does not take down its tmux pane.
-if [[ "${AGENT##*/}" == opencode ]]; then
-  export BUN_JSC_useJIT=0
-fi
+# Another opencode with this directory as its own: then "the last session" here may be
+# that one's.
+others_here() {
+  local pid
+  for pid in $(pgrep -u "$UID" -x opencode); do
+    ((pid != $$)) && [[ $(readlink "/proc/$pid/cwd" 2>/dev/null) == "$PWD" ]] && return 0
+  done
+  return 1
+}
 
 # A wrapper that is started by the desktop rather than by a shell cannot assume the
 # shell's PATH. Saying which agent is missing beats bash's "command not found" arriving
@@ -39,8 +43,31 @@ if ! command -v "$AGENT" >/dev/null 2>&1; then
   exit 127
 fi
 
-"$AGENT" "$@"
-code=$?
+# OpenCode's renderer (OpenTUI) can read past the end of its screen buffer when the
+# display scale under it changes -- a window moving between the laptop screen and a
+# monitor at another scale, which is what logging in docked does to every agent pane at
+# once. Bun ends the process with a trap, so it dies of SIGILL (anomalyco/opencode#42094).
+# The conversation is on disk, so the pane starts it again, and goes back into it when
+# no other opencode works in this directory and could own the last session instead.
+# Turning the JIT off was tried first and made no difference.
+restarts=()
+while :; do
+  started=$SECONDS
+  "$AGENT" "$@"
+  code=$?
+  [[ ${AGENT##*/} == opencode && $code -eq 132 ]] || break
+  # A crash in the first seconds is not the one above, and three in ten minutes is a
+  # loop; either is left to the notification below.
+  now=$SECONDS
+  restarts=($(for t in "${restarts[@]}"; do ((now - t < 600)) && echo "$t"; done) "$now")
+  ((now - started >= ${DESKTOP_AGENT_MIN_UP:-5} && ${#restarts[@]} <= 3)) || break
+  echo "desktop-agent: opencode crashed (SIGILL), starting it again" >&2
+  if [[ " $* " != *" -c "* && " $* " != *" --continue "* && " $* " != *" -s "* && " $* " != *" --session"* ]] &&
+    ! others_here; then
+    set -- --continue "$@"
+  fi
+  sleep 1
+done
 
 if ((code == 0)); then
   exit 0
