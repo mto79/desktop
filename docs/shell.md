@@ -128,7 +128,7 @@ colour and a soft light breathes behind it. `IconLabel` draws it, from one prope
 |---|---|
 | Microphone | A program is recording from it |
 | Sound | Something is playing, a call in a browser as much as music |
-| Media | A player is playing |
+| Media | A player is playing; the equalizer takes the glyph's place while it does |
 | Bluetooth | A device is connected (colour); it is searching (light) |
 | VPN | A tunnel is up (green) |
 | Network | More than a trickle is going through |
@@ -143,6 +143,25 @@ ever played, and it is the link that goes inactive when a stream is quiet.
 
 Dimming a whole module, which the AI widget does when an agent waits, means "look here"
 and is kept for that.
+
+## Music
+
+While a player plays, the media widget's glyph becomes an equalizer: a dozen bars, bass
+to treble, from `cava` listening to PipeWire. `Spectrum` (`shell/Commons/Spectrum.qml`)
+runs the one cava for every monitor, with `default/cava/spectrum.conf`, and stops it on
+pause. Without cava the glyph stays, so the widget works either way.
+
+When a new track starts, `shell/NowPlaying/` raises a card under the bar: the cover,
+the track, and the artist's studio albums with the one playing lit. The albums come from
+`desktop-discography`, which asks MusicBrainz and keeps the answer and the covers a month
+in `~/.cache/desktop/discography/`; an artist with no album yet shows EPs and singles,
+and one MusicBrainz does not know gets the card without a discography. Hovering holds the
+card, a click opens the media panel, a right click puts it away. It stays down while do
+not disturb is on, and the track that is playing when the shell starts does not count as
+new.
+
+`desktop-shell shell nowPlaying` shows it for the track already playing. In
+`shell.json`, `nowPlaying` takes `enabled`, `position`, `margin` and `timeout`.
 
 ## Adding a panel
 

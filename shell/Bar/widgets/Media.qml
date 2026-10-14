@@ -65,12 +65,53 @@ BarItem {
     text: root.label
   }
 
-  IconLabel {
+  // Measured separately from the label because, while the equalizer stands in for the
+  // glyph, going compact empties the label's text -- and what compact gives back has to
+  // stay the same whether it is compact or not, or the bar's fitting never settles.
+  TextMetrics {
+    id: shown
+
+    font.family: Style.fontFamily
+    font.pixelSize: Style.fontSize
+    text: metrics.elidedText
+  }
+
+  // Playing, the equalizer takes the glyph's place: it says "sound is coming out" better
+  // than a breathing note does. Paused, or with no cava to listen through, the glyph
+  // comes back.
+  Row {
     id: content
 
-    icon: root.icon
-    text: metrics.elidedText
-    color: (root.player && root.player.isPlaying) ? Color.barAccent : Color.barMuted
-    lively: !!root.player && root.player.isPlaying
+    readonly property bool dancing: !!root.player && root.player.isPlaying && Spectrum.live
+
+    // BarItem hands `compact` to whichever child has compactSaving, so this row stands
+    // in for the label it holds.
+    property bool compact: false
+    readonly property real compactSaving: dancing ? shown.advanceWidth + spacing : label.compactSaving
+
+    spacing: dancing && label.text !== "" ? 7 : 0
+
+    Equalizer {
+      id: equalizer
+
+      anchors.verticalCenter: parent.verticalCenter
+      visible: content.dancing
+      levels: Spectrum.levels
+      count: 12
+      barWidth: 3
+      spacing: 2
+      height: Style.barSize - 18
+    }
+
+    IconLabel {
+      id: label
+
+      anchors.verticalCenter: parent.verticalCenter
+      icon: content.dancing ? "" : root.icon
+      text: content.dancing && content.compact ? "" : metrics.elidedText
+      compact: content.compact
+      color: (root.player && root.player.isPlaying) ? Color.barAccent : Color.barMuted
+      lively: !!root.player && root.player.isPlaying && !content.dancing
+    }
   }
 }

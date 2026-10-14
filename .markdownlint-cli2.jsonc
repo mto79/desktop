@@ -6,7 +6,10 @@
     // as their content needs; wrapping them breaks them.
     "MD013": { "line_length": 90, "tables": false, "code_blocks": false },
     // CHANGELOG.md repeats Added/Changed/Fixed under every month.
-    "MD024": { "siblings_only": true }
+    "MD024": { "siblings_only": true },
+    // Tables pad their cells but not the |---| row under the header, which no MD060
+    // style allows. Newer markdownlint releases added the rule; the tables read fine.
+    "MD060": false
   },
   "globs": ["**/*.md"],
   "ignores": [

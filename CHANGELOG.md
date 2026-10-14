@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- An equalizer in place of the media widget's glyph while music plays, from cava, and a
+  card under the bar when a new track starts: the cover, the track, and the artist's
+  albums from MusicBrainz with the one playing lit. cava is installed.
 - A scan of who else is on the network and which Wi-Fi networks are near, and of the
   Bluetooth devices near, each drawn as a radar on the dashboard, with a Bluetooth
   heading under Infrastructure and the devices in the network panel. A scan only pings

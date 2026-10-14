@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+
+# desktop-discography: an artist's studio albums, oldest first, with their covers.
+#
+#   desktop-discography <artist> [album]
+#
+# Prints one JSON object for the now-playing card in the shell:
+#
+#   {"artist": "Radiohead", "kind": "albums", "albums": [{"title": "Pablo Honey", "year": "1993",
+#     "cover": "/home/u/.cache/desktop/discography/covers/<id>.jpg", "current": false}, ...]}
+#
+# `kind` is "releases" for an artist with no album yet, whose EPs and singles stand in.
+# `current` marks the album named as the second argument, the one the track is from.
+# `cover` is empty where the Cover Art Archive has none. An artist MusicBrainz does not
+# know prints {"artist": "", "albums": []} -- a YouTube channel name, mostly -- and the
+# card leaves the section out.
+#
+# Asked of MusicBrainz, whose search is what tells a studio album from the dozens of
+# live bootlegs and compilations filed beside it. Kept a month per artist, since a
+# discography changes about once a year and MusicBrainz asks for one request a second.
+
+set -uo pipefail
+
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/desktop/discography"
+API="https://musicbrainz.org/ws/2"
+COVERS="https://coverartarchive.org/release-group"
+# MusicBrainz turns away requests that do not say who is asking.
+AGENT="desktop-discography/1 ( https://github.com/mto79/desktop )"
+KEEP_DAYS=30
+MOST=12
+# Below this the search is guessing: "Radiohead" scores 100, "radiohead 3" 57.
+SURE=90
+
+artist_in=${1:-}
+album_in=${2:-}
+if [[ -z $artist_in ]]; then
+  echo "usage: desktop-discography <artist> [album]" >&2
+  exit 2
+fi
+
+empty() { jq -n '{artist: "", albums: []}'; }
+
+# The first credited artist. Players hand over "A feat. B", "A, B" and YouTube's
+# "A - Topic"; a band called "A & B" is left whole, since that is too often the name.
+primary() {
+  local name=$1
+  name=${name%% - Topic}
+  name=$(sed -E 's/ +(feat\.?|ft\.?|featuring|with) .*$//I; s/, .*$//; s/ +\/ +.*$//' <<<"$name")
+  printf '%s' "$name"
+}
+
+# Lucene escapes, so a name with a colon or quotes searches as text.
+quoted() {
+  local s=${1//\\/\\\\}
+  s=${s//\"/\\\"}
+  printf '"%s"' "$s"
+}
+
+get() {
+  curl -fsS --max-time 10 -A "$AGENT" -G "$API/$1" --data-urlencode "query=$2" --data "fmt=json&limit=${3:-1}"
+}
+
+# The albums, oldest first, as {id, title, year}. A search for albums with no secondary
+# type still lets through the odd bootleg filed without one, but no live record or
+# compilation.
+albums_of() {
+  jq -c --argjson most "$MOST" 2>/dev/null '
+    [."release-groups"[]? | select((."secondary-types" // []) | length == 0)
+      | {id, title, date: (."first-release-date" // "")}]
+    | unique_by(.title | ascii_downcase) | sort_by(if .date == "" then "9999" else .date end)
+    | .[:$most] | map({id, title, year: .date[0:4]})'
+}
+
+name=$(primary "$artist_in")
+key=$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '_' | cut -c1-80)
+mkdir -p "$CACHE/covers"
+entry="$CACHE/$key.json"
+
+if [[ ! -s $entry ]] || [[ -n $(find "$entry" -mtime +"$KEEP_DAYS" 2>/dev/null) ]]; then
+  found=$(get artist/ "artist:$(quoted "$name")" | jq -c --argjson sure "$SURE" \
+    '[.artists[]? | select(.score >= $sure)][0] // empty | {id, name}')
+  if [[ -z $found ]]; then
+    # Remembered as unknown too, so an obscure artist does not cost a lookup per track.
+    jq -n '{artist: "", albums: []}' >"$entry"
+  else
+    id=$(jq -r .id <<<"$found")
+    sleep 1
+    kind=albums
+    list=$(get release-group/ "arid:$id AND primarytype:album AND NOT secondarytype:*" 100 | albums_of) || list=""
+    # An artist with no album yet has EPs and singles, and those are the discography.
+    if [[ $list == "[]" ]]; then
+      kind=releases
+      sleep 1
+      list=$(get release-group/ "arid:$id AND NOT secondarytype:*" 100 | albums_of) || list=""
+    fi
+    if [[ -z $list ]]; then
+      # A failed second request is not "no albums": nothing is kept, and the next
+      # track by them asks again.
+      empty
+      exit 0
+    fi
+    jq -n --argjson found "$found" --argjson albums "$list" --arg kind "$kind" '{artist: $found.name, kind: $kind, albums: $albums}' >"$entry"
+  fi
+fi
+
+# Covers, fetched once each and in parallel. One the archive does not have is noted as
+# missing, so it is not asked for again with every track, and asked again after a month.
+find "$CACHE/covers" -name '*.none' -mtime +"$KEEP_DAYS" -delete 2>/dev/null
+want=() ids=()
+while read -r rg; do
+  [[ -z $rg || -s $CACHE/covers/$rg.jpg || -e $CACHE/covers/$rg.none ]] && continue
+  ids+=("$rg")
+  want+=(-o "$CACHE/covers/$rg.jpg" "$COVERS/$rg/front-250")
+done < <(jq -r '.albums[].id' "$entry")
+if ((${#want[@]} > 0)); then
+  curl -fsSL --max-time 20 --parallel -A "$AGENT" "${want[@]}" 2>/dev/null
+  for rg in "${ids[@]}"; do
+    [[ -s $CACHE/covers/$rg.jpg ]] || { rm -f "$CACHE/covers/$rg.jpg"; touch "$CACHE/covers/$rg.none"; }
+  done
+fi
+
+# jq cannot see the disk, so it is told which covers are there.
+have=$(cd "$CACHE/covers" && ls -- *.jpg 2>/dev/null | sed 's/\.jpg$//' | jq -R . | jq -sc .)
+
+# The track's album matches its studio album with the edition taken off: "OK Computer
+# (Remastered)" is OK Computer.
+jq -c --arg covers "$CACHE/covers" --arg album "$album_in" --argjson have "${have:-[]}" '
+  def plain: ascii_downcase | gsub("[^a-z0-9]"; "");
+  ($album | sub(" *[\\(\\[].*$"; "") | sub(" - .*(remaster|edition|deluxe).*$"; ""; "i") | plain) as $now
+  | {artist, kind: (.kind // "albums"), albums: [.albums[] | {title, year,
+      cover: (if (.id | IN($have[])) then $covers + "/" + .id + ".jpg" else "" end),
+      current: ($now != "" and (.title | plain) == $now)}]}' "$entry"
