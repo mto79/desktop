@@ -10,6 +10,9 @@ RowLayout {
   property string icon: ""
   property string text: ""
   property color color: Color.barText
+  // The glyph on its own, for a widget whose icon says something its text does not --
+  // the Wi-Fi ramp coloured by signal, beside a speed that is not.
+  property color iconColor: root.color
   property int iconSize: Style.iconSize
   property int fontSize: Style.fontSize
 
@@ -37,7 +40,7 @@ RowLayout {
 
     visible: root.icon !== ""
     text: root.icon
-    color: root.color
+    color: root.iconColor
     font.family: Style.fontFamily
     font.pixelSize: root.iconSize
     verticalAlignment: Text.AlignVCenter

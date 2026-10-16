@@ -3,9 +3,10 @@ import Quickshell.Io
 import Quickshell.Networking
 import qs.Commons
 import qs.Ui
+import "tether.js" as Tether
 
-// Connectivity: a Wi-Fi signal ramp with the network's name, or a single glyph for
-// ethernet.
+// Connectivity: a Wi-Fi signal ramp coloured by strength, a phone for a USB-tethered
+// one, or a single glyph for ethernet.
 //
 // Reads Quickshell's NetworkManager binding rather than polling nmcli, so the name
 // changes the moment the connection does, and the widget and its panel cannot disagree
@@ -56,6 +57,18 @@ BarItem {
     if (activeWifi)
       return "wifi";
     return "disconnected";
+  }
+
+  // A phone sharing its connection over USB is a wired device to NetworkManager; the
+  // driver behind the interface is what says otherwise. See tether.js.
+  property bool tethered: false
+
+  FileView {
+    path: root.kind === "ethernet" && root.wiredDevice.name ? "/sys/class/net/" + root.wiredDevice.name + "/device/uevent" : ""
+    onLoaded: root.tethered = Tether.isTether(text())
+    onLoadFailed: root.tethered = false
+    onPathChanged: if (path === "")
+      root.tethered = false
   }
 
   readonly property string ssid: activeWifi ? activeWifi.name : ""
@@ -175,7 +188,7 @@ BarItem {
   readonly property string icon: {
     // A cable, which nobody takes for the Wi-Fi fan at a glance.
     if (kind === "ethernet")
-      return "\u{f0200}";
+      return tethered ? "\u{f011c}" : "\u{f0200}";
     if (kind === "disconnected")
       return "󰖪";
     var index = Math.min(wifiIcons.length - 1, Math.max(0, Math.floor(activeWifi.signalStrength * 4.999)));
@@ -199,7 +212,7 @@ BarItem {
 
   tooltip: {
     if (kind === "ethernet")
-      return "Wired\n" + (wiredDevice.name || "");
+      return (tethered ? "Phone tethering\n" : "Wired\n") + (wiredDevice.name || "");
     if (kind === "disconnected")
       return "Disconnected";
     return ssid + "\n" + signal + "% signal";
@@ -217,10 +230,17 @@ BarItem {
     popups.toggle(root.panelId, this)
   rightCommand: ["desktop-launch-wifi"]
 
+  // The signal ramp in colour as well as shape: the gauge the battery and disks use,
+  // read the other way round, so a full signal is good and a fading one goes through
+  // caution to urgent. Blended rather than stepped, so 55% and 75% are told apart though
+  // they share a glyph. Busy still wins -- blue means working, wherever it is on the bar.
+  readonly property color baseColor: root.kind === "disconnected" ? Color.barMuted : (root.busy ? Color.barAccent : Color.barText)
+
   IconLabel {
     icon: root.icon
     text: root.label
-    color: root.kind === "disconnected" ? Color.barMuted : (root.busy ? Color.barAccent : Color.barText)
+    color: root.baseColor
+    iconColor: root.kind === "wifi" && !root.busy ? Color.gauge(1 - root.activeWifi.signalStrength) : root.baseColor
     lively: root.busy
   }
 }
