@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- kubeseal, for sealing Kubernetes secrets so they can be committed: 0.40.0, checked
+  against a checksum written into the install script.
 - `desktop-tmux-fresh`, a clean slate in tmux: every session closed, and nothing left for
   the next login to restore.
 - A phone on the bar in place of the cable when the wired link is a phone tethering over
