@@ -20,7 +20,6 @@ keys() {
 t	t	another tab: a terminal, or an agent on the same files
 Tab	Tab	next tab
 BTab	Shift+Tab	previous tab
-x	x	close the tab on top (a plain pane: the pane)
 [	[	scroll back in the tab on top
 # Agents
 a	a	next model: claude, opencode, codex
@@ -32,6 +31,11 @@ T	T	new task: a branch name, and a tab whose agent works there
 D	D	finish the task on show: push, open the review, remove it
 # Terminal
 Z	Z	the window's terminal full size, and back
+# Closing
+x	x	the tab on top, or a plain pane
+w	w	the window
+q	q	the session
+Q	Q	every session: the tmux server itself
 # Getting around
 s	s	the sessions you work in
 f	f	sessionizer: a repository or a task, laid out
