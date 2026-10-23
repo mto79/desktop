@@ -69,20 +69,20 @@ JSON
 MONITORS_FIXTURE="$sandbox/monitors.json" WORKSPACES_FIXTURE="$sandbox/workspaces.json" \
   HYPRCTL_LOG="$log" HOME="$sandbox" PATH="$stubs:$PATH" bash "$PIN"
 
-CONF="$sandbox/.config/hypr/workspaces.conf"
+CONF="$sandbox/.config/hypr/workspaces.lua"
 check "the rules are written for the next reload" \
-  test "$(grep -c '^workspace = ' "$CONF")" = 6
-check "workspace 2 is written to the portrait screen" grep -qx "workspace = 2, monitor:DP-8" "$CONF"
-check "a misplaced workspace is moved" grep -qx "dispatch moveworkspacetomonitor 3 DP-7" "$log"
-check "a workspace already in place is not moved" lacks "moveworkspacetomonitor 1 " "$log"
-check "the focus is handed back after moving" grep -qx "dispatch workspace 3" "$log"
+  test "$(grep -c '^hl.workspace_rule(' "$CONF")" = 6
+check "workspace 2 is written to the portrait screen" grep -qxF 'hl.workspace_rule({ workspace = "2", monitor = "DP-8" })' "$CONF"
+check "a misplaced workspace is moved" grep -qxF 'dispatch hl.dsp.workspace.move({ workspace = 3, monitor = "DP-7" })' "$log"
+check "a workspace already in place is not moved" lacks -F "workspace.move({ workspace = 1," "$log"
+check "the focus is handed back after moving" grep -qxF "dispatch hl.dsp.focus({ workspace = 3 })" "$log"
 
 # A desk that reports no physical size matches no kind; that must not write a broken rule.
 echo '[{"name":"HDMI-A-1","physicalWidth":0,"physicalHeight":0,"transform":0,"disabled":false}]' \
   >"$sandbox/monitors.json"
 MONITORS_FIXTURE="$sandbox/monitors.json" DESKTOP_LAPTOP_MONITOR=none HYPRCTL_LOG="$log" \
   HOME="$sandbox" PATH="$stubs:$PATH" bash "$PIN" 2>/dev/null
-check "no screen of any kind writes no rule at all" lacks '^workspace' "$CONF"
+check "no screen of any kind writes no rule at all" lacks '^hl.workspace_rule' "$CONF"
 
 # The start script, with every app replaced by a stub that maps a window of its class.
 : >"$log"
@@ -137,7 +137,7 @@ CLIENTS="$clients" HYPRCTL_LOG="$log" TMUX_LOG="$sandbox/tmux.log" HOME="$sandbo
 moved_to() {
   local address
   address="0x$(printf '%s' "$2" | md5sum | cut -c1-8)"
-  grep -qx "dispatch movetoworkspacesilent $1,address:$address" "$log"
+  grep -qxF "dispatch hl.dsp.window.move({ workspace = $1, window = \"address:$address\", follow = false })" "$log"
 }
 check "Brave is moved to workspace 1" moved_to 1 "brave-browser"
 check "tmux is moved to workspace 3" moved_to 3 "ghostty -e tmux attach-session -t home"
@@ -152,14 +152,14 @@ check "the llm-wiki tmux session is created" grep -q "new-session -d -s llm-wiki
 check "llm-wiki is laid out with claude, so it is ready when you switch to it" \
   grep -qx "llm-wiki:ide claude" "$sandbox/layout.log"
 check "home is left a plain shell" lacks "^home" "$sandbox/layout.log"
-check "the focus ends on the dashboard's workspace" grep -q "dispatch workspace 6$" "$log"
+check "the focus ends on the dashboard's workspace" grep -qF "dispatch hl.dsp.focus({ workspace = 6 })" "$log"
 # Applications ask for the focus when they have finished starting, which is after it has
 # been put where it belongs: every login used to end on workspace 5, where Obsidian is.
 check "an application asking for attention is not followed while the windows open" \
-  test "$(grep -n -e '^keyword misc:focus_on_activate false$' -e 'movetoworkspacesilent' "$log" | head -1 | cut -d: -f2 | cut -c1-7)" = keyword
+  test "$(grep -n -e 'focus_on_activate = false' -e 'window.move' "$log" | head -1 | cut -d: -f2 | cut -c1-4)" = eval
 check "and asking counts again once they are all open" \
-  test "$(grep '^keyword misc:focus_on_activate' "$log" | tail -1)" = "keyword misc:focus_on_activate true"
+  test "$(grep 'focus_on_activate' "$log" | tail -1)" = "eval hl.config({ misc = { focus_on_activate = true } })"
 check "which comes after the focus has been placed" \
-  test "$(grep -n -e '^keyword misc:focus_on_activate true$' -e 'dispatch workspace 6$' "$log" | tail -1 | cut -d: -f2 | cut -c1-7)" = keyword
+  test "$(grep -n -e 'focus_on_activate = true' -e 'focus({ workspace = 6 })' "$log" | tail -1 | cut -d: -f2 | cut -c1-4)" = eval
 
 finish

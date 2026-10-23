@@ -119,7 +119,7 @@ show_style_menu() {
   *Theme*) show_theme_menu ;;
   *Font*) show_font_menu ;;
   *Background*) desktop-theme-bg-next ;;
-  *Hyprland*) open_in_editor ~/.config/hypr/looknfeel.conf ;;
+  *Hyprland*) open_in_editor ~/.config/hypr/looknfeel.lua ;;
   *Screensaver*) open_in_editor ~/.config/desktop/branding/screensaver.txt ;;
   *About*) open_in_editor ~/.config/desktop/branding/about.txt ;;
   *) show_main_menu ;;
@@ -146,8 +146,8 @@ show_font_menu() {
 
 show_setup_menu() {
   local options="  Audio\n  Wifi\n󰂯  Bluetooth\n󱐋  Power Profile\n󰍹  Monitors\n  Camera"
-  [ -f ~/.config/hypr/bindings.conf ] && options="$options\n  Keybindings"
-  [ -f ~/.config/hypr/input.conf ] && options="$options\n󰍽  Input"
+  [ -f ~/.config/hypr/bindings.lua ] && options="$options\n  Keybindings"
+  [ -f ~/.config/hypr/input.lua ] && options="$options\n󰍽  Input"
   options="$options\n  Defaults\n󰱔  DNS\n  Config"
 
   case $(menu "Setup" "$options") in
@@ -163,8 +163,8 @@ show_setup_menu() {
   *Power*) show_setup_power_menu ;;
   *Monitors*) show_monitors_menu ;;
   *Camera*) show_camera_menu ;;
-  *Keybindings*) open_in_editor ~/.config/hypr/bindings.conf ;;
-  *Input*) open_in_editor ~/.config/hypr/input.conf ;;
+  *Keybindings*) open_in_editor ~/.config/hypr/bindings.lua ;;
+  *Input*) open_in_editor ~/.config/hypr/input.lua ;;
   *Defaults*) open_in_editor ~/.config/uwsm/default ;;
   *DNS*) present_terminal desktop-setup-dns ;;
   *Config*) show_setup_config_menu ;;
@@ -192,7 +192,7 @@ show_monitors_menu() {
   case "$choice" in
   "") back_to show_setup_menu ;;
   Auto) desktop-cmd-monitors-switch ;;
-  Edit*) open_in_editor ~/.config/hypr/monitors.conf ;;
+  Edit*) open_in_editor ~/.config/hypr/monitors.lua ;;
   *) desktop-cmd-monitors-switch "$choice" ;;
   esac
 }
@@ -210,7 +210,7 @@ show_setup_power_menu() {
 show_setup_config_menu() {
   # case $(menu "Setup" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n  Swayosd\n󰌧  Walker\n󰍜  Waybar\n󰞅  XCompose") in
   case $(menu "Setup" "  Hyprland\n  Hypridle\n  Hyprlock\n  Hyprsunset\n󰌧  Wofi\n󰍜  Shell\n󰍜  Waybar\n󰞅  XCompose") in
-  *Hyprland*) open_in_editor ~/.config/hypr/hyprland.conf ;;
+  *Hyprland*) open_in_editor ~/.config/hypr/hyprland.lua ;;
   *Hypridle*) open_in_editor ~/.config/hypr/hypridle.conf && desktop-restart-hypridle ;;
   *Hyprlock*) open_in_editor ~/.config/hypr/hyprlock.conf ;;
   *Hyprsunset*) open_in_editor ~/.config/hypr/hyprsunset.conf && desktop-restart-hyprsunset ;;

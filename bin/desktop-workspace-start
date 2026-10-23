@@ -47,7 +47,7 @@ open_on() {
   while ((SECONDS < deadline)); do
     address="$(comm -13 <(echo "$before") <(addresses_of "$class") | grep . | head -1 || true)"
     if [[ -n "$address" ]]; then
-      hyprctl dispatch movetoworkspacesilent "$workspace,address:$address" >/dev/null
+      hyprctl dispatch "hl.dsp.window.move({ workspace = $workspace, window = \"address:$address\", follow = false })" >/dev/null
       return 0
     fi
     sleep 0.2
@@ -67,10 +67,11 @@ desktop-workspace-pin
 # login ended on workspace 5 whatever was dispatched here. Put back as it was at the end,
 # and on any way out, so a script that dies half-way does not leave it off.
 activate=true
-[[ $(hyprctl getoption misc:focus_on_activate 2>/dev/null) == *"int: 0"* ]] && activate=false
-restore_activate() { hyprctl keyword misc:focus_on_activate "$activate" >/dev/null 2>&1 || true; }
+[[ $(hyprctl getoption misc:focus_on_activate 2>/dev/null) == *"bool: false"* ]] && activate=false
+focus_on_activate() { hyprctl eval "hl.config({ misc = { focus_on_activate = $1 } })" >/dev/null 2>&1 || true; }
+restore_activate() { focus_on_activate "$activate"; }
 trap restore_activate EXIT
-hyprctl keyword misc:focus_on_activate false >/dev/null 2>&1 || true
+focus_on_activate false
 
 # Both sessions exist before the terminal attaches, so llm-wiki is one switch away --
 # and llm-wiki is the one that is always the same job, so it is laid out and has claude
@@ -105,7 +106,9 @@ wait
 # starts on the dashboard, which says what is waiting before anything is opened to find
 # out. Screens that hold several of these show the last one named, which is why 6 comes
 # last -- and 1 just before it, so that it is what the laptop falls back to.
-hyprctl --batch "dispatch workspace 5 ; dispatch workspace 4 ; dispatch workspace 2 ; dispatch workspace 3 ; dispatch workspace 1 ; dispatch workspace 6" >/dev/null
+hyprctl --batch "dispatch hl.dsp.focus({ workspace = 5 }) ; dispatch hl.dsp.focus({ workspace = 4 }) ;
+  dispatch hl.dsp.focus({ workspace = 2 }) ; dispatch hl.dsp.focus({ workspace = 3 }) ;
+  dispatch hl.dsp.focus({ workspace = 1 }) ; dispatch hl.dsp.focus({ workspace = 6 })" >/dev/null
 
 # And a welcome, now that everything is where it belongs: a greeting by name and what is
 # waiting, said while the dashboard shows the same. Not waited for, and desktop-say keeps

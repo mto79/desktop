@@ -12,15 +12,15 @@ out at install time, part of it is read in place for as long as the machine runs
 | Whose it is | Yours to change per machine | The desktop's defaults |
 | Deployed by | `install/config/config.sh`, or `desktop-refresh-config <path>` for one file | Nothing; it is sourced |
 
-`~/.config/hypr/hyprland.conf` shows how they combine: it sources every file under
+`~/.config/hypr/hyprland.lua` shows how they combine: it sources every file under
 `default/hypr/` first, then the active theme, then the files in `~/.config/hypr/`, so a
 personal setting overrides a default without editing it.
 
 `desktop-refresh-config hypr/hyprlock.conf` copies one file from `config/` over the
 deployed one, keeping a timestamped backup of what was there.
 
-Two files under `~/.config/hypr/` are neither: `monitors.conf` is written by
-`desktop-cmd-monitors-switch` and `workspaces.conf` by `desktop-workspace-pin`. Change the
+Two files under `~/.config/hypr/` are neither: `monitors.lua` is written by
+`desktop-cmd-monitors-switch` and `workspaces.lua` by `desktop-workspace-pin`. Change the
 script, not the output.
 
 ## Commands

@@ -168,8 +168,8 @@ new.
 1. A `Popup` in `shell/Bar/panels/` with `readonly property string panelId`.
 2. Register it in `shell/Bar/Bar.qml`.
 3. Have its widget open it with `popups.toggle(root.panelId, this)`.
-4. Add a letter for it to the `panels` submap in `default/hypr/bindings/utilities.conf`,
-   and its Lua twin.
+4. Add a letter for it to the `panels` submap in `default/hypr/bindings/utilities.lua`,
+   and its `.conf` twin.
 5. `desktop-restart-shell`, then `desktop-shell shell togglePanel <id>`.
 
 ## Rules that are easy to break

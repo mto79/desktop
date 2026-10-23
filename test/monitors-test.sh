@@ -82,23 +82,23 @@ laptop"
 
 # Applying, rather than only listing. A home desk missing its ultrawide should light the
 # portrait screen where it belongs, not disable it.
-CONF="$sandbox/.config/hypr/monitors.conf"
+CONF="$sandbox/.config/hypr/monitors.lua"
 MONITORS_FIXTURE="$(desk "$LAPTOP" "$PORTRAIT")" HOME="$sandbox" PATH="$stubs:$PATH" \
   bash "$SWITCH" >/dev/null
 
-check "the applied layout is home" grep -qx "# layout: home" "$CONF"
+check "the applied layout is home" grep -qx -- "-- layout: home" "$CONF"
 check "the portrait screen is placed, not disabled" \
-  grep -qx "monitor=DP-9, 3840x2160@60, 0x0, 1, transform, 1" "$CONF"
-check "no screen on the desk is disabled" lacks 'disable' "$CONF"
+  grep -qxF 'hl.monitor({ output = "DP-9", mode = "3840x2160@60", position = "0x0", scale = 1, transform = 1 })' "$CONF"
+check "no screen on the desk is disabled" lacks 'disabled' "$CONF"
 
 # Nothing changed, so the second run must leave the file alone. The header carries the
 # proof: the comparison reads only the monitor lines, so a sentinel there survives
 # exactly as long as the file is not rewritten.
-sed -i 's/^# Generated on .*/# Generated on SENTINEL/' "$CONF"
+sed -i 's/^-- Generated on .*/-- Generated on SENTINEL/' "$CONF"
 MONITORS_FIXTURE="$(desk "$LAPTOP" "$PORTRAIT")" HOME="$sandbox" PATH="$stubs:$PATH" \
   bash "$SWITCH" >/dev/null
 check "applying a layout already in force rewrites nothing" \
-  grep -qx "# Generated on SENTINEL" "$CONF"
+  grep -qx -- "-- Generated on SENTINEL" "$CONF"
 
 # Applying a layout wakes the screens it leaves on. A dock plugged in while hypridle has
 # them powered down reconfigures the outputs, and the screen the reload rebuilds can come
@@ -109,7 +109,7 @@ ASLEEP=$(screen eDP-1 0x4196 1920 1080 false)
 MONITORS_FIXTURE="$(desk "$ASLEEP" "$PORTRAIT")" DISPATCHED="$DISPATCHED" HOME="$sandbox" \
   PATH="$stubs:$PATH" bash "$SWITCH" home >/dev/null
 check "a screen left asleep is woken after the layout is applied" \
-  grep -qx "dispatch dpms on eDP-1" "$DISPATCHED"
+  grep -qxF 'dispatch hl.dsp.dpms({ action = "on", monitor = "eDP-1" })' "$DISPATCHED"
 check "and a screen that is already awake is left alone" lacks "DP-9" "$DISPATCHED"
 
 # What the bar shows for all this. The module is a command widget, so its whole

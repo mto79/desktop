@@ -9,7 +9,7 @@ require python3 || finish
 python3 - "$ROOT" <<'PY'
 import pathlib, re, sys
 root = pathlib.Path(sys.argv[1])
-rules = (root / "default/hypr/apps/system.conf").read_text()
+rules = (root / "default/hypr/apps/system.lua").read_text()
 
 # Titles the launchers actually pass. A title built from a variable is reduced to its
 # literal prefix -- "Agent $AGENT" only ever has to match on "Agent".
@@ -69,13 +69,16 @@ else
 fi
 
 # The authority on all of this is Hyprland itself, which can check a config without
-# running. Only meaningful once the config has been deployed to ~/.config.
-if have Hyprland && [[ -f $HOME/.config/hypr/hyprland.conf ]]; then
-  if Hyprland --verify-config --config "$HOME/.config/hypr/hyprland.conf" 2>&1 | grep -q "^config ok"; then
+# running. Only meaningful once the config has been deployed to ~/.config, and only the
+# file Hyprland reads: hyprland.lua whenever it is there.
+deployed=$HOME/.config/hypr/hyprland.lua
+[[ -f $deployed ]] || deployed=$HOME/.config/hypr/hyprland.conf
+if have Hyprland && [[ -f $deployed ]]; then
+  if Hyprland --verify-config --config "$deployed" 2>&1 | grep -q "^config ok"; then
     pass "Hyprland accepts the deployed config"
   else
     fail "Hyprland accepts the deployed config" \
-      "$(Hyprland --verify-config --config "$HOME/.config/hypr/hyprland.conf" 2>&1 | grep -m3 '^Config error' | tr '\n' ' ')"
+      "$(Hyprland --verify-config --config "$deployed" 2>&1 | grep -m3 -i 'error' | tr '\n' ' ')"
   fi
 else
   pass "skipped, Hyprland or deployed config not present"

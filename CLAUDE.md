@@ -25,13 +25,19 @@ is live immediately.
 **Ghostty is the only terminal, and it cannot set a Wayland app id.** Every window it
 opens is `com.mitchellh.ghostty`. Floating window rules therefore match on **title**,
 which each `desktop-launch-*` script passes with `--title`. See
-`default/hypr/apps/system.conf`. A title match is weaker than a class match — an app
+`default/hypr/apps/system.lua`. A title match is weaker than a class match — an app
 that renames its own window escapes it (yazi and tmux do; bluetui does not) — so a new
 TUI needs checking, not assuming.
 
-**Some files under `~/.config` are generated, not copied.** `hypr/monitors.conf` comes
-from `desktop-cmd-monitors-switch` and `hypr/workspaces.conf` from
+**Some files under `~/.config` are generated, not copied.** `hypr/monitors.lua` comes
+from `desktop-cmd-monitors-switch` and `hypr/workspaces.lua` from
 `desktop-workspace-pin`. Edit the script, never the output.
+
+**Hyprland runs on `hyprland.lua`, and so does everything that talks to it.** A Lua
+session refuses `hyprctl dispatch workspace 3` and every `hyprctl keyword`; it takes
+`hyprctl dispatch 'hl.dsp.focus({ workspace = 3 })'` and `hyprctl eval '...'`. That holds
+for the shell's `Hyprland.dispatch()` as well. The `.conf` files are kept as twins until
+0.57 and still change with their `.lua`. See `docs/hyprland.md`.
 
 **`jq` is a hard dependency** of a dozen `bin/desktop-*` scripts. So is `python3` in
 places. Neither is optional.

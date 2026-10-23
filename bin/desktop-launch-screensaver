@@ -17,13 +17,9 @@ fi
 focused=$(hyprctl monitors -j | jq -r '.[] | select(.focused == true).name')
 
 for m in $(hyprctl monitors -j | jq -r '.[] | .name'); do
-  hyprctl dispatch focusmonitor $m
+  hyprctl dispatch "hl.dsp.focus({ monitor = \"$m\" })"
 
-  hyprctl dispatch exec -- \
-    ghostty --title=org.desktop.screensaver \
-    --background=000000 --cursor-color=000000 \
-    --font-size=18 --background-opacity=1 \
-    -e desktop-cmd-screensaver
+  hyprctl dispatch 'hl.dsp.exec_cmd("ghostty --title=org.desktop.screensaver --background=000000 --cursor-color=000000 --font-size=18 --background-opacity=1 -e desktop-cmd-screensaver")'
 done
 
-hyprctl dispatch focusmonitor $focused
+hyprctl dispatch "hl.dsp.focus({ monitor = \"$focused\" })"

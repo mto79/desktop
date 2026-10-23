@@ -125,9 +125,9 @@ BarWidget {
 
           anchors.fill: parent
           hoverEnabled: true
-          onClicked: Hyprland.dispatch("workspace " + workspace.modelData.id)
+          onClicked: Hyprland.dispatch("hl.dsp.focus({ workspace = " + workspace.modelData.id + " })")
           // Scroll walks workspaces, as it did in waybar.
-          onWheel: wheel => Hyprland.dispatch(wheel.angleDelta.y > 0 ? "workspace e-1" : "workspace e+1")
+          onWheel: wheel => Hyprland.dispatch(wheel.angleDelta.y > 0 ? 'hl.dsp.focus({ workspace = "e-1" })' : 'hl.dsp.focus({ workspace = "e+1" })')
         }
       }
     }

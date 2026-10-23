@@ -21,7 +21,7 @@ timeout_before() {
 }
 screensaver=$(timeout_before "desktop-launch-screensaver")
 lock=$(timeout_before "lock-session")
-dpms=$(timeout_before "dpms off")
+dpms=$(timeout_before 'dpms\\(\\{ action = "off"')
 
 check "every listener declares a timeout" test "${#timeouts[@]}" = 3
 

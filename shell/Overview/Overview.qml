@@ -63,16 +63,16 @@ Item {
 
   function goTo(workspaceId) {
     hide();
-    Hyprland.dispatch("workspace " + workspaceId);
+    Hyprland.dispatch("hl.dsp.focus({ workspace = " + workspaceId + " })");
   }
 
   function focusWindow(address) {
     hide();
-    Hyprland.dispatch("focuswindow address:" + address);
+    Hyprland.dispatch('hl.dsp.focus({ window = "address:' + address + '" })');
   }
 
   function moveWindow(address, workspaceId) {
-    Hyprland.dispatch("movetoworkspacesilent " + workspaceId + ",address:" + address);
+    Hyprland.dispatch("hl.dsp.window.move({ workspace = " + workspaceId + ', window = "address:' + address + '", follow = false })');
     Hyprland.refreshToplevels();
   }
 

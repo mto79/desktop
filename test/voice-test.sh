@@ -52,11 +52,11 @@ shown() { jq -r .text "$sandbox/run/desktop/say/now" 2>/dev/null; }
 
 # --- as the recogniser really hears them
 say "Go to Workspace 3."
-check "a workspace by its number" did "hyprctl dispatch workspace 3"
+check "a workspace by its number" did "hyprctl dispatch hl.dsp.focus({ workspace = 3 })"
 say "workspace three"
-check "or by the word for it" did "hyprctl dispatch workspace 3"
+check "or by the word for it" did "hyprctl dispatch hl.dsp.focus({ workspace = 3 })"
 say "Dashboard."
-check "the dashboard is workspace 6" did "hyprctl dispatch workspace 6"
+check "the dashboard is workspace 6" did "hyprctl dispatch hl.dsp.focus({ workspace = 6 })"
 say "Dashboard health"
 check "a tab of the dashboard by its subject" did "desktop-shell shell dashboardTab health"
 say "show domotics"
@@ -108,7 +108,7 @@ say "shell on ocp203"
 check "a shell on a cluster" did "uwsm app -- ghostty -e ocl ocp203"
 
 say "go to firefox"
-check "a window by a word in its name" did "hyprctl dispatch focuswindow address:0xaa"
+check "a window by a word in its name" did 'hyprctl dispatch hl.dsp.focus({ window = "address:0xaa" })'
 say "open spreadsheet"
 check "a window that is not there is said to be not there" grep -q 'No window called' <<<"$(shown)"
 
@@ -226,7 +226,7 @@ check "and what has a newer version" said_aloud "desktop-say Newer versions: kub
 
 say "workspace 4"
 say "again"
-check "'again' does the last thing once more" did "hyprctl dispatch workspace 4"
+check "'again' does the last thing once more" did "hyprctl dispatch hl.dsp.focus({ workspace = 4 })"
 say "tell desktop to run the tests"
 say "again"
 check "but never sends a message to an agent twice" lacks 'send-keys' "$sandbox/calls"
@@ -236,7 +236,7 @@ model_says() { printf '%s' "$1" >"$sandbox/model"; rm -f "$sandbox/asked"; }
 
 model_says '{"action":"workspace","arg":"3"}'
 say "could you bring up the third one"
-check "a sentence the list does not know is put to the model" did "hyprctl dispatch workspace 3"
+check "a sentence the list does not know is put to the model" did "hyprctl dispatch hl.dsp.focus({ workspace = 3 })"
 check "which is told what is in front of you" grep -q 'Focused window' "$sandbox/asked"
 check "and may only answer from a fixed set" grep -q '"enum"' "$sandbox/asked"
 rm -f "$sandbox/asked"
@@ -288,12 +288,12 @@ which_model() { jq -r '"\(.name) \(.where)"' "$sandbox/run/desktop/voice/model" 
 printf '<think>hm</think> {"action":"workspace","arg":"5"}' >"$sandbox/remote"
 model_says '{"action":"workspace","arg":"9"}'
 far "could you bring up the fifth one"
-check "the model elsewhere is asked first when it is in reach" did "hyprctl dispatch workspace 5"
+check "the model elsewhere is asked first when it is in reach" did "hyprctl dispatch hl.dsp.focus({ workspace = 5 })"
 check "and it is written down that the sentence left this machine" test "$(which_model)" = "Big/Model remote"
 check "its key is never on a command line" lacks 'sekrit-key' "$sandbox/curls"
 rm -f "$sandbox/remote"
 far "could you bring up the fifth one"
-check "when it does not answer, the one on this machine is asked" did "hyprctl dispatch workspace 9"
+check "when it does not answer, the one on this machine is asked" did "hyprctl dispatch hl.dsp.focus({ workspace = 9 })"
 check "and that is what is written down" test "$(which_model)" = "qwen2.5:3b local"
 sed -i 's|^remote_url=.*|remote_url=https://nowhere.invalid|' "$sandbox/voice.conf"
 printf '{"action":"workspace","arg":"5"}' >"$sandbox/remote"
@@ -323,10 +323,10 @@ haiku_says '{"action":"workspace","arg":"7"}'
 model_says '{"action":"workspace","arg":"9"}'
 touch "$sandbox/haskey"
 cloud "could you bring up the seventh one"
-check "nothing goes to the cloud unless you chose it" did "hyprctl dispatch workspace 9"
+check "nothing goes to the cloud unless you chose it" did "hyprctl dispatch hl.dsp.focus({ workspace = 9 })"
 set_mode cloud
 cloud "could you bring up the seventh one"
-check "in cloud mode a sentence the list does not know goes to Haiku" did "hyprctl dispatch workspace 7"
+check "in cloud mode a sentence the list does not know goes to Haiku" did "hyprctl dispatch hl.dsp.focus({ workspace = 7 })"
 check "which is written down as having left" test "$(which_model)" = "claude-haiku-5-5 cloud"
 check "the sentence goes alone: no window, no agents, no last command" lacks -E 'Focused window|Coding agents|Last command' "$sandbox/body"
 check "and is held to the same fixed set" test "$(jq -r '.output_config.format.schema.properties.action.enum | index("workspace") != null' "$sandbox/body")" = true
@@ -342,7 +342,7 @@ cloud "tell desktop to lock the door"
 check "a message to an agent never goes anywhere" test ! -e "$sandbox/body"
 haiku_says '{"action":"workspace","arg":"7"}' refusal
 cloud "could you bring up the seventh one"
-check "a refusal is no answer, and the local model is asked" did "hyprctl dispatch workspace 9"
+check "a refusal is no answer, and the local model is asked" did "hyprctl dispatch hl.dsp.focus({ workspace = 9 })"
 haiku_says '{"action":"lock; reboot","arg":""}'
 model_says 'x'
 cloud "do the thing"
@@ -364,11 +364,11 @@ learnt() { PATH="$stubs:$PATH" XDG_RUNTIME_DIR="$sandbox/run" XDG_STATE_HOME="$s
 teachable() { : >"$sandbox/calls"; : >"$sandbox/curls"; learnt run "$1" >/dev/null; }
 model_says '{"action":"workspace","arg":"8"}'
 teachable "let me see number eight"
-check "a sentence a model made sense of is done" did "hyprctl dispatch workspace 8"
+check "a sentence a model made sense of is done" did "hyprctl dispatch hl.dsp.focus({ workspace = 8 })"
 check "and kept, with what it meant and who said so" test "$(learnt learned --json | jq -r '.learned[0] | "\(.phrase)|\(.command)|\(.by)"')" = "let me see number 8|workspace 8|qwen2.5:3b"
 rm -f "$sandbox/model"
 teachable "let me see number eight"
-check "said again it is known, with no model there at all" did "hyprctl dispatch workspace 8"
+check "said again it is known, with no model there at all" did "hyprctl dispatch hl.dsp.focus({ workspace = 8 })"
 check "and nobody is asked" lacks -E 'api/chat|v1/messages|chat/completions' "$sandbox/curls"
 model_says '{"action":"none","arg":""}'
 teachable "order me a pizza"

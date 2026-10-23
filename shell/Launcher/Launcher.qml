@@ -327,7 +327,7 @@ Item {
     if (item.kind === "copy")
       Quickshell.execDetached(["wl-copy", "--", item.payload]);
     else if (item.kind === "window")
-      Hyprland.dispatch("focuswindow address:" + item.payload);
+      Hyprland.dispatch('hl.dsp.focus({ window = "address:' + item.payload + '" })');
     else if (item.kind === "run")
       Quickshell.execDetached({
         command: ["uwsm", "app", "--", "bash", "-c", item.payload],

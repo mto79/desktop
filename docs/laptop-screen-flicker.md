@@ -11,7 +11,8 @@ Found on 2026-10-12. What pinned it down:
 
 - screenshots of the bar were steady, so the flicker happens after the compositor;
 - the kernel log has `Selective fetch area calculation failed in pipe A`;
-- `hyprctl keyword debug:damage_tracking 0` (repaint whole frames) made it stop.
+- `hyprctl eval 'hl.config({ debug = { damage_tracking = 0 } })'` (repaint whole frames)
+  made it stop. Under hyprland.conf this was `hyprctl keyword debug:damage_tracking 0`.
 
 The fix is one kernel argument, `i915.enable_psr2_sel_fetch=0`. It is read at boot, so
 it has to be stored where the boot loader finds it, and a reboot is needed.
@@ -81,7 +82,7 @@ Then reboot.
 ## A stopgap that does not survive
 
 ```bash
-hyprctl keyword debug:damage_tracking 0
+hyprctl eval 'hl.config({ debug = { damage_tracking = 0 } })'
 ```
 
 Stops the flicker at once, without a reboot, by repainting whole frames on every monitor.

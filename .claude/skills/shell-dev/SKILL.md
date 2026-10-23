@@ -49,9 +49,9 @@ desktop-shell shell togglePanel memory     # "ok" = registered, "unknown" = not
 ```
 
 Panels are keyboard-reachable through the `panels` submap: `SUPER+D` then a letter.
-Adding a panel means adding it there too — see `default/hypr/bindings/utilities.conf`,
-and note the closing `submap = reset`, without which every binding in the thirteen files
-sourced afterwards lands inside the submap.
+Adding a panel means adding it there too — see `default/hypr/bindings/utilities.lua`,
+and its `.conf` twin, where the closing `submap = reset` is not optional: without it every
+binding in the thirteen files sourced afterwards lands inside the submap.
 
 ## Rules that are easy to break
 

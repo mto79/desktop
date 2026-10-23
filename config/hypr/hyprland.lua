@@ -1,14 +1,13 @@
 -- Learn how to configure Hyprland: https://wiki.hypr.land/Configuring/
 --
--- The Lua twin of hyprland.conf, file for file, for Hyprland 0.57, which reads no other.
+-- The config Hyprland reads: whenever hyprland.lua exists it is read in place of
+-- hyprland.conf, decided once at startup, and from 0.57 nothing else is read at all.
 --
--- Named hyprland.next.lua until the switch, because the name is the switch: Hyprland reads
--- hyprland.lua in place of hyprland.conf whenever one exists, deciding once at startup,
--- and install/config/config.sh copies all of config/ into ~/.config. Under its real name
--- this would take over a fresh install before the scripts and the bar speak the Lua
--- dispatchers. Renamed to hyprland.lua when they do; until then test/hypr-lua-test.sh
--- loads it with Hyprland --verify-config. After the switch, removing hyprland.lua and
--- logging in again is the way back, for as long as the .conf files are kept.
+-- The .conf files beside it are no longer loaded and are kept only until 0.57 as the
+-- record of what this was converted from. They are not a way back on their own: the
+-- scripts and the bar now speak the Lua dispatchers (`hyprctl dispatch 'hl.dsp...'`,
+-- `hyprctl eval`), which a hyprlang session refuses, just as a Lua session refuses the
+-- old `hyprctl dispatch workspace 3` and `hyprctl keyword`.
 
 -- hyprland.conf's `source =`: runs another config file, ~ being home. dofile rather than
 -- require, since the files live in three places -- the repo's defaults, the active theme,

@@ -580,7 +580,7 @@ interpret() { # the sentence
 
   if is '(workspace|desktop) ([0-9]+)$'; then
     number=${BASH_REMATCH[2]}
-    hyprctl dispatch workspace "$number" >/dev/null 2>&1 && did "Workspace $number"
+    hyprctl dispatch "hl.dsp.focus({ workspace = $number })" >/dev/null 2>&1 && did "Workspace $number"
   elif is '(dashboard|show|open)( the)? (start|ai|assistant|domotics|home|house|infrastructure|clusters|health|finance|money|watching|versions|news|headlines)( tab| page)?$'; then
     # A tab of the dashboard, by its subject or the word you would use for it.
     local subject=${BASH_REMATCH[3]} key
@@ -591,7 +591,7 @@ interpret() { # the sentence
     shell_call dashboardTab "$key"
     # The clusters share their tab with the network; asked for by name, they are shown.
     [[ $subject == clusters ]] && shell_call infraSection clusters
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Dashboard: $subject"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "Dashboard: $subject"
   elif is '^(show|open)?( me)?( the| my)? ?(prompts|what i asked|voice commands|learned|what you learned|presence|agents|agent statistics|token usage)$'; then
     # A heading of the dashboard's AI tab.
     local heading
@@ -599,30 +599,30 @@ interpret() { # the sentence
     agents | "agent statistics" | "token usage") heading=agents ;; *) heading=voice ;; esac
     shell_call dashboardTab ai
     shell_call aiSection "$heading"
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "AI: $heading"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "AI: $heading"
   elif is '^(scan|sweep)( the| my)? network$|^(who|what) (else )?is on (the|my|this) network$'; then
     # A scan, the way the network allows: quiet off a network of yours.
     shell_call dashboardTab infra
     shell_call infraSection network
     shell_call scanNetwork quiet
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Scanning the network"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "Scanning the network"
   elif is '^(scan|look|listen)( for)? bluetooth( devices)?$|^(scan|look) for bluetooth devices$|^what bluetooth devices are (near|around|here)$|^which bluetooth devices are (near|around|here)$'; then
     shell_call dashboardTab infra
     shell_call infraSection bluetooth
     shell_call scanBluetooth
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Listening for Bluetooth devices"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "Listening for Bluetooth devices"
   elif is '^(show|open)?( me)?( the| my)? ?(vpn routes|vpn networks|routes( through| of)?( the)? vpn|what (goes|is) (through|behind) the vpn)$'; then
     # The network picture with the VPN's box open: every network it takes.
     shell_call dashboardTab infra
     shell_call networkDetails vpn
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Infrastructure: the VPN's routes"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "Infrastructure: the VPN's routes"
   elif is '^(show|open)?( me)?( the| my)? ?(network|which network( am i (on|in))?|where am i)$'; then
     # A heading of the dashboard's infrastructure tab.
     shell_call dashboardTab infra
     shell_call infraSection network
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Infrastructure: network"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "Infrastructure: network"
   elif is '(dashboard|what needs me)$'; then
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "Dashboard"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "Dashboard"
   elif is '^lock( the)?( screen| computer| desktop)?$'; then
     did "Locking"
     desktop-power lock >/dev/null 2>&1
@@ -675,7 +675,7 @@ interpret() { # the sentence
     [[ $heading == technology ]] && heading=tech
     shell_call dashboardTab news
     shell_call newsSection "$heading"
-    hyprctl dispatch workspace 6 >/dev/null 2>&1 && did "News: $heading"
+    hyprctl dispatch "hl.dsp.focus({ workspace = 6 })" >/dev/null 2>&1 && did "News: $heading"
   elif is '^(read|whats|what is)( me)?( the)?( new| latest)?( on| from| in)?( the)? ?(.*)(headlines|news)$|^whats new (on|at|from) (.+)$'; then
     headlines "$(sed -E 's/^(read|whats|what is)( me)?( the)?( new| latest)?( on| from| in| at)?( the)? ?//; s/ ?(headlines|news)$//' <<<"$said")"
   elif is '(cluster|clusters)( status| health)?$|in trouble$'; then
@@ -726,7 +726,7 @@ interpret() { # the sentence
     local name=${BASH_REMATCH[3]} address
     address=$(window_named "$name")
     if [[ -n $address ]]; then
-      hyprctl dispatch focuswindow "address:$address" >/dev/null 2>&1 && did "$name"
+      hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null 2>&1 && did "$name"
     else
       # "Show ..." and "open ..." begin a great many sentences that are not about a window.
       second_try "$heard" "No window called “$name”"

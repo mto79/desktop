@@ -865,7 +865,7 @@ Popup {
       sublabel: "Every device, the Wi-Fi around, and a radar of who is near"
       onClicked: {
         root.close();
-        Quickshell.execDetached(["bash", "-c", "desktop-shell shell dashboardTab infra; desktop-shell shell infraSection network; hyprctl dispatch workspace 6"]);
+        Quickshell.execDetached(["bash", "-c", "desktop-shell shell dashboardTab infra; desktop-shell shell infraSection network; hyprctl dispatch 'hl.dsp.focus({ workspace = 6 })'"]);
       }
     }
 
