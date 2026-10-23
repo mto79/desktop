@@ -52,6 +52,11 @@ Commit messages follow Conventional Commits and explain **why**, not what — th
 already says what. Look at recent history for the register; it is closer to prose than
 to changelog lines.
 
+Every change the desktop's behaviour shows gets a line in `CHANGELOG.md`, under the
+current month and in the **same commit** — Added, Changed or Fixed, said in terms of what
+the desktop now does rather than which files moved. A pure refactor, a test or a doc
+fix does not need one.
+
 Run `./test/all` before finishing. It is plain bash, needs no compositor, and takes a
 second; every check in it exists because something once broke. Add a case when you fix a
 bug — that is what stops it coming back.
