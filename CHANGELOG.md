@@ -78,6 +78,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The tmux session and tab menus, prefix + s and prefix + S, in the desktop theme's
+  colours again: tmux 3.8 drew them in a palette of its own.
 - ClamAV has virus signatures again, kept current by a timer: Fedora 44 renamed the
   package that fetches them, so the scanner was installed with nothing to match. The
   security check warns when they are missing or more than a week old.

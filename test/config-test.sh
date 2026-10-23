@@ -57,6 +57,16 @@ else
   fail "tmux passes a copy made inside an AI column on to the clipboard" "set-clipboard is not on"
 fi
 
+# tmux 3.8 writes its default styles in its own theme colours (menu-selected-style is
+# bg=themeyellow), and at the default theme detect those are tmux's palette rather than the
+# terminal's: the prefix + S menu came up in a yellow no desktop theme has. At terminal
+# they are the ANSI colours again, which Ghostty takes from the desktop theme.
+if grep -qE '^set -gq? theme terminal$' "$ROOT/config/tmux/tmux.conf"; then
+  pass "tmux draws its own defaults in the terminal's colours"
+else
+  fail "tmux draws its own defaults in the terminal's colours" "theme is not terminal"
+fi
+
 # The agent marks on tmux tabs take their colours from the theme. A theme without them draws
 # the waiting mark in the tab's ordinary colour, which is to say not noticeably at all -- and
 # nothing reports that, so it is checked here.
