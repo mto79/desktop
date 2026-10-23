@@ -348,6 +348,37 @@ check_hardening() {
   fi
 }
 
+# A scanner with no signatures passes every file it is given, and says nothing about
+# why -- which is how this machine ran with an empty /var/lib/clamav after Fedora renamed
+# the package that fetches them. daily is the database that changes, several times a day
+# upstream, so its age is how long freshclam has been failing. Nothing is said when
+# ClamAV is not installed: it is a tool for scanning by hand, not a defence to miss.
+CLAMAV_DB=${CLAMAV_DB:-/var/lib/clamav}
+check_clamav() {
+  command -v clamscan >/dev/null || return
+  local newest=0 file stamp days
+  for file in "$CLAMAV_DB"/daily.cld "$CLAMAV_DB"/daily.cvd; do
+    [[ -f $file ]] || continue
+    stamp=$(stat -c %Y "$file")
+    ((stamp > newest)) && newest=$stamp
+  done
+  local fix="sudo dnf install clamav-freshclam, then sudo systemctl enable --now clamav-freshclam-once.timer"
+  if ((newest == 0)); then
+    add clamav-signatures warn "ClamAV has no virus signatures" \
+      "Nothing in $CLAMAV_DB, so a scan passes every file." "$fix"
+    return
+  fi
+  days=$((($(date +%s) - newest) / 86400))
+  fact clamavSignatureDays "$days"
+  if ((days > 7)); then
+    add clamav-signatures warn "ClamAV's signatures are $days days old" \
+      "freshclam has not updated them since $(date -d "@$newest" +%F), so recent malware goes unrecognised." \
+      "systemctl status clamav-freshclam-once.timer, and $fix"
+  else
+    passing clamav-signatures "ClamAV's signatures are current"
+  fi
+}
+
 # --------------------------------------------------------------------------- what changed
 #
 # Each list is compared with the one kept from the last run. New entries are findings
@@ -407,6 +438,7 @@ run_checks() {
   check_processes
   check_logins
   check_hardening
+  check_clamav
   check_changes
 }
 

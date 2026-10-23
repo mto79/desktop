@@ -90,4 +90,22 @@ notify "$(result '["b"]')"
 notify "$(result '["a", "b"]')"
 check "a finding that went away and came back is announced again" test "$(count)" = 3
 
+# ClamAV installed without the package that fetches its signatures: Fedora 44 renamed
+# clamav-update to clamav-freshclam, and the scanner sat beside an empty database.
+printf '#!/usr/bin/env bash\n' >"$sandbox/bin/clamscan"
+chmod +x "$sandbox/bin/clamscan"
+CLAMAV_DB=$sandbox/clamav
+mkdir -p "$CLAMAV_DB"
+clamav() { findings=() passed=(); check_clamav; jq -r .id <<<"${findings[0]:-${passed[0]:-\{\}}}"; }
+check "a scanner with no signatures is a finding" test "$(clamav)" = clamav-signatures
+check "and a warning, not a pass" test "$(jq -r .level <<<"${findings[0]}")" = warn
+touch -d '-1 day' "$CLAMAV_DB/daily.cld"
+check "signatures fetched yesterday pass" test "$(jq -r .title <<<"$(findings=() passed=(); check_clamav; echo "${passed[0]}")")" = "ClamAV's signatures are current"
+touch -d '-30 days' "$CLAMAV_DB/daily.cld"
+check "a month without updates is a finding" grep -q "30 days old" <<<"$(findings=() passed=(); check_clamav; echo "${findings[0]}")"
+touch -d '-2 days' "$CLAMAV_DB/daily.cvd"
+check "the newer of the two databases is the one that counts" test -z "$(findings=() passed=(); check_clamav; echo "${findings[@]}")"
+mkdir -p "$sandbox/no-clamav"
+check "without ClamAV installed, nothing is said" test -z "$(findings=() passed=(); PATH=$sandbox/no-clamav check_clamav; echo "${findings[@]}${passed[@]}")"
+
 finish

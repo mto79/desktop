@@ -43,6 +43,13 @@ Findings have a level: `bad` (act on it), `warn` (worth a look), `info` (context
 notified). Some checks are about change: the first run records startup items, setuid
 files and shell profiles, and later runs report what was added.
 
+ClamAV is there for scanning by hand -- `clamscan -ri ~/Downloads`, a USB stick, a file
+on its way to someone on Windows -- and not on access, which would keep about a gigabyte
+of signatures in memory for malware written mostly for other systems. Its signatures
+come from `clamav-freshclam` on `clamav-freshclam-once.timer`. The check warns when
+they are missing or more than a week old, since a scanner with nothing to match passes
+every file without saying why.
+
 `desktop-reboot-check` answers a different question: will this machine come back up? It
 runs after every update.
 

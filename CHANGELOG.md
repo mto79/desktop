@@ -76,6 +76,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- ClamAV has virus signatures again, kept current by a timer: Fedora 44 renamed the
+  package that fetches them, so the scanner was installed with nothing to match. The
+  security check warns when they are missing or more than a week old.
 - A stuck built-in camera can no longer take every audio device down with it: WirePlumber
   leaves libcamera out, and the USB webcams still come through V4L2.
 - opencode starts again when its renderer dies, back into the same conversation.
