@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `desktop-tmux-fresh`, a clean slate in tmux: every session closed, and nothing left for
+  the next login to restore.
 - A phone on the bar in place of the cable when the wired link is a phone tethering over
   USB, and the Wi-Fi icon coloured by signal strength, green through to red.
 - An equalizer in place of the media widget's glyph while music plays, from cava, and a
@@ -67,6 +69,8 @@ Add a line under the current month in the same commit as the change it describes
   Screenshots, toggles, agents waiting and the rest go when their toast does.
 - The tmux keys list, prefix + ?, has a Closing section: the tab or pane, the window,
   the session, and the whole server.
+- tmux no longer loads TPM, which had no plugins to manage: tmux-resurrect and tmux-yank
+  were listed but never installed. A migration removes the copy of TPM.
 - Hyprland reads its Lua configuration, ahead of 0.57, which reads nothing else. The
   scripts, the bar and hypridle speak the Lua dispatchers; a session must be started
   again for the switch, and until then they are refused.

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# desktop-tmux-fresh: close every tmux session and forget them, for a clean slate.
+#
+#   desktop-tmux-fresh      # asks first
+#   desktop-tmux-fresh -y   # does not
+#
+# Killing the server alone is not a clean slate: desktop-tmux-restore keeps a picture of
+# what was open, and the next login builds all of it again. So the picture goes too.
+# Nothing outside tmux is touched -- worktrees, tasks and the agents' own conversations
+# are where they were, and come back the next time something opens them.
+
+set -uo pipefail
+
+SNAPSHOT="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/tmux/last.json"
+
+forget() {
+  # Before the kill as well as after: a save the hooks asked for a moment ago may be
+  # waiting out its few seconds. Once the server is gone it finds nothing to save and
+  # leaves the file alone, so what is removed here stays removed.
+  rm -f "$SNAPSHOT"
+  tmux kill-server 2>/dev/null
+  rm -f "$SNAPSHOT"
+}
+
+if [[ ${1:-} == --now ]]; then
+  forget
+  exit 0
+fi
+
+if [[ ${1:-} != -y ]]; then
+  sessions=$(tmux list-sessions 2>/dev/null | wc -l)
+  read -r -p "Close all $sessions tmux sessions and forget them? [y/N] " answer
+  [[ $answer == [yY]* ]] || exit 1
+fi
+
+# Run from inside tmux, this shell is one of the panes about to go, and would be killed
+# halfway. The work is handed to a process of its own that outlives it.
+if [[ -n ${TMUX:-} ]]; then
+  setsid -f "$0" --now </dev/null >/dev/null 2>&1
+  exit 0
+fi
+forget

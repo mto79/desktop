@@ -35,6 +35,15 @@ holds tabs too, through `desktop-terminal-tabs`.
 `desktop-tmux-restore` writes down what is open and rebuilds it at login, because a tmux
 server does not survive a reboot.
 
+`desktop-tmux-fresh` is the way out of that: it closes every session and deletes the
+snapshot, so the next tmux starts empty and the next login restores nothing. It asks
+first, unless given `-y`, and it works from inside tmux. Worktrees, tasks and the agents'
+conversations are left alone.
+
+tmux.conf loads no plugins. TPM used to run at the end of it, for tmux-resurrect and
+tmux-yank, but neither was ever installed. `desktop-tmux-restore` does resurrect's job,
+and `set-clipboard on` does yank's.
+
 ## What an agent is doing
 
 `desktop-agent-hooks` merges hooks into Claude Code's `settings.json`. Each hook event
