@@ -84,6 +84,13 @@ Audio runs on PipeWire and WirePlumber. The audio panel binds to Quickshell's ow
 service. `desktop-cmd-audio-switch` cycles outputs and keeps the mute state;
 `desktop-launch-audio` opens `wiremix`.
 
+WirePlumber does not load libcamera (`config/wireplumber/wireplumber.conf.d/50-no-libcamera.conf`).
+It owns every audio device, and libcamera inside it has taken them all down: once by
+aborting on the NVIDIA GPU, once by hanging in the kernel on the built-in IPU6 camera
+after a hub replug, after which a USB sound card plugged in later never became an
+output. The USB webcams (a C920, a UGREEN 4K) still come through V4L2; the built-in
+camera is no longer offered through PipeWire.
+
 ## Bluetooth
 
 A connected device's battery shows beside the Bluetooth icon on the bar, the lowest one

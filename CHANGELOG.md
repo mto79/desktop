@@ -76,6 +76,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A stuck built-in camera can no longer take every audio device down with it: WirePlumber
+  leaves libcamera out, and the USB webcams still come through V4L2.
 - opencode starts again when its renderer dies, back into the same conversation.
 - Starship no longer warns about a slow directory scan when a terminal starts cold.
 - The VPN voice model shows as available whenever the VPN is up, whatever mode is chosen.
