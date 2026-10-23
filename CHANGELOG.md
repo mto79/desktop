@@ -63,6 +63,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- The notification centre keeps only reviews waiting on you, Teams and the chat.
+  Screenshots, toggles, agents waiting and the rest go when their toast does.
 - Hyprland reads its Lua configuration, ahead of 0.57, which reads nothing else. The
   scripts, the bar and hypridle speak the Lua dispatchers; a session must be started
   again for the switch, and until then they are refused.

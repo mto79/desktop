@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Services.Notifications
 import qs.Commons
 import qs.Ui
+import "kept.js" as Kept
 
 // Notification toasts, in place of mako.
 //
@@ -92,18 +93,39 @@ Item {
     value: server.trackedNotifications ? server.trackedNotifications.values : []
   }
 
-  // --- not worth keeping --------------------------------------------------------------------
+  // --- worth keeping ------------------------------------------------------------------------
   //
-  // Some notifications are only news while they are on screen. What a sender marks
-  // transient is one kind. The coding agents' are another: "waiting for you" and "finished"
-  // are already on the bar, on the agent's tab and in the AI panel for as long as they are
-  // true, and stop being true the moment you look -- kept here they were a pile of fifteen
-  // stale lines saying an agent had been waiting, hours after it was answered.
-  // notifications.forget in shell.json names the applications; these are the default.
-  readonly property var forget: (config && config.forget) ? config.forget : ["Claude Code"]
+  // Most notifications are only news while they are on screen: a screenshot saved, a
+  // setting toggled, an agent waiting -- which the bar, the agent's tab and the AI panel
+  // already say for as long as it is true. Kept, they buried the few that are messages
+  // from people and still want an answer after the toast has gone: a review waiting, and
+  // the chats. So the centre keeps only senders on a list, and everything else leaves with
+  // its toast. notifications.remember in shell.json replaces the list: application names,
+  // and for a web app the site it is on. The chat's site is read from chat.conf rather
+  // than written here, because this repository is public (see desktop-launch-chat).
+  readonly property var remember: {
+    var list = (config && config.remember) ? config.remember.slice() : ["GitHub", "GitLab", "Forgejo", "Codeberg", "teams.microsoft.com", "teams.cloud.microsoft"];
+    if (chatHost !== "")
+      list.push(chatHost);
+    return list;
+  }
+  property string chatHost: ""
+  // The saved list is filtered by the rule as it is read, so it waits for this: read
+  // before the chat's site is known, every chat message in it would be dropped.
+  property bool chatRead: false
+
+  FileView {
+    path: Quickshell.env("HOME") + "/.config/desktop/chat.conf"
+    printErrors: false
+    onLoaded: {
+      root.chatHost = Kept.chatHost(text());
+      root.chatRead = true;
+    }
+    onLoadFailed: root.chatRead = true
+  }
 
   function passing(notification) {
-    return notification.transient === true || forget.indexOf(String(notification.appName || "")) !== -1;
+    return notification.transient === true || !Kept.kept(notification.appName, notification.body, Kept.browser(notification.desktopEntry), remember);
   }
 
   // --- kept across a restart ---------------------------------------------------------------
@@ -119,7 +141,7 @@ Item {
   property bool storeRead: false
 
   FileView {
-    path: root.storePath
+    path: root.chatRead ? root.storePath : ""
     printErrors: false
 
     onLoaded: {
@@ -128,7 +150,7 @@ Item {
         if (Array.isArray(entries))
           // Without what would not be kept today: the rule may be newer than the file.
           Inbox.past = entries.filter(function (entry) {
-            return root.forget.indexOf(String(entry.app || "")) === -1;
+            return Kept.kept(entry.app, entry.body, Kept.browser(entry.app), root.remember);
           }).slice(-root.keep);
       } catch (error) {
         // A half-written or hand-edited file is no reason to start without notifications.
@@ -353,29 +375,8 @@ Item {
     // so the header read "Brave" for every tab that has ever asked for permission, and
     // the one thing identifying the sender was buried in the first line of the body.
     // Lift it out: the origin becomes the sender, and the body keeps only the message.
-    readonly property bool fromBrowser: {
-      var entry = String(notification.desktopEntry || "").toLowerCase();
-      return entry.indexOf("brave") !== -1 || entry.indexOf("chrom") !== -1 || entry.indexOf("firefox") !== -1;
-    }
-
-    // Split only on something that looks like a host: one line, no spaces, at least one
-    // dot, followed by a blank line. A body that merely opens with a short sentence is
-    // left alone.
-    readonly property var originSplit: {
-      if (!fromBrowser)
-        return null;
-      var body = String(notification.body || "");
-      var brk = body.indexOf("\n\n");
-      if (brk <= 0)
-        return null;
-      var head = body.slice(0, brk).trim();
-      if (head === "" || head.indexOf(" ") !== -1 || head.indexOf(".") === -1)
-        return null;
-      return {
-        origin: head,
-        rest: body.slice(brk + 2).trim()
-      };
-    }
+    readonly property bool fromBrowser: Kept.browser(notification.desktopEntry)
+    readonly property var originSplit: fromBrowser ? Kept.originSplit(notification.body) : null
 
     // notify-send reports itself as the app unless it is given --app-name, and no desktop-*
     // script gives one, so the header over most toasts read "notify-send". A sender that

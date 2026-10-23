@@ -144,6 +144,21 @@ ever played, and it is the link that goes inactive when a stream is quiet.
 Dimming a whole module, which the AI widget does when an agent waits, means "look here"
 and is kept for that.
 
+## Notifications
+
+Every notification gets a toast, but the notification centre behind the bell keeps only
+messages that still want an answer once the toast has gone: a review waiting on GitHub,
+GitLab, Forgejo or Codeberg (from `desktop-reviews`), and Teams and the chat. Everything
+else, such as a screenshot saved or an agent waiting, goes when its toast does. The rule
+is in `shell/Notifications/kept.js`. It matches an application's name, or for a browser
+notification the site named on the first line of the body. The chat's site comes from
+`CHAT_URL` in `~/.config/desktop/chat.conf`, so it never appears in the repository.
+`notifications.remember` in `shell.json` replaces the built-in list, and the chat's site
+is still added to it.
+
+What the centre keeps is saved to `~/.local/state/desktop/notifications.json` and read
+back on restart, filtered by the same rule.
+
 ## Music
 
 While a player plays, the media widget's glyph becomes an equalizer: a dozen bars, bass

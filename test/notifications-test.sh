@@ -93,16 +93,43 @@ check "and is not offered an action its sender is no longer waiting for" \
 check "the bell counts both" grep -q 'readonly property int count: all.length + past.length' "$INBOX"
 check "clearing clears both" test "$(grep -c 'Inbox.forgetAll()' "$QML" "$PANEL" | cut -d: -f2 | paste -sd+ | bc)" -ge 2
 
-# --- not worth keeping
-# An agent waiting or finished is on the bar, its tab and the AI panel for as long as it is
-# true. Kept in the centre they were stale lines, hours after the agent had been answered.
-check "the coding agents' notifications are not kept" \
-  grep -q 'config.forget : \["Claude Code"\]' "$QML"
-check "they leave with their toast, like what a sender marks transient" \
+# --- worth keeping
+# The centre kept everything, and a screenshot saved or an agent waiting buried the few
+# messages still wanting an answer once their toast was gone. It keeps only a list now:
+# reviews by forge, and the chats by the site they are on.
+KEPT="$ROOT/shell/Notifications/kept.js"
+if command -v node >/dev/null; then
+  kept() {
+    node -e "
+      const k = require('$KEPT');
+      console.log(k.kept($1, $2, $3, ['GitLab', 'teams.microsoft.com', 'chat.example.com']));"
+  }
+  check "a review is kept" test "$(kept '"GitLab"' '"!12 waits for you"' false)" = true
+  check "a screenshot is not" test "$(kept '"satty"' '"Copied to clipboard"' false)" = false
+  check "nor what notify-send sends unnamed" test "$(kept '"notify-send"' '"Screenshot saved"' false)" = false
+  check "nor a coding agent waiting" test "$(kept '"Claude Code"' '"waiting for you"' false)" = false
+  check "a chat message is kept by its site" \
+    test "$(kept '"Brave"' '"chat.example.com\n\n@someone: hi"' true)" = true
+  check "a Teams message too" test "$(kept '"Brave"' '"teams.microsoft.com\n\nhi"' true)" = true
+  check "another site in the same browser is not" \
+    test "$(kept '"Brave"' '"news.example.org\n\nbreaking"' true)" = false
+  check "nor a browser notification without a site" test "$(kept '"Brave"' '"hi"' true)" = false
+  check "the site matches whatever case it comes in" \
+    test "$(kept '"Brave"' '"Chat.Example.com\n\nhi"' true)" = true
+
+  host() { node -e "console.log(require('$KEPT').chatHost(process.argv[1]))" "$1"; }
+  check "the chat's site is read from chat.conf" test "$(host 'CHAT_URL="https://chat.example.com/team"')" = chat.example.com
+  check "with a port" test "$(host "CHAT_URL='https://chat.example.com:8065'")" = chat.example.com
+  check "and none is none" test -z "$(host '# CHAT_URL="https://chat.example.com"')"
+fi
+
+check "it leaves with its toast, like what a sender marks transient" \
   grep -q 'if (root.passing(due\[d\]))' "$QML"
-check "and are not written down for after a restart" grep -q 'if (!root.passing(all\[i\]))' "$QML"
+check "and is not written down for after a restart" grep -q 'if (!root.passing(all\[i\]))' "$QML"
 check "ones kept before the rule existed are dropped when the file is read" \
-  test -n "$(sed -n '/onLoaded: {/,/root.storeRead = true/p' "$QML" | grep 'root.forget.indexOf(String(entry.app')"
-check "the agent hook sends under the name the rule knows" \
-  grep -q -- '--app-name="Claude Code"' "$ROOT/bin/desktop-agent-state"
+  test -n "$(sed -n '/onLoaded: {/,/root.storeRead = true/p' "$QML" | grep 'Kept.kept(entry.app')"
+# Read before chat.conf, the saved list would be filtered without the chat's site, and
+# every chat message in it dropped at each restart.
+check "the saved list is read only once the chat's site is known" \
+  grep -q 'path: root.chatRead ? root.storePath : ""' "$QML"
 finish
