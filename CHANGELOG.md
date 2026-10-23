@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A phone on the bar in place of the cable when the wired link is a phone tethering over
+  USB, and the Wi-Fi icon coloured by signal strength, green through to red.
 - An equalizer in place of the media widget's glyph while music plays, from cava, and a
   card under the bar when a new track starts: the cover, the track, and the artist's
   albums from MusicBrainz with the one playing lit. cava is installed.
