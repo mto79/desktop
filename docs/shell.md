@@ -159,6 +159,26 @@ is still added to it.
 What the centre keeps is saved to `~/.local/state/desktop/notifications.json` and read
 back on restart, filtered by the same rule.
 
+## Keeping the screen on
+
+hypridle starts the screensaver after 15 minutes, locks after 17.5 and turns the screen
+off after 18. During a call that is wrong: you are listening, not typing. `Awake`
+(`shell/Commons/Awake.qml`) keeps the screen on while a microphone is recording, while
+the screen is shared, and while you hold it by hand. Every bar carries a Quickshell
+`IdleInhibitor` bound to it, and hypridle honours it.
+
+The coffee cup among the toggles lights up while the screen is being kept on, and its
+tooltip says why. Clicking it, or `SUPER + CTRL + I` (`desktop-toggle-idle`), holds the
+screen on or lets it go again. A hold is not kept across a restart of the shell. When the
+shell is not running, `desktop-toggle-idle` stops or starts hypridle instead, as it
+always did.
+
+    desktop-shell shell awake          # "on: a microphone is recording", or "off"
+    desktop-shell shell toggleAwake    # "held" or "released"
+
+A recording only counts when it is not from a speaker's monitor. `cava`, which draws the
+music equalizer, records what the speakers play, and that is not a call.
+
 ## Music
 
 While a player plays, the media widget's glyph becomes an equalizer: a dozen bars, bass

@@ -186,8 +186,8 @@ check "a muted microphone does not look as if it is listening" grep -q 'lively: 
 # in a browser. Both now ask which links are carrying sound, and of what kind of stream.
 SOUND="$ROOT/shell/Commons/Sound.qml"
 check "the speaker lights for any stream that is playing" grep -q 'playing: flowing(groups, "source", PwNodeType.AudioOutStream)' "$SOUND"
-check "the microphone for any stream that is recording" grep -q 'recording: flowing(groups, "target", PwNodeType.AudioInStream)' "$SOUND"
-check "a stream gone quiet is not sound" grep -q 'group.state === PwLinkState.Active' "$SOUND"
+check "the microphone for any stream that is recording" grep -q 'recording: flowing(groups, "target", PwNodeType.AudioInStream' "$SOUND"
+check "a stream gone quiet is not sound" grep -q 'group.state !== PwLinkState.Active' "$SOUND"
 check "the links are tracked, or their state is never known" grep -q 'objects: root.groups' "$SOUND"
 check "both widgets ask it" grep -q 'Sound.playing' "$ROOT/shell/Bar/widgets/Audio.qml"
 check "  the microphone too" grep -q 'Sound.recording' "$ROOT/shell/Bar/widgets/Microphone.qml"

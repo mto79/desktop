@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
 
+# desktop-toggle-idle: keep the screen on, or let it sleep again. SUPER + CTRL + I.
+#
+# The shell holds the screen awake with an idle inhibitor, which hypridle honours, and
+# shows it on the bar -- the coffee cup -- so a hold is never forgotten. The shell does
+# that on its own during a call or a screen share; this is for any other time.
+#
+# Without the shell (the waybar fallback) there is nothing to hold an inhibitor, and the
+# old way is the only one: hypridle itself is stopped and started again.
+
+case $(desktop-shell shell toggleAwake 2>/dev/null) in
+held) exit 0 ;;
+released) exit 0 ;;
+esac
+
 if pgrep -x hypridle >/dev/null; then
   pkill -x hypridle
   notify-send "Stop locking computer when idle"

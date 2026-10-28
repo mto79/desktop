@@ -186,6 +186,18 @@ ShellRoot {
       notifications.dismissAll();
     }
 
+    // Keep the screen on, or stop: what desktop-toggle-idle asks. Answers "held" or
+    // "released". The screen stays on through a call or a share either way.
+    function toggleAwake(): string {
+      Awake.held = !Awake.held;
+      return Awake.held ? "held" : "released";
+    }
+
+    // "on: a microphone is recording", or "off".
+    function awake(): string {
+      return Awake.active ? "on: " + Awake.reason : "off";
+    }
+
     // Answers with the new state, and says so on screen through the OSD -- a toast
     // confirming that toasts are now silenced would be a poor way to find out.
     function toggleDoNotDisturb(): string {

@@ -12,3 +12,4 @@ singleton Speech 1.0 Speech.qml
 singleton Sound 1.0 Sound.qml
 singleton Sharing 1.0 Sharing.qml
 singleton Scans 1.0 Scans.qml
+singleton Awake 1.0 Awake.qml

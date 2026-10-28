@@ -4,7 +4,8 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Screen recording and dictation, as buttons rather than as indicators.
+// Screen recording, dictation, meeting capture and keeping the screen on, as buttons
+// rather than as indicators.
 //
 // Omarchy's bar keeps a cluster of manual-state toggles in its centre: they light up
 // when the mode is on and otherwise stay out of the way, revealed by hovering the bar.
@@ -342,6 +343,20 @@ BarWidget {
       panelId: "capture"
 
       onAlternate: root.launch(["desktop-meeting-capture", "toggle"])
+    }
+
+    Toggle {
+      // A cup of coffee: the screen is being kept on. Lit on its own during a call or a
+      // screen share, which is when it matters and when nobody would think to ask for it,
+      // and by a click for anything else -- a long read, a build to watch.
+      icon: "\u{f0176}"
+      active: Awake.active
+      tone: Color.barAccent
+      tip: Awake.active ? "Screen stays on: " + Awake.reason + (Awake.held ? "  ·  click to let it sleep" : "  ·  click to keep it on after that too") : "Screen sleeps when idle  ·  click to keep it on"
+      shortcut: Shortcuts.forExec("desktop-toggle-idle")
+
+      onTriggered: Awake.held = !Awake.held
+      onAlternate: Awake.held = !Awake.held
     }
   }
 }

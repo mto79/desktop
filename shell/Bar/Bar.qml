@@ -232,6 +232,14 @@ Item {
     WlrLayershell.namespace: "desktop-bar"
     WlrLayershell.layer: WlrLayer.Top
 
+    // Keeps the session from going idle while Awake says so. On every bar rather than one:
+    // the compositor honours an inhibitor only while its window is on a screen, and one
+    // monitor may be off or unplugged. They all follow the same flag.
+    IdleInhibitor {
+      window: barWindow
+      enabled: Awake.active
+    }
+
     // Ignoring the exclusion zone while hidden lets tiled windows reclaim the space.
     exclusionMode: root.barHidden ? ExclusionMode.Ignore : ExclusionMode.Auto
 

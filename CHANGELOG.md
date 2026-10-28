@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- The screen stays on during a call or a screen share, shown by a coffee cup on the bar.
+  Clicking the cup, or `SUPER + CTRL + I`, keeps the screen on at any other time.
 - kubeseal, for sealing Kubernetes secrets so they can be committed: 0.40.0, checked
   against a checksum written into the install script.
 - `desktop-tmux-fresh`, a clean slate in tmux: every session closed, and nothing left for
@@ -88,6 +90,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The microphone no longer reads as in use while music plays: the equalizer's recording
+  of the speakers was counted as a microphone.
 - The tmux session and tab menus, prefix + s and prefix + S, in the desktop theme's
   colours again: tmux 3.8 drew them in a palette of its own.
 - ClamAV has virus signatures again, kept current by a timer: Fedora 44 renamed the

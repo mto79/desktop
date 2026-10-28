@@ -14,13 +14,18 @@ import Quickshell.Services.Pipewire
 Singleton {
   id: root
 
-  // Is there an active link with a stream of this kind at that end of it?
-  function flowing(groups, end, kind) {
+  // Is there an active link with a stream of this kind at that end of it? With
+  // `notFromSink`, one whose other end is not a sink, which is how a recording of what
+  // the speakers play looks.
+  function flowing(groups, end, kind, notFromSink) {
     for (var i = 0; i < groups.length; i++) {
       var group = groups[i];
       var node = group ? group[end] : null;
-      if (group && group.state === PwLinkState.Active && node && node.type === kind)
-        return true;
+      if (!group || group.state !== PwLinkState.Active || !node || node.type !== kind)
+        continue;
+      if (notFromSink && group.source && group.source.isSink)
+        continue;
+      return true;
     }
     return false;
   }
@@ -29,7 +34,11 @@ Singleton {
   // A playback stream sends; a recording stream takes. Matching the exact type leaves out
   // the Bluetooth headset's own internal capture stream, and video.
   readonly property bool playing: flowing(groups, "source", PwNodeType.AudioOutStream)
-  readonly property bool recording: flowing(groups, "target", PwNodeType.AudioInStream)
+  // From a microphone, that is. cava, which draws the media widget's equalizer, records
+  // too -- from the speakers' monitor -- so while music played the microphone read as in
+  // use. Not "from an AudioSource" instead: a noise-suppressing or echo-cancelling
+  // microphone is an Audio/Source/Virtual node, which Quickshell gives no type at all.
+  readonly property bool recording: flowing(groups, "target", PwNodeType.AudioInStream, true)
 
   // Untracked, a link reads state -1 and a node type 0.
   PwObjectTracker {
