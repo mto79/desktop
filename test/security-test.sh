@@ -108,4 +108,12 @@ check "the newer of the two databases is the one that counts" test -z "$(finding
 mkdir -p "$sandbox/no-clamav"
 check "without ClamAV installed, nothing is said" test -z "$(findings=() passed=(); PATH=$sandbox/no-clamav check_clamav; echo "${findings[@]}${passed[@]}")"
 
+# Any program of yours could read the memory of any other -- the browser, KeePassXC, the
+# SSH agent -- and kernel addresses were there for the asking. Fedora leaves both open.
+HARDENING="$ROOT/default/sysctl/90-desktop-hardening.conf"
+check "ptrace is limited to a process's own children" grep -qx 'kernel.yama.ptrace_scope = 1' "$HARDENING"
+check "kernel addresses are hidden" grep -qx 'kernel.kptr_restrict = 1' "$HARDENING"
+check "the install puts the settings in place" grep -q 'default/sysctl/90-desktop-hardening.conf" /etc/sysctl.d/' "$ROOT/install/config/security.sh"
+check "and applies them without waiting for a reboot" grep -q 'sysctl -q -p /etc/sysctl.d/90-desktop-hardening.conf' "$ROOT/install/config/security.sh"
+
 finish

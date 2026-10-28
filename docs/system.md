@@ -50,6 +50,13 @@ come from `clamav-freshclam` on `clamav-freshclam-once.timer`. The check warns w
 they are missing or more than a week old, since a scanner with nothing to match passes
 every file without saying why.
 
+Two kernel settings Fedora leaves open are closed, from
+`default/sysctl/90-desktop-hardening.conf` in `/etc/sysctl.d`. `ptrace_scope = 1` limits
+tracing to a process's own children, so no program of yours can read another's memory.
+`gdb ./prog` and `strace cmd` still work, but attaching to a running process (`gdb -p`,
+`strace -p`, py-spy) needs sudo. `kptr_restrict = 1` hides kernel addresses, so `perf`
+run as yourself shows no kernel symbols.
+
 `desktop-reboot-check` answers a different question: will this machine come back up? It
 runs after every update.
 

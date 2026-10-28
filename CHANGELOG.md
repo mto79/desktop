@@ -69,6 +69,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- No program can read another's memory any more unless it started it, and kernel
+  addresses are hidden. Attaching a debugger to a running program now needs sudo.
 - The notification centre keeps only reviews waiting on you, Teams and the chat.
   Screenshots, toggles, agents waiting and the rest go when their toast does.
 - The tmux keys list, prefix + ?, has a Closing section: the tab or pane, the window,

@@ -8,6 +8,11 @@ systemctl --user enable --now desktop-security-check.timer
 # admin password for -- a fingerprint prompt every fifteen minutes. Reading only.
 sudo install -m 0644 "$DESKTOP_PATH/default/polkit/49-desktop-firewall-read.rules" /etc/polkit-1/rules.d/
 
+# No program of yours reading another's memory, and no kernel addresses for the asking.
+# What each setting costs is in the file. Applied now as well as at the next boot.
+sudo install -m 0644 "$DESKTOP_PATH/default/sysctl/90-desktop-hardening.conf" /etc/sysctl.d/
+sudo sysctl -q -p /etc/sysctl.d/90-desktop-hardening.conf
+
 # No SSH logins to a laptop nobody logs in to remotely. sshd listens on every interface the
 # machine has, the VPN's included, and Fedora's default firewall zone admits it, so unused
 # it is only a way in. Off, with the socket unit that would start it again on the first
