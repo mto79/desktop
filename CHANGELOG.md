@@ -90,6 +90,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- `dnf upgrade` no longer stops on three NVIDIA conflicts: RPM Fusion nonfree offered
+  newer copies of three of NVIDIA's own driver packages, which the rest of the driver
+  could not go with. NVIDIA's repository is now the only source of the driver.
 - The microphone no longer reads as in use while music plays: the equalizer's recording
   of the speakers was counted as a microphone.
 - The tmux session and tab menus, prefix + s and prefix + S, in the desktop theme's

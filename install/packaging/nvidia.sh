@@ -101,6 +101,23 @@ gpgcheck=1
 gpgkey=${REPO_KEYS}
 EOF
 
+# RPM Fusion nonfree packages the same driver under some of the same names --
+# nvidia-modprobe, nvidia-persistenced, nvidia-settings -- with the same epoch, and is
+# often a point release ahead of NVIDIA. dnf then upgrades those three from RPM Fusion
+# while NVIDIA's own nvidia-driver and nvidia-kmod-common require them at exactly their
+# version, and every update ends in "cannot install both" for each. RPM Fusion nonfree is
+# on this machine for other things (intel-media-driver), so it stays, without its NVIDIA
+# packages. setopt writes to /etc/dnf/repos.override.d, which a reinstall of
+# rpmfusion-nonfree-release does not touch. A repository enabled after this has run is
+# not covered; the migration that does the same, and test/install-test.sh, are.
+exclude_rpmfusion_nvidia() {
+  local repo
+  for repo in $(dnf repolist --all 2>/dev/null | awk '$1 ~ /^rpmfusion-nonfree/ {print $1}'); do
+    sudo dnf config-manager setopt "${repo}.excludepkgs=*nvidia*"
+  done
+}
+exclude_rpmfusion_nvidia
+
 # The module is built by DKMS against the running kernel, so its headers have to be
 # present before the driver package is unpacked. kernel-devel-matched keeps them in step
 # with the kernel across later updates.

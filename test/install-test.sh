@@ -315,4 +315,24 @@ if [[ -f $cuda_repo ]] && have curl && have rpm; then
 else
   pass "skipped, no CUDA repo or no curl on this machine"
 fi
+
+# Two repositories for one driver. RPM Fusion nonfree packages nvidia-modprobe,
+# nvidia-persistenced and nvidia-settings under the same names and epoch as NVIDIA, a
+# point release ahead; dnf took those three from it while NVIDIA's driver required its
+# own version of each, and every update ended in "cannot install both".
+check "nvidia.sh keeps RPM Fusion's NVIDIA packages out" grep -q 'excludepkgs=\*nvidia\*' "$ROOT/install/packaging/nvidia.sh"
+if [[ -f $cuda_repo ]] && have dnf; then
+  unexcluded=()
+  for repo in $(dnf repolist --enabled 2>/dev/null | awk '$1 ~ /^rpmfusion-nonfree/ {print $1}'); do
+    awk -v repo="[$repo]" '$0 == repo {in_repo = 1; next} /^\[/ {in_repo = 0}
+      in_repo && /^excludepkgs=.*\*nvidia\*/ {found = 1} END {exit !found}' \
+      /etc/dnf/repos.override.d/*.repo 2>/dev/null || unexcluded+=("$repo")
+  done
+  if ((${#unexcluded[@]} == 0)); then
+    pass "no enabled RPM Fusion nonfree repository offers NVIDIA packages beside NVIDIA's own"
+  else
+    fail "no enabled RPM Fusion nonfree repository offers NVIDIA packages beside NVIDIA's own" \
+      "${unexcluded[*]}: run the newest migration, or install/packaging/nvidia.sh"
+  fi
+fi
 finish
