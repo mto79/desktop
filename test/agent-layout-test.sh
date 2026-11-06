@@ -103,9 +103,9 @@ check "the column has a bar across its top" \
   test "$(tm show-options -wqv -t "=$session:" pane-border-status)" = top
 check "naming the model and where its agent works" test "$(top "=$session:")" = " claude work "
 check "with what the model has burned on the right" \
-  grep -q 'align=right\] .*#(desktop-agent-tokens --tmux-status --agent #{@ai_model})' <<<"$topbar"
+  grep -q 'align=right\] .*#(desktop-tmux-cached 30 desktop-agent-tokens --tmux-status --agent #{@ai_model})' <<<"$topbar"
 check "led, for claude alone, by how full its limits are" \
-  grep -qF '#{?#{==:#{@ai_model},claude},#(desktop-status-claude --tmux-status),}' <<<"$topbar"
+  grep -qF '#{?#{==:#{@ai_model},claude},#(desktop-tmux-cached 30 desktop-status-claude --tmux-status),}' <<<"$topbar"
 check "the bar above the windows is left the session's name" \
   grep -qx 'set -g status-left " #S "' "$ROOT/config/tmux/tmux.conf"
 tabname=$(grep -oP '^set -g @agent-tab-name "\K.*(?="$)' "$ROOT/config/tmux/tmux.conf")

@@ -86,6 +86,12 @@ restarted and gets the notification.
 `desktop-agent-tokens` counts tokens per local day per agent from what each one leaves on
 disk. `desktop-status-claude` reports Claude Code's usage limits.
 
+Both are on the top bar of each AI column, behind `desktop-tmux-cached 30`. tmux runs a
+`#()` once per client per `status-interval`, so with a dozen tabs attached the two Python
+scripts started ten times a second and took two cores to print the same line. The wrapper
+runs each at most once in thirty seconds and answers every other call from
+`$XDG_RUNTIME_DIR/desktop-tmux-cached/`, with nothing but bash builtins.
+
 ## Tasks in worktrees
 
 Two agents on two changes in one checkout trample each other's files. `desktop-worktree`

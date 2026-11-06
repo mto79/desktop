@@ -15,6 +15,11 @@ Add a line under the current month in the same commit as the change it describes
 - The tmux sidebar is on from the start, in every window; prefix + e still closes it, and
   reloading tmux.conf no longer matters to it.
 
+### Fixed
+
+- The AI columns' top bars no longer cost two cores: their limits and token counts are
+  worked out once every thirty seconds, not once per attached tab every five.
+
 ## 2026-10
 
 ### Added

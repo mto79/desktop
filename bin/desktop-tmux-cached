@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# desktop-tmux-cached <seconds> <command> [args...]
+#
+# Print what <command> printed, running it at most once every <seconds> however often it
+# is asked. For the #() jobs on the AI columns' top bar: tmux runs those once per client per
+# status-interval, and with a dozen agent tabs attached that was a Python start ten times a
+# second -- two cores, all to print the same limits and token counts every time.
+#
+# Builtins only on the fresh path, since that is nearly every call. The answer is kept in
+# the runtime directory with the time it was made on its first line. When it is stale one
+# caller makes it again, behind a lock; the rest print the stale one rather than all
+# starting the command at once.
+
+set -u
+
+ttl=${1:?seconds}
+shift
+(($#)) || exit 2
+
+dir=${XDG_RUNTIME_DIR:-/tmp}/desktop-tmux-cached
+key="$*"
+key=${key//[^A-Za-z0-9._-]/_}
+file=$dir/$key
+printf -v now '%(%s)T' -1
+
+stamp=0
+body=
+if [[ -r $file ]]; then
+  { read -r stamp && body=$(cat); } <"$file" 2>/dev/null || stamp=0
+  [[ $stamp =~ ^[0-9]+$ ]] || stamp=0
+fi
+
+if ((now - stamp < ttl)); then
+  printf '%s' "$body"
+  exit 0
+fi
+
+[[ -d $dir ]] || mkdir -p "$dir"
+lock=$file.lock
+# A lock left by a run that was killed is taken over once it is more than a minute older
+# than the ttl, which no run that is still going should be.
+if ! mkdir "$lock" 2>/dev/null; then
+  if [[ -n $(find "$lock" -maxdepth 0 -mmin +$((ttl / 60 + 1)) 2>/dev/null) ]]; then
+    rmdir "$lock" 2>/dev/null
+    mkdir "$lock" 2>/dev/null || { printf '%s' "$body"; exit 0; }
+  else
+    printf '%s' "$body"
+    exit 0
+  fi
+fi
+trap 'rmdir "$lock" 2>/dev/null' EXIT
+
+body=$("$@")
+status=$?
+# A failed run is not kept, so the next call tries again rather than showing nothing for
+# the whole ttl.
+if ((status == 0)); then
+  printf '%s\n%s' "$now" "$body" >"$file.$$" && mv -f "$file.$$" "$file"
+fi
+printf '%s' "$body"
