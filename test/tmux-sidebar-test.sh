@@ -91,6 +91,8 @@ elif sys.argv[2] == "attach":
     sidebar.attach("alpha:2")
 elif sys.argv[2] == "toggle":
     sidebar.toggle()
+elif sys.argv[2] == "on":
+    sidebar.on()
 DRIVER
 
 drive() {
@@ -142,6 +144,14 @@ check "in a slot of its own, so the tabs' hooks on the same event survive" \
   lacks 'set-hook -g after-new-window ' "$sandbox/did"
 
 touch "$sandbox/on"
+: >"$sandbox/did"
+drive on >/dev/null
+check "--on, as a tmux.conf reload runs it, leaves open columns open" \
+  lacks 'kill-pane' "$sandbox/did"
+check "and still hooks new windows" grep -q 'set-hook -g after-new-window\[50\] ' "$sandbox/did"
+check "tmux.conf turns it on as the server starts" \
+  grep -q '^run-shell "desktop-tmux-sidebar --on"' "$ROOT/config/tmux/tmux.conf"
+
 : >"$sandbox/did"
 drive attach >/dev/null
 check "a window that has a column is not given a second" lacks 'split-window' "$sandbox/did"

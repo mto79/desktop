@@ -3,6 +3,7 @@
 """A column down the left of every tmux window: the sessions, their windows, their agents.
 
     desktop-tmux-sidebar --toggle          # prefix + e: on or off, everywhere at once
+    desktop-tmux-sidebar --on              # on, and left on if it is; tmux.conf runs it
     desktop-tmux-sidebar                   # the column itself; the toggle runs this
     desktop-tmux-sidebar --attach <window> # give one window a column (the new-window hook)
 
@@ -293,6 +294,15 @@ def toggle():
         for event in HOOKS:
             tmux("set-hook", "-gu", event)
         return
+    on()
+
+
+def on():
+    """A column in every window and every new one; again changes nothing.
+
+    tmux.conf runs this as the server starts, and again on every reload, which is why it
+    is not the toggle: a reload must leave the columns open rather than close them.
+    """
     # In a slot of their own, so turning the sidebar off leaves any other hook on the
     # same event -- the tabs use several -- exactly as it was.
     hook = f"run-shell -b '{sys.argv[0]} --attach \"#{{hook_window}}\"'"
@@ -306,6 +316,8 @@ if __name__ == "__main__":
     argument = sys.argv[1] if len(sys.argv) > 1 else ""
     if argument == "--toggle":
         toggle()
+    elif argument == "--on":
+        on()
     elif argument == "--attach":
         attach(sys.argv[2] if len(sys.argv) > 2 else "")
     else:

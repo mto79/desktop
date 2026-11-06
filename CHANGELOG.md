@@ -8,6 +8,13 @@ them.
 
 Add a line under the current month in the same commit as the change it describes.
 
+## 2026-11
+
+### Changed
+
+- The tmux sidebar is on from the start, in every window; prefix + e still closes it, and
+  reloading tmux.conf no longer matters to it.
+
 ## 2026-10
 
 ### Added
