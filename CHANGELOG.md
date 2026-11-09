@@ -12,6 +12,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- conftest, which tests Kubernetes manifests, Terraform plans and other configuration
+  against Rego policies: 0.71.1, checked against a checksum written into the install script.
+- tflint, the Terraform and OpenTofu linter: 0.65.0, checked against a checksum written
+  into the install script.
 - Live aircraft on the Security tab's globe: zoomed in to a region, positions from
   adsb.lol every ten seconds instead of OpenSky's five minutes. And NASA EONET's natural
   events going on now, such as wildfires, storms, volcanoes and sea ice, as a layer of their own.
@@ -68,6 +72,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- geteduroam, for setting up eduroam from your institution's profile: 0.15, checked against
+  a checksum written into the install script, with a daily warning before the profile expires.
 - NCSC-NL's security advisories on the dashboard's Security tab, with their rating, a filter
   for those naming something installed here, and a dot on the tab for a recent high/high.
 - A Security tab on the dashboard. Posture shows what `desktop-security` found. Events runs

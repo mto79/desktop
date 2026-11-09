@@ -316,6 +316,13 @@ else
   pass "skipped, no CUDA repo or no curl on this machine"
 fi
 
+# geteduroam's RPM is unsigned, so the checksum is all that says it is the real one. dnf is
+# told not to look for a signature, which is only safe after the file has been checked.
+GETEDUROAM="$ROOT/install/packaging/geteduroam.sh"
+check "geteduroam is pinned to a checksum" grep -qE '^GETEDUROAM_SHA256="[0-9a-f]{64}"$' "$GETEDUROAM"
+check "which is checked before dnf is told to skip the signature" \
+  test "$(grep -n 'sha256sum --check' "$GETEDUROAM" | cut -d: -f1)" -lt "$(grep -n -- '--nogpgcheck' "$GETEDUROAM" | cut -d: -f1)"
+
 # Two repositories for one driver. RPM Fusion nonfree packages nvidia-modprobe,
 # nvidia-persistenced and nvidia-settings under the same names and epoch as NVIDIA, a
 # point release ahead; dnf took those three from it while NVIDIA's driver required its
