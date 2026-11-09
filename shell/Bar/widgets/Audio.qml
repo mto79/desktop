@@ -8,8 +8,9 @@ BarItem {
   id: root
 
   readonly property PwNode sink: Pipewire.defaultAudioSink
-  readonly property bool muted: sink && sink.audio ? sink.audio.muted : false
-  readonly property int volume: sink && sink.audio ? Math.round(sink.audio.volume * 100) : 0
+  // From Levels, not from the node: Quickshell's copy goes stale when a headset reconnects.
+  readonly property bool muted: sink ? Levels.sinkMuted : false
+  readonly property int volume: sink ? Math.round(Levels.sinkVolume * 100) : 0
 
   readonly property var icons: ["", "", "", ""]
   readonly property string icon: {
@@ -45,7 +46,7 @@ BarItem {
   function step(delta) {
     if (!sink || !sink.audio)
       return;
-    sink.audio.volume = Math.min(1.0, Math.max(0.0, sink.audio.volume + delta));
+    sink.audio.volume = Math.min(1.0, Math.max(0.0, Levels.sinkVolume + delta));
   }
 
   onScrolledUp: step(0.05)

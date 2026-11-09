@@ -29,7 +29,7 @@ Popup {
 
   readonly property PwNode source: Pipewire.defaultAudioSource
   readonly property PwNode sink: Pipewire.defaultAudioSink
-  readonly property bool micMuted: source && source.audio ? source.audio.muted : false
+  readonly property bool micMuted: source ? Levels.sourceMuted : false
 
   // Everything else playing to the speakers, which the monitor side records too.
   property var others: []
@@ -175,7 +175,7 @@ Popup {
       accentColor: Color.popupUrgent
       // One click to fix the thing it warns about.
       onClicked: if (root.micMuted && root.source && root.source.audio)
-        root.source.audio.muted = false
+        Levels.unmuteSource()
     }
 
     PanelRow {

@@ -65,6 +65,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The bar, the audio and microphone panels and the volume overlay no longer show a
+  Bluetooth headset as muted after it drops and reconnects: they ask PipeWire what is true
+  instead of trusting a copy that went stale, and the mute buttons work on the real state.
 - A tmux window no longer gets two or three session sidebars when its session opens: the
   hooks that fire together now take turns, and a window that already has a spare loses it.
   A new session's first window gets its sidebar even when a second window opens at once.

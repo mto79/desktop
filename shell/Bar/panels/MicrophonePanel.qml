@@ -18,8 +18,9 @@ Popup {
 
   readonly property PwNode source: Pipewire.defaultAudioSource
 
-  readonly property int volume: source && source.audio ? Math.round(source.audio.volume * 100) : 0
-  readonly property bool muted: source && source.audio ? source.audio.muted : false
+  // From Levels, not from the node: Quickshell's copy goes stale when a headset reconnects.
+  readonly property int volume: source ? Math.round(Levels.sourceVolume * 100) : 0
+  readonly property bool muted: source ? Levels.sourceMuted : false
 
   // Debounced snapshot, for the reason the sound panel gives.
   property var sources: []
@@ -147,7 +148,7 @@ Popup {
       iconClickable: true
       // The icon is the mute button, as it is on the bar.
       onIconClicked: if (root.source && root.source.audio)
-        root.source.audio.muted = !root.source.audio.muted
+        Levels.toggleSourceMute()
     }
 
     Item {
@@ -161,7 +162,7 @@ Popup {
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
         enabled: !!root.source
-        value: root.source && root.source.audio ? root.source.audio.volume : 0
+        value: root.source ? Levels.sourceVolume : 0
         fillColor: root.muted ? Color.popupMuted : Color.popupAccent
         onMoved: v => {
           if (root.source && root.source.audio)

@@ -67,29 +67,31 @@ Item {
   // does not survive every way this file gets edited.
   readonly property var volumeIcons: ["\uf026", "\uf027", "\uf027", "\uf028"]
 
+  // The numbers come from Levels rather than from the nodes: Quickshell's copy of them
+  // goes stale when a headset reconnects.
   function showVolume() {
-    if (!ready || !sink || !sink.audio)
+    if (!ready || !sink || !Levels.sinkKnown)
       return;
-    var percent = Math.round(sink.audio.volume * 100);
+    var percent = Math.round(Levels.sinkVolume * 100);
     var icon = "\u{f075f}";
-    if (!sink.audio.muted)
+    if (!Levels.sinkMuted)
       icon = volumeIcons[Math.min(3, Math.max(0, Math.floor(percent / 34)))];
-    present(icon, sink.audio.muted ? 0 : sink.audio.volume, sink.audio.muted ? "muted" : percent + "%");
+    present(icon, Levels.sinkMuted ? 0 : Levels.sinkVolume, Levels.sinkMuted ? "muted" : percent + "%");
   }
 
   function showMic() {
-    if (!ready || !source || !source.audio)
+    if (!ready || !source || !Levels.sourceKnown)
       return;
-    var percent = Math.round(source.audio.volume * 100);
-    present(source.audio.muted ? "\u{f036d}" : "\uf130", source.audio.muted ? 0 : source.audio.volume, source.audio.muted ? "muted" : percent + "%");
+    var percent = Math.round(Levels.sourceVolume * 100);
+    present(Levels.sourceMuted ? "\u{f036d}" : "\uf130", Levels.sourceMuted ? 0 : Levels.sourceVolume, Levels.sourceMuted ? "muted" : percent + "%");
   }
 
   // Watched as bound values rather than through Connections on the node's own signals:
   // a property binding cannot be wrong about what the notify signal is called, and this
   // is the part that has to fire for the overlay to exist at all.
-  readonly property real sinkVolume: (sink && sink.audio) ? sink.audio.volume : 0
-  readonly property bool sinkMuted: (sink && sink.audio) ? sink.audio.muted : false
-  readonly property bool sourceMuted: (source && source.audio) ? source.audio.muted : false
+  readonly property real sinkVolume: Levels.sinkVolume
+  readonly property bool sinkMuted: Levels.sinkMuted
+  readonly property bool sourceMuted: Levels.sourceMuted
 
   onSinkVolumeChanged: showVolume()
   onSinkMutedChanged: showVolume()

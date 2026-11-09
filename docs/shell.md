@@ -141,6 +141,14 @@ The speaker and the microphone ask `Sound` (`shell/Commons/Sound.qml`), which lo
 PipeWire's links rather than at its streams: a browser keeps a stream for every tab that
 ever played, and it is the link that goes inactive when a stream is quiet.
 
+Their volume and mute come from `Levels` (`shell/Commons/Levels.qml`), and so do the audio
+and microphone panels' and the overlay's: not from Quickshell's `audio.muted` and
+`audio.volume`. Quickshell keeps its own copy of those and does not ask again after a
+Bluetooth device drops and comes back, so a reconnected headset read as muted for hours.
+`Levels` runs one `pactl subscribe`, and on each change to a device or to the default asks
+`wpctl get-volume` what is true now. Mute buttons go through `wpctl set-mute` for the same
+reason: flipping a stale copy sets the mute it already has.
+
 Dimming a whole module, which the AI widget does when an agent waits, means "look here"
 and is kept for that.
 

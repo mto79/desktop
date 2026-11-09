@@ -92,6 +92,7 @@ plocate
 plymouth
 plymouth-plugin-*
 power-profiles-daemon
+pulseaudio-utils
 remmina
 rhtlc
 ruby

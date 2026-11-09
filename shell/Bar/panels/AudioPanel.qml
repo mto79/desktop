@@ -28,8 +28,10 @@ Popup {
 
   readonly property PwNode sink: Pipewire.defaultAudioSink
 
-  readonly property int volume: sink && sink.audio ? Math.round(sink.audio.volume * 100) : 0
-  readonly property bool muted: sink && sink.audio ? sink.audio.muted : false
+  // The default output's own volume and mute come from Levels: Quickshell's copy of them
+  // goes stale when a headset reconnects.
+  readonly property int volume: sink ? Math.round(Levels.sinkVolume * 100) : 0
+  readonly property bool muted: sink ? Levels.sinkMuted : false
 
   // Live PipeWire model -> debounced snapshot. PipeWire can remove a node while
   // Quickshell is still dispatching the removal signal; rebuilding a Repeater from
@@ -246,8 +248,8 @@ Popup {
       struck: root.muted
       iconClickable: true
       // The icon is the mute button, as it is on the bar.
-      onIconClicked: if (root.sink && root.sink.audio)
-        root.sink.audio.muted = !root.sink.audio.muted
+      onIconClicked: if (root.sink)
+        Levels.toggleSinkMute()
     }
 
     Item {
@@ -261,7 +263,7 @@ Popup {
         anchors.rightMargin: 6
         anchors.verticalCenter: parent.verticalCenter
         enabled: !!root.sink
-        value: root.sink && root.sink.audio ? root.sink.audio.volume : 0
+        value: root.sink ? Levels.sinkVolume : 0
         fillColor: root.muted ? Color.popupMuted : Color.popupAccent
         onMoved: v => {
           if (root.sink && root.sink.audio)

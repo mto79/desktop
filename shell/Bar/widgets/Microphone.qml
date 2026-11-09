@@ -14,8 +14,9 @@ BarItem {
   id: root
 
   readonly property PwNode source: Pipewire.defaultAudioSource
-  readonly property bool muted: source && source.audio ? source.audio.muted : false
-  readonly property int volume: source && source.audio ? Math.round(source.audio.volume * 100) : 0
+  // From Levels, not from the node: Quickshell's copy goes stale when a headset reconnects.
+  readonly property bool muted: source ? Levels.sourceMuted : false
+  readonly property int volume: source ? Math.round(Levels.sourceVolume * 100) : 0
 
   PwObjectTracker {
     objects: root.source ? [root.source] : []
@@ -47,7 +48,7 @@ BarItem {
   function step(delta) {
     if (!source || !source.audio)
       return;
-    source.audio.volume = Math.min(1.0, Math.max(0.0, source.audio.volume + delta));
+    source.audio.volume = Math.min(1.0, Math.max(0.0, Levels.sourceVolume + delta));
   }
 
   onScrolledUp: step(0.05)
