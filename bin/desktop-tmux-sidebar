@@ -58,6 +58,7 @@ A column that is not being looked at asks tmux nothing: only the ones on screen 
 """
 
 import curses
+import fcntl
 import importlib.machinery
 import importlib.util
 import json
@@ -748,12 +749,30 @@ def inside_a_pane(window):
 
 
 def attach(window):
-    """Open a sidebar down the left of one window, unless it has one already."""
+    """Open a sidebar down the left of one window, unless it has one already.
+
+    One at a time, behind a lock. A new session fires after-new-window, client-attached
+    and session-window-changed at once, each starting an attach of its own; unlocked,
+    each looked, found no column yet, and split one, and the window ended up with two
+    or three. A window that already has more than one -- from before the lock -- keeps
+    the first and loses the rest.
+    """
     if inside_a_pane(window):
         tmux("set-option", "-wq", "-t", window, HELD, "1")
         return
-    held = tmux("list-panes", "-t", window, "-F", "#{@sidebar}")
-    if "1" in held.splitlines():
+    path = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp",
+                        f"desktop-tmux-sidebar-{os.getuid()}.lock")
+    with open(path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        attach_locked(window)
+
+
+def attach_locked(window):
+    listing = tmux("list-panes", "-t", window, "-F", "#{pane_id}\t#{@sidebar}")
+    held = [line.split("\t")[0] for line in listing.splitlines() if line.endswith("\t1")]
+    for extra in held[1:]:
+        tmux("kill-pane", "-t", extra)
+    if held:
         tmux("set-option", "-wq", "-t", window, HELD, "1")
         return
     # -f so the column is the height of the window rather than of whichever pane is
@@ -787,7 +806,12 @@ def on():
     """
     # In a slot of their own, so turning the sidebar off leaves any other hook on the
     # same event -- the tabs use several -- exactly as it was.
-    hook = f"run-shell -b '{sys.argv[0]} --attach \"#{{hook_window}}\"'"
+    # A new session's hook has no #{hook_window} -- nor #{hook_session} -- but its own
+    # #{session_name} is the new session. Given the empty one the attach took whichever
+    # window was current, which a second window opened at once had already become, so
+    # the first went without. By name, as an id's $ would meet the shell.
+    target = "#{?hook_window,#{hook_window},#{session_name}:^}"
+    hook = f"run-shell -b '{sys.argv[0]} --attach \"{target}\"'"
     for event in HOOKS:
         tmux("set-hook", "-g", event, hook)
     looked_at = (f"if -F '#{{{HELD}}}' '' "

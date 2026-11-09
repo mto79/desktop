@@ -66,8 +66,10 @@ case "$args" in
   [[ -e $SANDBOX/on ]] && printf '%%1\t1\n%%2\t\n%%3\t1\n'
   ;;
 *list-panes*)
-  [[ -e $SANDBOX/on ]] && echo 1
-  echo
+  # A window's panes: its column first, if open, and a second one if a race left two.
+  [[ -e $SANDBOX/on ]] && printf '%%5\t1\n'
+  [[ -e $SANDBOX/twice ]] && printf '%%6\t1\n'
+  printf '%%7\t\n'
   ;;
 *list-clients*) echo "1790000000 /dev/pts/9" ;;
 *split-window*) echo "%9" ;;
@@ -313,6 +315,8 @@ check "and each window it opens one in is marked" grep -q 'set-option -wq -t alp
 check "new windows get one too" grep -q 'set-hook -g after-new-window\[50\] ' "$sandbox/did"
 check "in a slot of its own, so the tabs' hooks on the same event survive" \
   lacks 'set-hook -g after-new-window ' "$sandbox/did"
+check "a new session's names the session, since it has no window to name" \
+  grep -q 'set-hook -g after-new-session\[50\] .*#{?hook_window,#{hook_window},#{session_name}:^}' "$sandbox/did"
 
 touch "$sandbox/on"
 : >"$sandbox/did"
@@ -332,6 +336,14 @@ drive attach >/dev/null
 check "a window that has a column is not given a second" lacks 'split-window' "$sandbox/did"
 check "and is marked as having one, so looking at it again asks nothing" \
   grep -q 'set-option -wq -t alpha:2 @sidebar_held 1' "$sandbox/did"
+
+touch "$sandbox/twice"
+: >"$sandbox/did"
+drive attach >/dev/null
+check "a window that ended up with two columns keeps the first" lacks 'kill-pane -t %5' "$sandbox/did"
+check "and loses the second" grep -q 'kill-pane -t %6' "$sandbox/did"
+check "and gains none" lacks 'split-window' "$sandbox/did"
+rm "$sandbox/twice"
 
 : >"$sandbox/did"
 drive toggle >/dev/null

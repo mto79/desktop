@@ -65,6 +65,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A tmux window no longer gets two or three session sidebars when its session opens: the
+  hooks that fire together now take turns, and a window that already has a spare loses it.
+  A new session's first window gets its sidebar even when a second window opens at once.
 - The tmux sidebar is in every window after a login, not only the few made after it: a
   window built before it had room gets its column the first time it is looked at.
 - The tmux sidebar (prefix + e) opens once, down the left of the window, instead of a
