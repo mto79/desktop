@@ -6,6 +6,9 @@
 #   desktop-netscan scan --sweep    send a ping to every address, even where it is not yours
 #   desktop-netscan last            the last answer again, without looking
 #
+# Each scan is compared with the last one of the same network by desktop-scan-changes,
+# which keeps the log of what came and went: `desktop-scan-changes show net`.
+#
 # Two ways of looking. The quiet one sends nothing: it reads what the kernel already knows
 # of its neighbours (`ip neigh`), what devices announce of themselves over mDNS, and the
 # Wi-Fi networks NetworkManager hears. The sweep pings every address of the subnet as well,
@@ -227,6 +230,18 @@ def scan(sweep_asked):
     return answer
 
 
+def changes(answer):
+    """What came and went since the last scan, from desktop-scan-changes, which also keeps the
+    log. Asked before this answer replaces the last one, since that is what it compares with.
+    A failure there is no reason to lose the scan."""
+    try:
+        out = subprocess.run(["desktop-scan-changes", "record", "net"], input=json.dumps(answer),
+                             capture_output=True, text=True, timeout=10).stdout
+        return json.loads(out)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "scan"
     if command == "last":
@@ -240,6 +255,7 @@ def main():
         print("usage: desktop-netscan scan [--sweep] | last", file=sys.stderr)
         sys.exit(2)
     answer = scan("--sweep" in sys.argv[2:])
+    answer["changes"] = changes(answer)
     text = json.dumps(answer, separators=(",", ":"))
     os.makedirs(STATE, mode=0o700, exist_ok=True)
     fd = os.open(LAST + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

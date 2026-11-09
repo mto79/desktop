@@ -16,6 +16,43 @@ Singleton {
 
   property var network: null
   property var bluetooth: null
+  // What came and went, newest first, from desktop-scan-changes: [{at, event, label, ...}].
+  property var networkLog: []
+  property var bluetoothLog: []
+
+  function readLog(which) {
+    var proc = which === "net" ? netLog : btLog;
+    if (!proc.running)
+      proc.running = true;
+  }
+
+  function events(text) {
+    try {
+      return JSON.parse(text).events || [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  Process {
+    id: netLog
+
+    running: true
+    command: ["desktop-scan-changes", "show", "net"]
+    stdout: StdioCollector {
+      onStreamFinished: root.networkLog = root.events(text)
+    }
+  }
+
+  Process {
+    id: btLog
+
+    running: true
+    command: ["desktop-scan-changes", "show", "bt"]
+    stdout: StdioCollector {
+      onStreamFinished: root.bluetoothLog = root.events(text)
+    }
+  }
   readonly property bool scanningNetwork: netProc.running
   readonly property bool scanningBluetooth: btProc.running
 
@@ -52,6 +89,7 @@ Singleton {
         var value = root.parse(text);
         if (value)
           root.network = value;
+        root.readLog("net");
       }
     }
   }
@@ -65,6 +103,7 @@ Singleton {
         var value = root.parse(text);
         if (value)
           root.bluetooth = value;
+        root.readLog("bt");
       }
     }
   }

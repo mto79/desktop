@@ -86,6 +86,16 @@ from the IEEE list in `hwdata` (a private, per-network MAC is said to be one), i
 name and services, reverse DNS and latency. This machine's other links in the subnet are
 this machine, not strangers.
 
+Each scan is compared with the last one of the same network by `desktop-scan-changes`,
+which logs every device that is **new** (never seen on this network), **back** (seen
+before, missing from the last scan) or **gone** (in the last scan, not in this one). The
+dashboard shows that log under the radar, and `desktop-scan-changes show net` prints it.
+A quiet scan and a sweep see different things, so the two are not compared: "gone" needs a
+scan at least as thorough as the last, and "back" needs a last scan as thorough as this
+one. A device heard only by name is matched by its IP to the MAC it had before. The first
+scan of a network only records. The log stays in `~/.local/state/desktop/netscan`, readable
+by you alone, at most 1000 lines.
+
 ## Storage
 
 `desktop-storage-details` lists filesystems and snapshots and what fills them.
@@ -132,6 +142,9 @@ manufacturer data it sends, what an Apple device is doing (AirPods, Find My, an 
 nearby), its services, battery and pairing. Phones and watches announce themselves under
 random addresses that change every few minutes, so one phone can show twice. It is the
 dashboard's Infrastructure, Bluetooth heading, or "what Bluetooth devices are near".
+What came and went between listens is logged the same way (`desktop-scan-changes show bt`),
+leaving out devices with a random address: each change of a phone's address would
+otherwise be one device gone and another new.
 
 ## Power and battery
 

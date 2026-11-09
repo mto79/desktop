@@ -5,6 +5,9 @@
 #   desktop-btscan scan [seconds]   listen for that long (default 12); one JSON object
 #   desktop-btscan last             the last answer again, without listening
 #
+# What came and went since the last time is logged by desktop-scan-changes:
+# `desktop-scan-changes show bt`.
+#
 # A scan is the adapter's own discovery, the same the Bluetooth panel starts: it listens
 # for what devices announce and asks nothing of them, and it stops when the time is up.
 # Bluetooth that is off is left off -- the answer then says so.
@@ -206,6 +209,18 @@ def scan(seconds):
     return answer
 
 
+def changes(answer):
+    """What came and went since the last scan, from desktop-scan-changes, which also keeps the
+    log. Asked before this answer replaces the last one, since that is what it compares with.
+    A failure there is no reason to lose the scan."""
+    try:
+        out = subprocess.run(["desktop-scan-changes", "record", "bt"], input=json.dumps(answer),
+                             capture_output=True, text=True, timeout=10).stdout
+        return json.loads(out)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
 def main():
     command = sys.argv[1] if len(sys.argv) > 1 else "scan"
     if command == "last":
@@ -219,7 +234,9 @@ def main():
         print("usage: desktop-btscan scan [seconds] | last", file=sys.stderr)
         sys.exit(2)
     seconds = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 12
-    text = json.dumps(scan(max(3, min(seconds, 60))), separators=(",", ":"))
+    answer = scan(max(3, min(seconds, 60)))
+    answer["changes"] = changes(answer)
+    text = json.dumps(answer, separators=(",", ":"))
     os.makedirs(STATE, mode=0o700, exist_ok=True)
     fd = os.open(LAST + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:

@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A log of what came and went on the network and over Bluetooth: each scan says which
+  devices are new, back or gone since the last one, and the dashboard keeps the history
+  under each radar.
 - prefix + N in tmux goes straight to the agent needing you most -- waiting longest, then a
   finished turn not yet read, then a stuck one -- and on to the next when pressed again.
 - p in the tmux sidebar shows an agent's screen in a popup, where its prompt can be answered

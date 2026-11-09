@@ -1056,6 +1056,16 @@ ColumnLayout {
     }
   }
 
+  ChangesCard {
+    visible: page.heading === "network"
+    appear: page.active && page.heading === "network"
+    Layout.fillWidth: true
+    order: 3
+    events: Scans.networkLog
+    latest: page.scan ? page.scan.changes || null : null
+    nothing: "Nothing has come or gone yet. Each scan is compared with the last one of the same network."
+  }
+
   Card {
     visible: page.heading === "network" && !!page.scan && !!page.scan.wifi && page.scan.wifi.length > 0
     appear: page.active && page.heading === "network"
@@ -1220,5 +1230,15 @@ ColumnLayout {
         }
       }
     }
+  }
+
+  ChangesCard {
+    visible: page.heading === "bluetooth"
+    appear: page.active && page.heading === "bluetooth"
+    Layout.fillWidth: true
+    order: 1
+    events: Scans.bluetoothLog
+    latest: page.blue ? page.blue.changes || null : null
+    nothing: "Nothing has come or gone yet. Devices with a random address, which phones change every few minutes, are left out."
   }
 }

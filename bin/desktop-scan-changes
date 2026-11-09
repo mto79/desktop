@@ -1,0 +1,206 @@
+#!/usr/bin/env python3
+
+"""What came and went between one network or Bluetooth scan and the next, kept as a log.
+
+    desktop-scan-changes record net|bt    the new scan's answer on stdin; prints what changed
+    desktop-scan-changes show net|bt      the log, newest first, as JSON
+
+desktop-netscan and desktop-btscan each call `record` with the answer they are about to
+keep, and put what it prints into that answer as "changes". A device is:
+
+    new    never seen before, on this network
+    back   seen before, but not in the last scan
+    gone   in the last scan, not in this one
+
+A network scan is compared only with earlier scans of the same network, and a device is
+"gone" only if this scan looked at least as hard as the last, and "back" only if the last
+looked as hard as this one: a quiet scan reads only what the kernel already knew, so it
+misses what a sweep finds, and that is neither a departure nor a return. The first
+scan of a network is recorded without a word -- every device in it would otherwise be "new".
+
+Bluetooth devices with a random address are left out. Phones change that address every few
+minutes on purpose, and each change would be one "gone" and one "new" of the same phone.
+
+What is kept is a list of the devices around you, so it lives beside the scans in
+~/.local/state/desktop, readable by you alone, and the log keeps only its last 1000 lines.
+"""
+
+import json
+import os
+import sys
+import time
+
+STATE_ROOT = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")), "desktop")
+DIRS = {"net": "netscan", "bt": "btscan"}
+KEEP = 1000
+
+
+def paths(which):
+    folder = os.path.join(STATE_ROOT, DIRS[which])
+    return folder, os.path.join(folder, "last.json"), os.path.join(folder, "known.json"), os.path.join(folder, "changes.jsonl")
+
+
+def load(path, empty):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return empty
+
+
+def write_private(path, text):
+    fd = os.open(path + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(path + ".new", path)
+
+
+# --- what a device is called, and which network a scan was of
+
+
+def net_scope(answer):
+    if answer.get("place"):
+        return answer["place"]
+    gateway = next((d.get("mac") for d in answer.get("devices", []) if d.get("gateway") and d.get("mac")), "")
+    return gateway or (answer.get("link") or {}).get("cidr", "")
+
+
+def net_devices(answer, macs=None):
+    """Devices by their MAC address. One heard only over mDNS has none yet, and is matched by
+    its IP to a MAC known from elsewhere: otherwise the same speaker is one device in a scan
+    that only heard its name and another in the next one, which also heard its MAC, and
+    each scan reports it gone and new at once."""
+    macs = macs or {}
+    out = {}
+    for d in answer.get("devices", []):
+        if d.get("me"):
+            continue
+        key = d.get("mac") or macs.get(d.get("ip"), "") or d.get("ip")
+        label = d.get("name") or d.get("host") or d.get("rdns") or (d.get("vendor") if d.get("vendor") != "private address" else "") or d.get("ip")
+        detail = "  ·  ".join(x for x in (d.get("ip", ""), d.get("vendor", "")) if x)
+        out[key] = {"label": label, "detail": detail, "ip": d.get("ip", "")}
+    return out
+
+
+def ip_to_mac(*answers, known=None):
+    """Every IP this network has had a MAC for, from these scans and from what is remembered."""
+    macs = {}
+    for key, d in (known or {}).items():
+        if d.get("ip") and ":" in key and not key.count(".") == 3:
+            macs[d["ip"]] = key
+    for answer in answers:
+        for d in answer.get("devices", []):
+            if d.get("mac") and d.get("ip"):
+                macs[d["ip"]] = d["mac"]
+    return macs
+
+
+def bt_devices(answer):
+    out = {}
+    for d in answer.get("devices", []):
+        if d.get("random") or not d.get("near"):
+            continue
+        label = d.get("name") or d.get("doing") or d.get("maker") or d.get("kind") or d["address"]
+        detail = "  ·  ".join(x for x in (d["address"], d.get("kind", ""), d.get("maker", "")) if x)
+        out[d["address"]] = {"label": label, "detail": detail}
+    return out
+
+
+def record(which, answer):
+    folder, last_path, known_path, log_path = paths(which)
+    previous = load(last_path, {})
+    known = load(known_path, {})
+    now = int(answer.get("checked") or time.time())
+    if which == "net":
+        scope = net_scope(answer)
+        same_place = net_scope(previous) == scope
+        macs = ip_to_mac(answer, *([previous] if same_place else []), known=known.get(scope, {}))
+        devices = net_devices(answer, macs)
+        # A quiet scan after a sweep cannot tell gone from not asked, and a sweep after a
+        # quiet scan finds what the quiet one never asked about: that is not "back".
+        looked_as_hard = bool(answer.get("swept")) or not previous.get("swept")
+        last_as_hard = bool(previous.get("swept")) or not answer.get("swept")
+        before = net_devices(previous, macs) if same_place else {}
+    else:
+        scope, devices = "bluetooth", bt_devices(answer)
+        same_place, looked_as_hard, last_as_hard = True, True, True
+        before = bt_devices(previous)
+        if answer.get("powered") is False:
+            return {"new": [], "back": [], "gone": [], "first": False}
+    if not scope:
+        return {"new": [], "back": [], "gone": [], "first": False}
+
+    seen = known.setdefault(scope, {})
+    first = not seen
+    # Remembered by IP before its MAC was known: the same device, under its MAC from now on.
+    for key, d in list(devices.items()):
+        ip = d.get("ip")
+        if ip and key != ip and ip in seen:
+            seen[key] = {**seen.pop(ip), **seen.get(key, {})}
+    changes = {"new": [], "back": [], "gone": [], "first": first}
+    events = []
+    for key, d in devices.items():
+        if key not in seen:
+            kind = "new"
+        elif same_place and previous and last_as_hard and key not in before:
+            kind = "back"
+        else:
+            kind = ""
+        seen.setdefault(key, {"first": now, "label": d["label"]})
+        seen[key].update(last=now, label=d["label"])
+        if d.get("ip"):
+            seen[key]["ip"] = d["ip"]
+        if kind and not first:
+            changes[kind].append({"key": key, **d})
+    if same_place and previous and looked_as_hard and not first:
+        for key, d in before.items():
+            if key not in devices:
+                changes["gone"].append({"key": key, **d})
+    for kind in ("new", "back", "gone"):
+        for d in changes[kind]:
+            events.append({"at": now, "event": kind, "scope": scope, **d})
+
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+    write_private(known_path, json.dumps(known, separators=(",", ":")))
+    if events:
+        try:
+            with open(log_path) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+        lines += [json.dumps(e, separators=(",", ":")) for e in events]
+        write_private(log_path, "\n".join(lines[-KEEP:]) + "\n")
+    return changes
+
+
+def show(which):
+    _, _, _, log_path = paths(which)
+    try:
+        with open(log_path) as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+    events = []
+    for line in reversed(lines):
+        try:
+            events.append(json.loads(line))
+        except ValueError:
+            continue
+    return {"events": events[:300]}
+
+
+def main():
+    if len(sys.argv) != 3 or sys.argv[1] not in ("record", "show") or sys.argv[2] not in DIRS:
+        sys.exit("usage: desktop-scan-changes record|show net|bt")
+    if sys.argv[1] == "show":
+        print(json.dumps(show(sys.argv[2]), separators=(",", ":")))
+        return
+    try:
+        answer = json.load(sys.stdin)
+    except ValueError:
+        answer = {}
+    print(json.dumps(record(sys.argv[2], answer), separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()
