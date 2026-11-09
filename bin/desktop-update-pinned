@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+
+# desktop-update-pinned: which tools pinned in an install script have a newer release.
+#
+#   desktop-update-pinned    # one line per pinned tool; changes nothing, ever
+#
+# argo9s, kubeseal, tea, tflint, conftest, geteduroam and voxtype are installed at a version
+# written into their packaging script, next to the checksum of that exact download. That is on
+# purpose -- a checksum taken when the version was chosen is worth more than one fetched
+# beside the file -- but it means nothing moves them, and nothing said when there was a
+# reason to. This says it, during desktop-update, so a bump is a decision rather than an
+# accident: change the version and checksum in the script, and the next install takes it.
+
+set -uo pipefail
+
+DESKTOP_PATH=${DESKTOP_PATH:-$HOME/.local/share/desktop}
+PACKAGING=${DESKTOP_PINNED_PACKAGING:-$DESKTOP_PATH/install/packaging}
+
+# script, the variable holding its version, and where its releases are announced.
+PINS=(
+  "argo9s ARGO9S_VERSION github:vvrnv/argo9s"
+  "kubeseal KUBESEAL_VERSION github:bitnami-labs/sealed-secrets"
+  "tea TEA_VERSION gitea:gitea/tea"
+  "tflint TFLINT_VERSION github:terraform-linters/tflint"
+  "conftest CONFTEST_VERSION github:open-policy-agent/conftest"
+  "geteduroam GETEDUROAM_VERSION github:geteduroam/linux-app"
+  "voxtype VOXTYPE_RELEASE github:peteonrails/voxtype"
+)
+
+latest() {
+  local url
+  case "$1" in
+  github:*) url="https://api.github.com/repos/${1#github:}/releases/latest" ;;
+  gitea:*) url="https://gitea.com/api/v1/repos/${1#gitea:}/releases/latest" ;;
+  esac
+  curl -fsSL --max-time 20 "$url" 2>/dev/null | jq -r '.tag_name // empty' 2>/dev/null | sed 's/^v//'
+}
+
+echo -e "\e[32m\nCheck pinned tools for newer releases\e[0m"
+
+for pin in "${PINS[@]}"; do
+  read -r name var source <<<"$pin"
+  script="$PACKAGING/$name.sh"
+  pinned=$(sed -n "s/^$var=\"\\{0,1\\}\\([^\"]*\\)\"\\{0,1\\}$/\\1/p" "$script" 2>/dev/null | head -1)
+  [[ -n $pinned ]] || {
+    echo "$name: no $var in ${script##*/}"
+    continue
+  }
+  newest=$(latest "$source")
+  if [[ -z $newest ]]; then
+    echo "$name $pinned: could not ask upstream"
+  elif [[ $newest == "$pinned" ]]; then
+    echo "$name $pinned is the newest"
+  # Only newer counts: a project that pulls a release should not read as an update.
+  elif [[ $(printf '%s\n%s\n' "$pinned" "$newest" | sort -V | tail -1) == "$newest" ]]; then
+    echo -e "\e[33m$name $pinned -> $newest available\e[0m; bump $var in install/packaging/$name.sh"
+  else
+    echo "$name $pinned is newer than upstream's latest ($newest)"
+  fi
+done
+exit 0

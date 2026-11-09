@@ -32,9 +32,35 @@ into it instead and leaves the rest alone.
 
 1. `desktop-update-git` pulls the repository
 2. `desktop-migrate` runs migrations that have not run here
-3. `desktop-update-cargo`, `-oc`, `-flatpak`, `-system-pkgs`, `-firmware`
+3. `desktop-update-cargo`, `-oc`, `-kubectl`, `-releases`, `-npm`, `-flatpak`,
+   `-system-pkgs`, `-secrets`, `-firmware`, `-pinned`
 4. `desktop-update-restart` checks whether the machine would come back up, and offers a
    reboot when one is needed
+
+### Tools that are not packages
+
+Command-line tools from outside Fedora each have an update step, so nothing stays at the
+version the machine was installed with. Every one checks a download against a checksum
+published apart from it before installing, skips with a line rather than failing when
+upstream cannot be reached, and says an update on the desktop. Each takes `--check`,
+which only reports.
+
+| Step | What it keeps current |
+|---|---|
+| `desktop-update-oc` | `oc`, the newest patch of one pinned minor (OpenShift 4.22) |
+| `desktop-update-kubectl` | `kubectl`, the newest patch of 1.35, the Kubernetes under 4.22. Move the two together |
+| `desktop-update-releases` | helm, lazygit and kubie at upstream's newest release; the aws cli through AWS's signed installer. Updates only what is installed; `desktop-update-releases kubie` installs it |
+| `desktop-update-npm` | what `npm i -g` put in `~/.local` (codex, opencode), at `@latest` across majors |
+| `desktop-update-pinned` | nothing: it names argo9s, kubeseal, tea, tflint, conftest, geteduroam and voxtype when there is a newer release than the version pinned in their install script, so a bump is a decision |
+
+The clean-install scripts for oc, kubectl, helm, lazygit and kubie call the same commands,
+so an install and an update cannot disagree about where a tool comes from.
+
+`desktop-update-secrets` changes no software. It keeps the directories tools hold
+credentials in readable by you alone: `~/.config/tofu` (OpenTofu's `.env` files, made when
+tofu is installed), `~/.kube` and its `config`, `~/.aws` and its `credentials`,
+`~/.config/gh` and `~/.config/helm`. A file kept tighter than that is left alone; nothing
+is read.
 
 `desktop-update-available` says what an update would bring without running one; the bar's
 update widget reads it.

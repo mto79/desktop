@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+# desktop-update-npm: the command-line tools installed with `npm i -g` into ~/.local, kept on
+# their newest release.
+#
+#   desktop-update-npm          # update every one that is behind
+#   desktop-update-npm --check  # say which are behind, change nothing
+#
+# codex and opencode come from npm, installed by their packaging scripts into ~/.local and
+# never updated after: dnf does not know them, and neither updates itself reliably once it is
+# off the path it was installed to. Whatever else is in that prefix is updated with them --
+# it got there the same way.
+#
+# Each is installed at @latest, not `npm update -g`, which stays inside the range recorded at
+# install time and so never crosses a major version: these tools move fast and an old major
+# is exactly the one that stops talking to its API.
+
+set -uo pipefail
+
+PREFIX=${DESKTOP_NPM_PREFIX:-$HOME/.local}
+
+echo -e "\e[32m\nUpdate npm tools ($PREFIX)\e[0m"
+
+command -v npm >/dev/null 2>&1 || {
+  echo "no npm; skipped"
+  exit 0
+}
+
+# npm outdated exits 1 when anything is outdated; the JSON is what says so.
+outdated=$(npm outdated -g --json --prefix "$PREFIX" 2>/dev/null)
+[[ -n $outdated ]] || outdated='{}'
+if ! behind=$(jq -r 'to_entries[] | select(.value.current != null and .value.current != .value.latest)
+    | "\(.key)\t\(.value.current)\t\(.value.latest)"' <<<"$outdated" 2>/dev/null); then
+  echo "could not ask npm what is outdated; left as they are"
+  exit 0
+fi
+
+if [[ -z $behind ]]; then
+  echo "all current"
+  exit 0
+fi
+
+while IFS=$'\t' read -r name have want; do
+  echo "$name $have -> $want"
+  [[ ${1:-} == --check ]] && continue
+  if npm i -g --prefix "$PREFIX" --no-fund --no-audit --loglevel=error "$name@$want"; then
+    notify-send -a "Updates" -i software-update-available "$name updated" "$have → $want" 2>/dev/null || true
+  else
+    echo "$name: npm could not install $want; left at $have" >&2
+  fi
+done <<<"$behind"
+exit 0

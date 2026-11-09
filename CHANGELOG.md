@@ -12,6 +12,14 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `~/.config/tofu` for OpenTofu's `.env` files, made owner-only when tofu is installed.
+  Every `desktop-update` now also checks it, `~/.kube`, `~/.aws`, `~/.config/gh` and
+  `~/.config/helm`, and puts back to owner-only whatever other accounts could read.
+- kubectl, helm, lazygit, kubie, the aws cli, codex and opencode are kept current by
+  `desktop-update`, each download checked against its published checksum. kubectl follows
+  1.35's patch releases, matching the clusters oc is pinned for.
+- `desktop-update` names the tools pinned in an install script (kubeseal, voxtype and the
+  rest) that have a newer release, without installing it.
 - conftest, which tests Kubernetes manifests, Terraform plans and other configuration
   against Rego policies: 0.71.1, checked against a checksum written into the install script.
 - tflint, the Terraform and OpenTofu linter: 0.65.0, checked against a checksum written

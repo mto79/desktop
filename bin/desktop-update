@@ -16,9 +16,14 @@ desktop-update-git
 desktop-migrate
 desktop-update-cargo
 desktop-update-oc
+desktop-update-kubectl
+desktop-update-releases
+desktop-update-npm
 desktop-update-flatpak
 desktop-update-system-pkgs
+desktop-update-secrets
 desktop-update-firmware
+desktop-update-pinned
 desktop-update-restart
 
 # The answer desktop-update-available shares between bars is from before this run; it must

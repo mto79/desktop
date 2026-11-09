@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+
+# desktop-update-releases: the command-line tools that come from upstream's own releases,
+# kept on the newest one.
+#
+#   desktop-update-releases             # update every one of them that is installed
+#   desktop-update-releases helm kubie  # these, installing them if they are not there
+#   desktop-update-releases --check     # say what is installed and what is current, change nothing
+#
+# helm, lazygit and kubie are not in Fedora (or not at a version worth having), and each
+# had an install script that fetched "latest" once and nothing ever fetched again: a year
+# on, all three were several releases behind, and kubie's was installed without anything
+# checked at all. The aws cli is the same, through its own installer.
+#
+# These follow upstream's newest release, not a pinned one -- unlike oc and kubectl, none of
+# them has to match a server. Every download is checked against a checksum published apart
+# from it before it is installed: helm's .sha256sum next to the archive, and for the GitHub
+# ones the digest GitHub computed when the asset was uploaded. The aws cli is checked by
+# install/packaging/awscli2.sh against AWS's signing key, pinned there.
+#
+# A tool that cannot be reached is skipped with a line saying so; the update goes on.
+
+set -uo pipefail
+
+DESKTOP_PATH=${DESKTOP_PATH:-$HOME/.local/share/desktop}
+BIN=${DESKTOP_RELEASES_BIN:-/usr/local/bin}
+TOOLS=(helm lazygit kubie aws)
+
+case "$(uname -m)" in
+x86_64) arch=amd64 longarch=x86_64 ;;
+aarch64) arch=arm64 longarch=arm64 ;;
+*) arch="" longarch="" ;;
+esac
+
+# github <owner/repo>: the newest release, as GitHub's API describes it.
+github() {
+  curl -fsSL --max-time 30 -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/$1/releases/latest" 2>/dev/null
+}
+
+# asset <release json> <name pattern>: "url<TAB>sha256" of the one asset matching.
+asset() {
+  jq -r --arg re "$2" '[.assets[] | select(.name | test($re; "i"))][0]
+    | select(. != null) | "\(.browser_download_url)\t\(.digest // "" | sub("^sha256:"; ""))"' <<<"$1"
+}
+
+# Each tool answers three things. have_<tool>: the version installed, or nothing. latest_<tool>:
+# sets want, url, sum and member (the path inside the archive; empty for a bare binary).
+have_helm() { helm version --template '{{.Version}}' 2>/dev/null | sed 's/^v//'; }
+latest_helm() {
+  local tag
+  tag=$(github helm/helm | jq -r '.tag_name // empty') && [[ -n $tag ]] || return 1
+  want=${tag#v}
+  url="https://get.helm.sh/helm-$tag-linux-$arch.tar.gz"
+  sum=$(curl -fsSL --max-time 30 "$url.sha256sum" 2>/dev/null | awk '{ print $1 }')
+  member="linux-$arch/helm"
+}
+
+have_lazygit() { lazygit --version 2>/dev/null | grep -o 'version=[^,]*' | head -1 | cut -d= -f2; }
+latest_lazygit() {
+  local json line
+  json=$(github jesseduffield/lazygit) && [[ -n $json ]] || return 1
+  want=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
+  line=$(asset "$json" "_linux_${longarch}\\.tar\\.gz$")
+  url=${line%%$'\t'*} sum=${line#*$'\t'} member=lazygit
+}
+
+have_kubie() { kubie --version 2>/dev/null | awk '{ print $2 }'; }
+latest_kubie() {
+  local json line
+  json=$(github kubie-org/kubie) && [[ -n $json ]] || return 1
+  want=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
+  line=$(asset "$json" "^kubie-linux-${arch}$")
+  url=${line%%$'\t'*} sum=${line#*$'\t'} member=""
+}
+
+have_aws() { aws --version 2>/dev/null | sed -n 's|^aws-cli/\([^ ]*\).*|\1|p'; }
+# AWS publishes no "latest" to ask, but the v2 branch's changelog starts with the newest.
+latest_aws() {
+  want=$(curl -fsSL --max-time 30 https://raw.githubusercontent.com/aws/aws-cli/v2/CHANGELOG.rst 2>/dev/null |
+    grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+$')
+  [[ -n $want ]]
+}
+
+# put <tool>: download, check, unpack, check again, install. Leaves the old one on any failure.
+# A subshell, so its scratch directory goes however it ends.
+put() (
+  local tool=$1 work got
+  [[ $sum =~ ^[0-9a-f]{64}$ ]] || {
+    echo "$tool: upstream publishes no checksum for $want; not installed" >&2
+    exit 1
+  }
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  curl -fsSL --max-time 600 -o "$work/download" "$url" || {
+    echo "$tool: could not download $want" >&2
+    exit 1
+  }
+  echo "$sum  $work/download" | sha256sum --check --quiet 2>/dev/null || {
+    echo "$tool: the download does not match its checksum; not installed" >&2
+    exit 1
+  }
+  if [[ -n $member ]]; then
+    tar -xzf "$work/download" -C "$work" "$member" 2>/dev/null || {
+      echo "$tool: no $member in the archive; not installed" >&2
+      exit 1
+    }
+    [[ $member == "$tool" ]] || mv "$work/$member" "$work/$tool"
+  else
+    mv "$work/download" "$work/$tool"
+  fi
+  chmod 0755 "$work/$tool"
+  got=$(PATH="$work:$PATH" "have_$tool")
+  [[ $got == "$want" ]] || {
+    echo "$tool: the download is version ${got:-unknown}, not $want; not installed" >&2
+    exit 1
+  }
+  if [[ -w $BIN ]]; then
+    install -m 0755 "$work/$tool" "$BIN/$tool"
+  else
+    sudo install -m 0755 "$work/$tool" "$BIN/$tool"
+  fi
+)
+
+check=0
+named=()
+for arg in "$@"; do
+  case "$arg" in
+  --check) check=1 ;;
+  *)
+    [[ " ${TOOLS[*]} " == *" $arg "* ]] || {
+      echo "desktop-update-releases: no such tool: $arg (there are: ${TOOLS[*]})" >&2
+      exit 2
+    }
+    named+=("$arg")
+    ;;
+  esac
+done
+
+echo -e "\e[32m\nUpdate tools from upstream releases\e[0m"
+[[ -n $arch ]] || {
+  echo "no builds for $(uname -m); skipped"
+  exit 0
+}
+
+failed=0
+for tool in "${named[@]:-${TOOLS[@]}}"; do
+  have=$("have_$tool")
+  # Updating is for what is here; installing is for what was asked for by name.
+  [[ -z $have && ${#named[@]} -eq 0 ]] && continue
+  want="" url="" sum="" member=""
+  if ! "latest_$tool" || [[ -z $want ]]; then
+    echo "$tool: could not ask upstream for its newest release; left at ${have:-nothing}"
+    continue
+  fi
+  if ((check)); then
+    if [[ $have == "$want" ]]; then echo "$tool $have is current"; else echo "$tool ${have:-none} -> $want"; fi
+    continue
+  fi
+  [[ $have == "$want" ]] && {
+    echo "$tool $have is current"
+    continue
+  }
+  echo "$tool ${have:-not installed} -> $want"
+  if [[ $tool == aws ]]; then
+    bash "$DESKTOP_PATH/install/packaging/awscli2.sh" || failed=1
+  else
+    put "$tool" || failed=1
+  fi
+  now=$("have_$tool")
+  if [[ -n $now && $now != "$have" ]]; then
+    notify-send -a "Updates" -i software-update-available "$tool updated" \
+      "${have:-not installed} → $now" 2>/dev/null || true
+  fi
+done
+
+# A tool that was refused is said above and on the next run again; it is not a reason to stop
+# the rest of desktop-update, but an install that asked for it by name should know.
+((${#named[@]} > 0)) && exit "$failed"
+exit 0

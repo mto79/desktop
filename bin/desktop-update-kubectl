@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+
+# desktop-update-kubectl: keep kubectl on the newest patch release of one minor version.
+#
+#   desktop-update-kubectl          # install or update kubectl to the newest 1.35.z
+#   desktop-update-kubectl --check  # say what is installed and what is current, change nothing
+#
+# kubectl is not in Fedora at a useful version, so it came from dl.k8s.io -- once, from
+# "stable", by an install script that did nothing when a kubectl was already there. Fixes
+# never arrived, and on a machine installed later the minor version would have been whatever
+# was newest that day, not what the clusters run.
+#
+# The minor is pinned for the same reason desktop-update-oc pins oc's: kubectl is supported
+# one minor version either side of the API server, and an old client meeting a newer API is
+# the side that breaks. 1.35 is the Kubernetes under OpenShift 4.22, the channel oc follows;
+# move the two together. dl.k8s.io's stable-1.35.txt is its own pointer to the newest 1.35.z.
+
+set -euo pipefail
+
+CHANNEL="${DESKTOP_KUBECTL_CHANNEL:-stable-1.35}"
+BASE="https://dl.k8s.io/release"
+TARGET="${DESKTOP_KUBECTL_TARGET:-/usr/local/bin/kubectl}"
+
+case "$(uname -m)" in
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
+*)
+  echo "desktop-update-kubectl: no kubectl build for $(uname -m)" >&2
+  exit 0
+  ;;
+esac
+
+installed() {
+  [[ -x $TARGET ]] || return 0
+  "$TARGET" version --client 2>/dev/null | sed -n 's/^Client Version: //p'
+}
+
+echo -e "\e[32m\nUpdate kubectl ($CHANNEL)\e[0m"
+
+have=$(installed)
+want=$(curl -fsSL --max-time 30 "$BASE/$CHANNEL.txt" 2>/dev/null) || want=""
+if [[ ! $want =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  # No network, or dl.k8s.io is away: not a reason to fail the whole update.
+  echo "could not ask dl.k8s.io what $CHANNEL is; kubectl left at ${have:-nothing}"
+  exit 0
+fi
+
+if [[ ${1:-} == --check ]]; then
+  echo "installed: ${have:-none}"
+  echo "current:   $want"
+  exit 0
+fi
+
+if [[ $have == "$want" ]]; then
+  echo "kubectl $have is current"
+  exit 0
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+echo "kubectl ${have:-not installed} -> $want"
+curl -fSL --max-time 600 --progress-bar -o "$work/kubectl" "$BASE/$want/bin/linux/$arch/kubectl"
+
+# Checked before it is installed: this is the binary that holds the cluster tokens.
+sum=$(curl -fsSL --max-time 30 "$BASE/$want/bin/linux/$arch/kubectl.sha256" | awk '{ print $1 }')
+[[ $sum =~ ^[0-9a-f]{64}$ ]] || {
+  echo "desktop-update-kubectl: dl.k8s.io gives no checksum for $want; nothing installed" >&2
+  exit 1
+}
+echo "$sum  $work/kubectl" | sha256sum --check --quiet || {
+  echo "desktop-update-kubectl: checksum mismatch; nothing installed" >&2
+  exit 1
+}
+
+chmod 0755 "$work/kubectl"
+got=$("$work/kubectl" version --client 2>/dev/null | sed -n 's/^Client Version: //p')
+[[ $got == "$want" ]] || {
+  echo "desktop-update-kubectl: the download is kubectl $got, not $want; nothing installed" >&2
+  exit 1
+}
+
+if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
+  install -m 0755 "$work/kubectl" "$TARGET"
+else
+  sudo install -m 0755 "$work/kubectl" "$TARGET"
+fi
+
+now=$(installed)
+echo "kubectl $now installed"
+notify-send -a "Updates" -i software-update-available "kubectl updated" \
+  "${have:-not installed} → $now ($CHANNEL)" 2>/dev/null || true

@@ -30,3 +30,6 @@ sudo dnf install -y tofu
 echo
 echo "OpenTofu installed:"
 tofu version
+
+# The owner-only directory its environment files go in; every desktop-update checks it.
+"$DESKTOP_PATH/bin/desktop-update-secrets"
