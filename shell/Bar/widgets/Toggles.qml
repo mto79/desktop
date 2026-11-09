@@ -177,36 +177,31 @@ BarWidget {
     }
   }
 
-  Process {
-    id: recordProbe
+  // Five seconds is enough to notice a recording that started or stopped elsewhere --
+  // the keybinding, or wf-recorder dying on its own. The label does not wait for it.
+  // This and the meeting's are shared with the other monitors' bars. See Polls.
+  property var recordPoll: null
 
-    command: ["desktop-status-screenrecord"]
-
-    stdout: StdioCollector {
-      onStreamFinished: {
-        try {
-          var data = JSON.parse(text);
-          root.recording = !!data.active;
-          root.recordingTip = data.tooltip || "";
-          root.polledElapsed = data.elapsed || 0;
-          root.polledAt = Date.now();
-          root.elapsed = root.polledElapsed;
-        } catch (e) {
-          root.recording = false;
-        }
-      }
+  function readRecording(text) {
+    try {
+      var data = JSON.parse(text);
+      root.recording = !!data.active;
+      root.recordingTip = data.tooltip || "";
+      root.polledElapsed = data.elapsed || 0;
+      root.polledAt = Date.now();
+      root.elapsed = root.polledElapsed;
+    } catch (e) {
+      root.recording = false;
     }
   }
 
-  // Five seconds is enough to notice a recording that started or stopped elsewhere --
-  // the keybinding, or wf-recorder dying on its own. The label does not wait for it.
-  Timer {
-    interval: 5000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: if (!recordProbe.running)
-      recordProbe.running = true
+  Connections {
+    target: root.recordPoll
+    ignoreUnknownSignals: true
+
+    function onRead(text) {
+      root.readRecording(text);
+    }
   }
 
   Timer {
@@ -248,35 +243,44 @@ BarWidget {
       voiceFollower.running = true
   }
 
-  Process {
-    id: meetingProbe
+  property var meetingPoll: null
 
-    command: ["desktop-status-meeting-capture"]
-
-    stdout: StdioCollector {
-      onStreamFinished: {
-        try {
-          var data = JSON.parse(text);
-          root.meeting = !!data.active;
-          root.meetingTranscribing = !!data.transcribing;
-          root.meetingTip = data.tooltip || "";
-          root.meetingPolledElapsed = data.elapsed || 0;
-          root.meetingPolledAt = Date.now();
-          root.meetingElapsed = root.meetingPolledElapsed;
-        } catch (e) {
-          root.meeting = false;
-        }
-      }
+  function readMeeting(text) {
+    try {
+      var data = JSON.parse(text);
+      root.meeting = !!data.active;
+      root.meetingTranscribing = !!data.transcribing;
+      root.meetingTip = data.tooltip || "";
+      root.meetingPolledElapsed = data.elapsed || 0;
+      root.meetingPolledAt = Date.now();
+      root.meetingElapsed = root.meetingPolledElapsed;
+    } catch (e) {
+      root.meeting = false;
     }
   }
 
-  Timer {
-    interval: 5000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: if (!meetingProbe.running)
-      meetingProbe.running = true
+  Connections {
+    target: root.meetingPoll
+    ignoreUnknownSignals: true
+
+    function onRead(text) {
+      root.readMeeting(text);
+    }
+  }
+
+  // Joined here and not in a binding: a binding would be run again whenever the list of
+  // polls changed, and join each time.
+  Component.onCompleted: {
+    recordPoll = Polls.join(["desktop-status-screenrecord"], 5000);
+    meetingPoll = Polls.join(["desktop-status-meeting-capture"], 5000);
+    if (recordPoll.answered)
+      readRecording(recordPoll.last);
+    if (meetingPoll.answered)
+      readMeeting(meetingPoll.last);
+  }
+  Component.onDestruction: {
+    Polls.leave(recordPoll);
+    Polls.leave(meetingPoll);
   }
 
   Timer {

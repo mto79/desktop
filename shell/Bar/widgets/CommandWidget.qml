@@ -134,14 +134,28 @@ BarItem {
     working = 0;
   }
 
-  // Polled: run, read everything, exit, repeat on the timer.
-  Process {
-    id: probe
+  // Polled: shared with this widget on every other monitor. See Polls.
+  property var poll: null
 
-    command: root.shell(root.exec) || []
+  function joinPoll() {
+    Polls.leave(poll);
+    poll = root.exec !== "" && !root.follow ? Polls.join(root.shell(root.exec) || [], root.interval) : null;
+    if (poll && poll.answered)
+      root.apply(poll.last);
+  }
 
-    stdout: StdioCollector {
-      onStreamFinished: root.apply(text)
+  onExecChanged: joinPoll()
+  onFollowChanged: joinPoll()
+  onIntervalChanged: joinPoll()
+  Component.onCompleted: joinPoll()
+  Component.onDestruction: Polls.leave(poll)
+
+  Connections {
+    target: root.poll
+    ignoreUnknownSignals: true
+
+    function onRead(text) {
+      root.apply(text);
     }
   }
 
@@ -150,18 +164,9 @@ BarItem {
     target: Bus
 
     function onWidgetRefresh(id) {
-      if (root.widgetConfig && id === root.widgetConfig.id && root.exec !== "" && !root.follow && !probe.running)
-        probe.running = true;
+      if (root.widgetConfig && id === root.widgetConfig.id && root.poll)
+        root.poll.now();
     }
-  }
-
-  Timer {
-    interval: root.interval
-    running: root.exec !== "" && !root.follow
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: if (!probe.running)
-      probe.running = true
   }
 
   // Followed: stay running and read a line at a time.

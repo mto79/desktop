@@ -293,6 +293,12 @@ new.
 
 ## Rules that are easy to break
 
+- **A status script on a timer goes through `Polls`** (`shell/Commons/Polls.qml`), not a
+  `Timer` and `Process` in the widget. A bar widget exists once per monitor, so its own
+  poll runs once per monitor, and that once cost a third of a core on three screens. Join
+  in `Component.onCompleted`, never in a binding, or it joins again each time the list of
+  polls changes. `Polls` also stops asking when the machine has been idle for five minutes.
+
 - **Poll only while visible.** `running: root.visible` on timers; a `Binding` with `when:`
   for anything that costs power, or closing the panel leaves the radio scanning.
 - **A bar widget exists once per monitor.** Anything that must happen once, like sending a

@@ -47,29 +47,32 @@ BarItem {
     color: root.connected ? Color.barGood : Color.barMuted
   }
 
-  Process {
-    id: probe
+  // Shared with the other monitors' bars. See Polls.
+  property var poll: null
 
-    command: ["desktop-status-openvpn", "--names"]
-
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var list = [];
-        var lines = text.split("\n");
-        for (var i = 0; i < lines.length; i++)
-          if (lines[i].trim() !== "")
-            list.push(lines[i].trim());
-        root.names = list;
-      }
-    }
+  function read(text) {
+    var list = [];
+    var lines = text.split("\n");
+    for (var i = 0; i < lines.length; i++)
+      if (lines[i].trim() !== "")
+        list.push(lines[i].trim());
+    root.names = list;
   }
 
-  Timer {
-    interval: 5000
-    running: true
-    repeat: true
-    triggeredOnStart: true
-    onTriggered: if (!probe.running)
-      probe.running = true
+  // Joined here and not in a binding, which would join again whenever the list of polls changed.
+  Component.onCompleted: {
+    poll = Polls.join(["desktop-status-openvpn", "--names"], 5000);
+    if (poll.answered)
+      read(poll.last);
+  }
+  Component.onDestruction: Polls.leave(poll)
+
+  Connections {
+    target: root.poll
+    ignoreUnknownSignals: true
+
+    function onRead(text) {
+      root.read(text);
+    }
   }
 }

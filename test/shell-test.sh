@@ -184,6 +184,22 @@ check "a muted microphone does not look as if it is listening" grep -q 'lively: 
 # The microphone once asked for "a stream that is not a sink", which is a playback stream,
 # so it lit up for music and the speaker -- asking a media player -- stayed dark for a call
 # in a browser. Both now ask which links are carrying sound, and of what kind of stream.
+# Every bar on every monitor ran its own copy of every status script: on three monitors, a
+# third of a core of asking the same questions. They share one poll now.
+POLLS="$ROOT/shell/Commons/Polls.qml"
+check "Polls is a registered singleton" grep -q '^singleton Polls 1.0 Polls.qml$' "$ROOT/shell/Commons/qmldir"
+check "a poll is one process, however many widgets join it" grep -q 'var poll = polls\[key\]' "$POLLS"
+check "nothing is polled while the machine is idle" grep -q 'running: !root.away' "$POLLS"
+check "and everything is asked on the way back" grep -q 'triggeredOnStart: true' "$POLLS"
+for widget in CommandWidget Toggles Vpn; do
+  check "$widget polls through it" grep -q 'Polls.join' "$ROOT/shell/Bar/widgets/$widget.qml"
+  check "$widget leaves when it goes" grep -q 'Polls.leave' "$ROOT/shell/Bar/widgets/$widget.qml"
+done
+# A binding would be run again each time the list of polls changed, and join again each time.
+check "no widget joins from a binding" lacks -E 'property var [a-zA-Z]+: Polls\.join' "$ROOT"/shell/Bar/widgets/*.qml
+check "no status script is on a bar widget's own timer any more" \
+  lacks -E 'command: \["desktop-status-(screenrecord|openvpn|meeting-capture)' "$ROOT"/shell/Bar/widgets/*.qml
+
 SOUND="$ROOT/shell/Commons/Sound.qml"
 check "the speaker lights for any stream that is playing" grep -q 'playing: flowing(groups, "source", PwNodeType.AudioOutStream)' "$SOUND"
 check "the microphone for any stream that is recording" grep -q 'recording: flowing(groups, "target", PwNodeType.AudioInStream' "$SOUND"

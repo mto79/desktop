@@ -146,6 +146,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- The bars ask each status question once instead of once per monitor, and stop asking
+  while the machine is idle. With three monitors that takes more than half off what the
+  polling costs. The orb on the bar and the music equalizer also draw fewer frames.
 - No program can read another's memory any more unless it started it, and kernel
   addresses are hidden. Attaching a debugger to a running program now needs sudo.
 - The notification centre keeps only reviews waiting on you, Teams and the chat.

@@ -66,7 +66,9 @@ Item {
   property real t: 0
 
   Timer {
-    interval: orb.lively ? 33 : 50
+    // The bar's is twenty pixels across, on every monitor, for as long as an agent works.
+    // Ten frames a second looks the same there and costs a third of what thirty did.
+    interval: orb.simple ? 100 : orb.lively ? 33 : 50
     repeat: true
     running: orb.running && orb.visible
     onTriggered: {

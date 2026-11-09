@@ -70,6 +70,8 @@ binding in the thirteen files sourced afterwards lands inside the submap.
   notification, writing a file -- belongs in a `shell/Commons/` singleton the widget
   reads, not in the widget. `BluetoothBattery` is the example: its low-battery warning
   sent from the widget would arrive three times on three screens.
+- **A status script on a timer goes through `Polls`**, not its own `Timer` and `Process`:
+  those run once per monitor. Join in `Component.onCompleted`, never in a binding.
 - **Logic worth testing goes in a plain `.js` file** beside the QML that uses it
   (`lowbattery.js`, `calc.js`, `holidays.js`), kept free of QML so a test can run it
   with node.
