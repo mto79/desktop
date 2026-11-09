@@ -274,6 +274,20 @@ The git stash is shared between a repository and all its worktrees. Do not use a
 | `desktop-menu-agents` | List the running sessions and jump to one |
 | `desktop-git-commit` | Commit what is staged with a message Claude writes from the diff; lazygit's `C` |
 
+## What an agent may do
+
+The Rights heading of the dashboard's AI tab (`desktop-dash rights`) has a card per agent, in
+the sections [OpenShell](https://docs.nvidia.com/openshell/how-it-works/policies/schema.md)
+governs: files, kernel sandbox, process, network, inference and keys. It keeps apart what an
+agent promises, its own prompts, and what the kernel holds it to, read from `/proc` for each
+running process. It only looks: places are tested with `access(2)`, the environment is reduced
+to variable names, and it does not run `sudo`, whose refusals would land in the journal the
+Security tab reads.
+
+OpenShell is not needed for this and is not installed by `install/`. The page also lists what
+OpenShell needs here. Codex differs from the others: its commands run in a sandbox of its own,
+though Codex's own process has none.
+
 ## Review requests
 
 `desktop-reviews` pops up a notification when a merge request or pull request starts

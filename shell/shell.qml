@@ -251,6 +251,11 @@ ShellRoot {
       return dashboard.infraSection(name) ? "ok" : "unknown";
     }
 
+    // And of the security tab: "posture", "events", "scanner", "advisories".
+    function securitySection(name: string): string {
+      return dashboard.securitySection(name) ? "ok" : "unknown";
+    }
+
     // desktop-shell shell networkDetails vpn: the Network heading with that box open.
     function networkDetails(key: string): string {
       return dashboard.networkDetails(key) ? "ok" : "unknown";

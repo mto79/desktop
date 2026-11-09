@@ -69,11 +69,11 @@ tray) or runs a `desktop-*` command and reads its JSON:
 | Updates | `desktop-update-available` |
 | Tasks panel | `desktop-worktree tasks --json` |
 | Dashboard | `desktop-dash <tab> --json` |
-| Dashboard, AI tab | `desktop-dash ai` (the prompts), `desktop-dash agents` (sessions, limits, tokens) |
+| Dashboard, AI tab | `desktop-dash ai` (the prompts), `desktop-dash agents` (sessions, limits, tokens), `desktop-dash rights` (what each may do) |
 | Dashboard, Infrastructure tab | `desktop-dash infra` (the clusters), `desktop-dash network` (where this machine is) |
 
 A dashboard tab can have headings of its own, changed with the up and down keys: the AI
-tab has Presence, Agents, Voice commands and Prompts, the Infrastructure tab Clusters and
+tab has Presence, Agents, Rights, Voice commands and Prompts, the Infrastructure tab Clusters and
 Network. A heading with a command of its own is asked more often than its tab, and only
 while the tab is on show. `Page Down` and `Page Up` scroll a page taller than the screen.
 
@@ -178,6 +178,90 @@ always did.
 
 A recording only counts when it is not from a speaker's monitor. `cava`, which draws the
 music equalizer, records what the speakers play, and that is not a call.
+
+## The Security tab
+
+The dashboard's Security tab has four headings:
+
+- **Posture** draws `desktop-security check`: what needs looking at, the machine's facts,
+  and what passed.
+- **Events** draws `desktop-security-events`: alerts, a timeline, the rules with their
+  counts, and a search. Words narrow it, and `severity:high`, `rule:sudo-denied`,
+  `source:kernel` and a leading `-` for "not" work too. A click on a rule searches for it.
+- **Scanner** is a 3D globe, from `desktop-scanner`.
+- **Advisories** is NCSC-NL's security advisories, from `desktop-advisories`.
+
+| Layer | Source | Needs |
+|---|---|---|
+| Aircraft | OpenSky | Nothing, but an anonymous caller gets about 100 asks a day |
+| Ships | Digitraffic | Nothing, but it only covers the Baltic |
+| Malware C2 | Feodo Tracker and C2IntelFeeds, placed by ip-api | Nothing |
+| Earthquakes | USGS | Nothing |
+| Wi-Fi | WiGLE | An account, and where home is |
+| Natural events | NASA EONET | Nothing: wildfires, storms, volcanoes and sea ice going on now |
+| Aircraft, live | adsb.lol | Nothing; zoomed in to a region, every 10 seconds |
+| Webcams | Windy | A free key; shown once zoomed in to a region |
+
+For WiGLE, store `name:token` from wigle.net/account and say where home is:
+
+    secret-tool store --label="WiGLE" service desktop-dashboard account wigle
+    echo '{"home": {"lat": 52.0, "lon": 5.0}}' > ~/.config/desktop/dashboard/scanner.json
+
+Scroll zooms from orbit down to about 160 km up, and a double-click goes to a place and
+three times closer. A click on an aircraft asks `desktop-scanner --aircraft` for what
+hexdb.io knows about it: its type, registration, owner and the route its callsign usually
+flies, which can be out of date. It also offers a link to follow it live.
+
+Zoomed in to a region, aircraft come from adsb.lol instead, every ten seconds, within as
+much of the view as its limit of 250 nautical miles allows. OpenSky's five-minute-old
+aircraft are hidden meanwhile, so a plane is not drawn twice. A click on one asks hexdb.io
+about it, as for OpenSky's. adsb.lol's data is under the ODbL, which the layer list credits.
+
+Webcams are asked for around the middle of the view once it has been still for a moment and
+is zoomed in to a region, within Windy's limit of 250 km. Only cameras their owners
+registered with Windy are shown. A click on a dot or a thumbnail opens a pop-up over the
+globe, with the picture at the size Windy serves it, how old it is, and the day's timelapse.
+The timelapse is Windy's own player in a web app window that floats over the dashboard
+(`default/hypr/apps/webcams.lua`). It cannot play inside the shell, because QtWebEngine
+crashes Quickshell. Linking each picture to that player is also what Windy's terms ask,
+along with their credit, which sits under the pictures.
+
+They are fetched from further out than they are shown (`preloadFrom`), so they are already
+there, thumbnails included, when the view comes close enough. A view that moved only a
+little, within a radius already asked about and while the links still work, is not asked
+about again. The same goes for live aircraft between their ten-second asks. Windy's picture links expire after 10–15 minutes, so a copy
+is kept for 8. For the key:
+
+    secret-tool store --label="Windy" service desktop-dashboard account windy
+
+Each feed has an age limit, and one that is down keeps its last copy and says so. Nothing
+is fetched unless the heading is on show. The globe is a QtQuick3D scene loaded by a
+`Loader`, so it only costs anything while it is on screen, and a machine without
+`qt6-qtquick3d` loses the globe rather than the shell. The dots come from a file per layer
+(`FileInstancing`), which is one draw call however many there are. `Globe.qml` must stay
+the only file importing QtQuick3D, or that protection is gone.
+
+A frame only costs something when something changed, so the globe keeps still whenever it
+can. It turns only when nobody is using it: not with a dot chosen, not zoomed in, and not
+for more than a minute after the last touch. Nothing in the scene may animate forever,
+because one endless animation redraws the whole planet at the monitor's refresh rate.
+
+**Advisories** draws `desktop-advisories`: what NCSC-NL has published, with its rating of
+likelihood and damage. A click opens the summary and a link to the advisory. "Yours" means
+an advisory names something installed here, as a package or a command, or on your own list.
+It does not say your version is affected. Your own list is for what this machine cannot
+know about, and stays out of the repository:
+
+    echo '{"watch": ["OpenShift", "Kubernetes"]}' > ~/.config/desktop/dashboard/advisories.json
+
+A high/high advisory from the last fortnight that names something of yours puts a dot on the
+tab. The feed is asked at most every half hour, and the last copy stays if it cannot be
+reached.
+
+While the screen is shared, the events, the Wi-Fi around you and the home marker are not
+drawn.
+
+The texture is NASA's Black Marble 2016, public domain.
 
 ## Music
 

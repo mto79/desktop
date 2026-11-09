@@ -18,7 +18,7 @@ import "../Commons/holidays.js" as Holidays
 // keys, the overview and the bar all treat it as one, and anything else can share the
 // workspace with it. A window rule in default/hypr/apps/desktop-shell.conf puts it on 6.
 //
-// It has a tab for each subject -- start, domotics, infrastructure, health, money, what is
+// It has a tab for each subject -- start, domotics, infrastructure, security, health, money, what is
 // being watched, and the news -- and room for more: a tab is one entry in `tabs` below, one page
 // in this directory, and one answer from desktop-dash. The pages only draw. What they draw
 // comes from `desktop-dash <tab> --json`, so a subject gets a new source without anything
@@ -60,6 +60,12 @@ Item {
       key: "infra",
       label: "Infrastructure",
       glyph: "\u{f048b}",
+      every: 120
+    },
+    {
+      key: "security",
+      label: "Security",
+      glyph: "\u{f0483}",
       every: 120
     },
     {
@@ -119,7 +125,7 @@ Item {
   // stand in the row, so a tab can be put between two others without renumbering them.
   readonly property string key: tabs[current].key
   // The page with headings of its own, if that is what is showing.
-  readonly property var sectioned: key === "news" ? news : key === "ai" ? ai : key === "infra" ? infra : null
+  readonly property var sectioned: key === "news" ? news : key === "ai" ? ai : key === "infra" ? infra : key === "security" ? security : null
 
   function go(index) {
     current = (index + tabs.length) % tabs.length;
@@ -156,7 +162,13 @@ Item {
     return true;
   }
 
-  // And of the AI tab: "presence", "agents", "voice", "prompts".
+  // Of the security tab: "posture", "events", "scanner", "advisories".
+  function securitySection(name) {
+    refresh("security");
+    return security.choose(name);
+  }
+
+  // And of the AI tab: "presence", "agents", "rights", "voice", "prompts".
   function aiSection(name) {
     refresh("agents");
     return ai.choose(name);
@@ -210,7 +222,8 @@ Item {
   // What a tab shows besides its own answer: a heading with a command of its own.
   readonly property var beside: ({
       "infra": "network",
-      "ai": "agents"
+      "ai": "agents",
+      "security": "advisories"
     })
 
   onCurrentChanged: {
@@ -225,7 +238,12 @@ Item {
     if (beside[key])
       refresh(beside[key]);
   }
-  Component.onCompleted: refresh("start")
+  Component.onCompleted: {
+    refresh("start");
+    // Asked at the start of the day too: a high/high naming something here is why the tab
+    // has a dot, and nobody opens the tab to find out whether it should have.
+    refresh("advisories");
+  }
 
   // Asked again while it is being looked at, each tab at its own pace. Not otherwise:
   // an asking is commands, the network, git on every task.
@@ -249,6 +267,13 @@ Item {
     running: root.lookedAt && root.shown && root.key === "infra"
     onTriggered: root.refresh("network")
   }
+  // The advisories, whichever tab is open, for that dot. The script keeps its own half hour.
+  Timer {
+    interval: 1800000
+    repeat: true
+    running: root.lookedAt && root.shown
+    onTriggered: root.refresh("advisories")
+  }
   // The agents under the AI tab likewise: who is waiting changes by the minute, the list
   // of prompts beside it does not.
   Timer {
@@ -256,6 +281,15 @@ Item {
     repeat: true
     running: root.lookedAt && root.shown && root.key === "ai"
     onTriggered: root.refresh("agents")
+  }
+  // What the agents may do, only while that heading is what is being looked at. Also on
+  // the way in, so the page never opens on an answer from an hour ago.
+  Timer {
+    interval: 60000
+    repeat: true
+    triggeredOnStart: true
+    running: root.lookedAt && root.shown && root.key === "ai" && ai.heading === "rights"
+    onTriggered: root.refresh("rights")
   }
 
   Timer {
@@ -534,6 +568,8 @@ Item {
                     return answer.behind > 0;
                   if (modelData.key === "infra")
                     return answer.trouble > 0;
+                  if (modelData.key === "security")
+                    return answer.attention > 0 || (!!root.answers["advisories"] && root.answers["advisories"].attention > 0);
                   return false;
                 }
 
@@ -662,6 +698,7 @@ Item {
               id: ai
 
               stats: root.answers["agents"] || null
+              rights: root.answers["rights"] || null
               // Like the news, it fits itself to what is left of the window.
               room: scroll.height - holder.y
               width: parent.width
@@ -683,6 +720,17 @@ Item {
               visible: root.key === "infra"
               active: root.key === "infra" && root.lookedAt
               info: root.answers["infra"] || null
+            }
+            SecurityPage {
+              id: security
+
+              room: scroll.height - holder.y
+              width: parent.width
+              visible: root.key === "security"
+              active: root.key === "security" && root.lookedAt
+              info: root.answers["security"] || null
+              advisories: root.answers["advisories"] || null
+              onTypingDone: scroll.forceActiveFocus()
             }
             HealthPage {
               width: parent.width

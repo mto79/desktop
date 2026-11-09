@@ -215,7 +215,7 @@ for tab in $(bash "$DASH" tabs); do
   check "the $tab tab is on the dashboard" grep -q "key: \"$tab\"" "$frame"
 done
 check "there is a page for each" \
-  test "$(grep -cE '^            (Start|Ai|Home|Infra|Health|Finance|Watch|News)Page \{' "$frame")" = "$(bash "$DASH" tabs | wc -l)"
+  test "$(grep -cE '^            (Start|Ai|Home|Infra|Security|Health|Finance|Watch|News)Page \{' "$frame")" = "$(bash "$DASH" tabs | wc -l)"
 for page in Home Infra Health Finance Watch News; do
   check "the $page page says so when its numbers are invented" grep -q '^  Unconnected {' "$PAGES/${page}Page.qml"
 done
@@ -261,7 +261,7 @@ rm -rf "$home" "$empty"
 check "the reader only reads" lacks -E "open\([^)]*['\"][wa]|requests|urllib|socket" "$PROMPTS"
 check "the AI tab stands beside Start" test "$("$DASH" tabs | sed -n 2p)" = ai
 AIPAGE="$PAGES/AiPage.qml"
-check "it has the voice large, the agents, the voice commands, and the prompts" grep -q 'readonly property var headings: \["presence", "agents", "voice", "prompts"\]' "$AIPAGE"
+check "it has the voice large, the agents, their rights, the voice commands, and the prompts" grep -q 'readonly property var headings: \["presence", "agents", "rights", "voice", "prompts"\]' "$AIPAGE"
 check "a prompt is copied as an argument, never through a shell" grep -q 'execDetached(\["wl-copy", "--", modelData.text\])' "$AIPAGE"
 # Pages were told apart by where they stood in the row; a tab put between two others
 # would have shown every later page under the wrong name.

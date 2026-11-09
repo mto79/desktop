@@ -1,0 +1,524 @@
+#!/usr/bin/env python3
+
+"""What is moving on the planet, from public feeds, for the globe on the dashboard.
+
+    desktop-scanner --json          # every layer, fetched when its copy is too old
+    desktop-scanner --json --cached # what was fetched last, without the network
+    desktop-scanner --aircraft HEX [CALLSIGN]  # one aircraft, when it is clicked: JSON
+    desktop-scanner --webcams LAT LON KM       # public webcams around a place, from Windy
+    desktop-scanner --live LAT LON KM          # aircraft around a place, now, from adsb.lol
+
+One answer in JSON, a layer each:
+
+    planes    OpenSky: every aircraft with a position, no key (limited to ~100 calls a day)
+    ships     Digitraffic: what the Finnish coast's AIS hears, so the Baltic, no key
+    malware   Feodo Tracker and C2IntelFeeds: command-and-control servers, placed by ip-api
+    quakes    USGS: earthquakes of magnitude 2.5 and up, the last day
+    events    NASA EONET: wildfires, storms, volcanoes and sea ice that are going on now
+    wifi      WiGLE: networks around home, if you have an account and said where home is
+
+Each feed has its own age limit and a failure keeps the last copy, marked as old: a feed
+that is down dims a layer rather than emptying it. Nothing here runs by itself; the page
+asks while it is on screen, so a machine nobody is looking at does not spend OpenSky's
+daily allowance.
+
+Only the C2 servers' own addresses go to ip-api, never this machine's. WiGLE's key is asked
+of the secret service, as "name:token" under account "wigle", and the area searched comes
+from ~/.config/desktop/dashboard/scanner.json: {"home": {"lat": 0.0, "lon": 0.0}}.
+
+The dots are drawn by the GPU from a file per layer (QtQuick3D's FileInstancing), since ten
+thousand objects in QML would stop the shell. `position()` is where a coordinate lands on
+the texture: longitude 0 faces +z, east goes to +x.
+"""
+
+import concurrent.futures
+import csv
+import gzip
+import io
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "desktop" / "scanner"
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "desktop" / "dashboard" / "scanner.json"
+# A directory of <source>.txt to read instead of the network, for the test.
+FIXTURES = os.environ.get("DESKTOP_SCANNER_FIXTURES")
+
+AGENT = "desktop-scanner (personal dashboard)"
+RADIUS = 100.0
+TIMEOUT = 20
+
+URLS = {
+    "planes": "https://opensky-network.org/api/states/all",
+    "ships": "https://meri.digitraffic.fi/api/ais/v1/locations",
+    "quakes": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson",
+    "events": "https://eonet.gsfc.nasa.gov/api/v3/events?status=open&days=30",
+    "feodo": "https://feodotracker.abuse.ch/downloads/ipblocklist_recommended.json",
+    "c2intel": "https://raw.githubusercontent.com/drb-ra/C2IntelFeeds/master/feeds/IPC2s-30day.csv",
+}
+GEO_BATCH = "http://ip-api.com/batch?fields=status,query,lat,lon,country"
+WIGLE = "https://api.wigle.net/api/v2/network/search"
+HEXDB = "https://hexdb.io/api/v1"
+
+# What each layer looks like and how long a copy of it is good for, in seconds. OpenSky
+# allows an anonymous caller about a hundred global asks a day, so five minutes is the floor.
+LAYERS = {
+    "planes": {"label": "Aircraft", "colour": "#7dcfff", "size": 0.0055, "lift": 0.2, "every": 300},
+    "ships": {"label": "Ships", "colour": "#9ece6a", "size": 0.0055, "lift": 0.03, "every": 300},
+    "malware": {"label": "Malware C2", "colour": "#f7768e", "size": 0.012, "lift": 0.08, "every": 21600},
+    "quakes": {"label": "Earthquakes", "colour": "#ff9e64", "size": 0.008, "lift": 0.08, "every": 600},
+    "events": {"label": "Natural events", "colour": "#73daca", "size": 0.01, "lift": 0.08, "every": 1800},
+    "wifi": {"label": "Wi-Fi (WiGLE)", "colour": "#bb9af7", "size": 0.002, "lift": 0.02, "every": 86400},
+}
+
+
+def position(lat, lon, lift=0.0):
+    """Where a coordinate lands on the sphere, in the globe's own coordinates."""
+    a, b = math.radians(lat), math.radians(lon)
+    r = RADIUS + lift
+    return (r * math.cos(a) * math.sin(b), r * math.sin(a), r * math.cos(a) * math.cos(b))
+
+
+def fetch(source, url=None, data=None, headers=None):
+    if FIXTURES:
+        return (Path(FIXTURES) / f"{source}.txt").read_text()
+    # Digitraffic answers 406 to a caller that will not take gzip.
+    request = urllib.request.Request(url or URLS[source], data=data,
+                                     headers={"User-Agent": AGENT, "Accept-Encoding": "gzip", **(headers or {})})
+    with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
+        body = answer.read()
+        if answer.headers.get("Content-Encoding") == "gzip":
+            body = gzip.decompress(body)
+        return body.decode("utf-8", "replace")
+
+
+# --- each feed, down to rows of [lat, lon, name, detail]
+
+
+def planes():
+    rows = []
+    for s in json.loads(fetch("planes")).get("states") or []:
+        lon, lat, grounded = s[5], s[6], s[8]
+        if lat is None or lon is None or grounded:
+            continue
+        parts = [s[2] or ""]
+        if s[7] is not None:
+            parts.append(f"{round(s[7] / 100) * 100:,} m")
+        if s[9] is not None:
+            parts.append(f"{round(s[9] * 3.6)} km/h")
+        # The address and heading are for the page, when one is clicked.
+        rows.append([round(lat, 3), round(lon, 3), (s[1] or "").strip() or s[0], " · ".join(p for p in parts if p), s[0], s[10]])
+    return rows
+
+
+def ships():
+    rows = []
+    # Digitraffic asks callers to say who they are.
+    text = fetch("ships", headers={"Digitraffic-User": "desktop-scanner"})
+    for f in json.loads(text).get("features") or []:
+        lon, lat = f["geometry"]["coordinates"][:2]
+        props = f.get("properties") or {}
+        rows.append([round(lat, 3), round(lon, 3), f"MMSI {f.get('mmsi') or props.get('mmsi')}", f"{props.get('sog', 0)} kn"])
+    return rows
+
+
+def quakes():
+    rows = []
+    for f in json.loads(fetch("quakes")).get("features") or []:
+        lon, lat = f["geometry"]["coordinates"][:2]
+        props = f.get("properties") or {}
+        magnitude = props.get("mag") or 0
+        # The magnitude makes a stronger quake a larger dot.
+        rows.append([round(lat, 3), round(lon, 3), f"M{magnitude:.1f}", props.get("place") or "", magnitude])
+    return rows
+
+
+def events():
+    """What EONET has open: one dot each, where it was last reported. A storm's track or a
+    fire's outline becomes its latest point, or the middle of its latest shape."""
+    rows = []
+    for event in json.loads(fetch("events")).get("events") or []:
+        shapes = event.get("geometry") or []
+        if not shapes:
+            continue
+        last = shapes[-1]
+        coordinates = last.get("coordinates")
+        if last.get("type") == "Polygon" and coordinates:
+            ring = coordinates[0]
+            lon, lat = sum(p[0] for p in ring) / len(ring), sum(p[1] for p in ring) / len(ring)
+        elif last.get("type") == "Point" and coordinates:
+            lon, lat = coordinates[:2]
+        else:
+            continue
+        kinds = ", ".join(c.get("title", "") for c in event.get("categories") or [])
+        size = f"{last['magnitudeValue']:g} {last.get('magnitudeUnit', '')}".strip() if last.get("magnitudeValue") is not None else ""
+        when = (last.get("date") or "")[:10]
+        source = next((safe_url(src.get("url"), ("",)) or "" for src in event.get("sources") or [] if str(src.get("url", "")).startswith("https://")), "")
+        # The fifth field is where to read about it.
+        rows.append([round(lat, 3), round(lon, 3), str(event.get("title") or "Event"), " · ".join(x for x in (kinds, when, size) if x), source])
+    return rows
+
+
+def c2_servers():
+    """The two lists, as {ip: what it is}. One failing leaves the other."""
+    found, errors = {}, []
+    try:
+        for entry in json.loads(fetch("feodo")):
+            found[entry["ip_address"]] = f"{entry.get('malware', 'botnet')} C2"
+    except Exception as error:
+        errors.append(f"Feodo: {error}")
+    try:
+        for row in csv.reader(io.StringIO(fetch("c2intel"))):
+            if len(row) >= 2 and not row[0].startswith("#"):
+                found.setdefault(row[0], row[1].replace("Possible ", "").replace(" IP", ""))
+    except Exception as error:
+        errors.append(f"C2IntelFeeds: {error}")
+    if not found and errors:
+        raise RuntimeError("; ".join(errors))
+    return found
+
+
+def malware():
+    servers = c2_servers()
+    known_file = CACHE / "geo.json"
+    try:
+        known = json.loads(known_file.read_text())
+    except (OSError, ValueError):
+        known = {}
+    # ip-api allows 45 asks a minute of a hundred addresses each. Three is plenty: the lists
+    # change slowly, and what is not placed this time is placed the next.
+    missing = [ip for ip in servers if ip not in known]
+    for start in range(0, min(len(missing), 300), 100):
+        body = json.dumps(missing[start : start + 100]).encode()
+        for spot in json.loads(fetch("geo", GEO_BATCH, body, {"Content-Type": "application/json"})):
+            if spot.get("status") == "success":
+                known[spot["query"]] = [spot["lat"], spot["lon"], spot.get("country", "")]
+    keep(known_file, json.dumps(known))
+    rows = []
+    for ip, what in servers.items():
+        if ip in known:
+            lat, lon, country = known[ip]
+            rows.append([lat, lon, ip, " · ".join(p for p in (what, country) if p)])
+    return rows
+
+
+def secret(account):
+    if not shutil.which("secret-tool"):
+        return ""
+    try:
+        return subprocess.run(["secret-tool", "lookup", "service", "desktop-dashboard", "account", account],
+                              capture_output=True, text=True, timeout=5).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def home():
+    try:
+        spot = json.loads(CONFIG.read_text())["home"]
+        return float(spot["lat"]), float(spot["lon"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def wifi():
+    import base64
+
+    key, spot = secret("wigle"), home()
+    if not key or not spot:
+        raise LookupError("needs a key")
+    lat, lon = spot
+    query = (f"?latrange1={lat - 0.02:.5f}&latrange2={lat + 0.02:.5f}"
+             f"&longrange1={lon - 0.03:.5f}&longrange2={lon + 0.03:.5f}&resultsPerPage=100")
+    auth = base64.b64encode(key.encode()).decode()
+    answer = json.loads(fetch("wifi", WIGLE + query, headers={"Authorization": f"Basic {auth}"}))
+    if not answer.get("success"):
+        raise RuntimeError(answer.get("message") or "WiGLE refused")
+    return [[n["trilat"], n["trilong"], n.get("ssid") or "(hidden)", n.get("encryption") or ""] for n in answer.get("results") or []]
+
+
+FEEDS = {"planes": planes, "ships": ships, "malware": malware, "quakes": quakes, "events": events, "wifi": wifi}
+HOW = {"wifi": ['Make a WiGLE account, then: secret-tool store --label="WiGLE" service desktop-dashboard account wigle '
+                '(paste "name:token" from wigle.net/account)',
+                'Say where home is, in ~/.config/desktop/dashboard/scanner.json: {"home": {"lat": 52.0, "lon": 5.0}}']}
+NOTES = {"ships": "Baltic only: worldwide AIS needs a key"}
+
+
+# --- one aircraft, when it is clicked
+
+
+def aircraft(address, callsign):
+    """What hexdb.io knows: the airframe, and the route that callsign usually flies.
+
+    Asked only for the one clicked, and remembered for a week: an airframe's type does not
+    change. The route is what the callsign is listed as, not a flight plan, so it can be old.
+    """
+    # Both end up in a URL and a file name, and came from a feed.
+    address = re.sub(r"[^0-9a-f]", "", address.lower())[:6]
+    callsign = re.sub(r"[^0-9A-Z]", "", (callsign or "").upper())[:8]
+    answer = {"hex": address, "callsign": callsign, "track": f"https://globe.adsbexchange.com/?icao={address}" if address else ""}
+    if not address:
+        return answer
+    copy = CACHE / "aircraft" / f"{address}-{callsign}.json"
+    try:
+        if time.time() - copy.stat().st_mtime < 604800:
+            return json.loads(copy.read_text())
+    except (OSError, ValueError):
+        pass
+
+    def ask(source, url):
+        try:
+            found = json.loads(fetch(source, url))
+            return found if isinstance(found, dict) and "error" not in found else {}
+        except Exception:
+            return {}
+
+    plane = ask("hexdb-aircraft", f"{HEXDB}/aircraft/{address}")
+    answer.update(registration=plane.get("Registration") or "", maker=plane.get("Manufacturer") or "",
+                  type=plane.get("Type") or "", owner=plane.get("RegisteredOwners") or "")
+    route = ask("hexdb-route", f"{HEXDB}/route/icao/{callsign}").get("route", "") if callsign else ""
+    names = []
+    for code in route.split("-") if route else []:
+        airport = ask("hexdb-airport", f"{HEXDB}/airport/icao/{re.sub(r'[^0-9A-Z]', '', code)}")
+        names.append(airport.get("airport") or code)
+    answer["route"] = "  →  ".join(names)
+    keep(copy, json.dumps(answer))
+    return answer
+
+
+# --- public webcams around a place, when the globe is zoomed in on it
+
+
+WINDY = "https://api.windy.com/webcams/api/v3/webcams"
+CAMS = {"label": "Webcams (Windy)", "colour": "#e0af68", "size": 0.008, "lift": 0.05}
+# Windy's image links stop working after ten to fifteen minutes on the free plan, so a copy
+# is kept for less than that, and asked for again rather than shown broken.
+CAMS_EVERY = 480
+CAMS_HOW = ['Make a free key at https://api.windy.com/keys, then:',
+            'secret-tool store --label="Windy" service desktop-dashboard account windy',
+            "and paste the key. Only cameras their owners registered with Windy are shown."]
+
+
+def safe_url(url, hosts):
+    """A link from someone else's answer, kept only if it is https and goes where it should."""
+    url = str(url or "")
+    host = re.sub(r"^https://([^/:?#]+).*$", r"\1", url) if url.startswith("https://") else ""
+    # An empty name stands for any host: a link that only has to be https.
+    return url if host and any(h == "" or host == h or host.endswith("." + h) for h in hosts) else ""
+
+
+def pick_image(images, order):
+    """Windy names some sizes and not others: the first of those asked for that is there."""
+    current = (images or {}).get("current") or {}
+    for size in order:
+        url = safe_url(current.get(size), ("windy.com",))
+        if url:
+            return url
+    return ""
+
+
+def webcams(lat, lon, km):
+    lat = max(-90.0, min(90.0, lat))
+    lon = (lon + 180) % 360 - 180
+    km = int(max(1, min(250, km)))
+    key = os.environ.get("DESKTOP_SCANNER_WINDY_KEY") or secret("windy")
+    answer = {"connected": bool(key), "how": [] if key else CAMS_HOW, "centre": [round(lat, 2), round(lon, 2)], "km": km, "cams": []}
+    if not key:
+        return answer
+    copy = CACHE / f"webcams-{lat:.1f}-{lon:.1f}-{km}.json"
+    now = int(time.time())
+    try:
+        found = json.loads(copy.read_text()) if now - copy.stat().st_mtime < CAMS_EVERY else None
+    except (OSError, ValueError):
+        found = None
+    note, ok = "", True
+    if found is None:
+        try:
+            url = f"{WINDY}?nearby={lat:.4f},{lon:.4f},{km}&limit=50&include=images,location,urls,player&lang=en"
+            found = json.loads(fetch("webcams", url, headers={"x-windy-api-key": key})).get("webcams") or []
+            keep(copy, json.dumps(found))
+        except Exception as error:
+            found, ok, note = [], False, f"Windy could not be asked: {str(error)[:80]}"
+    for cam in found:
+        place = cam.get("location") or {}
+        if cam.get("status", "active") != "active" or place.get("latitude") is None:
+            continue
+        answer["cams"].append({
+            "id": cam.get("webcamId"),
+            "title": str(cam.get("title") or "Webcam"),
+            "lat": place["latitude"],
+            "lon": place["longitude"],
+            "place": ", ".join(str(x) for x in (place.get("city"), place.get("country")) if x),
+            "image": pick_image(cam.get("images"), ("preview", "thumbnail", "icon")),
+            "thumb": pick_image(cam.get("images"), ("thumbnail", "icon", "preview")),
+            "link": safe_url((cam.get("urls") or {}).get("detail"), ("windy.com",)),
+            # Windy's own timelapse of the day, made to be embedded: what a click on a picture plays.
+            "player": safe_url((cam.get("player") or {}).get("day"), ("windy.com",)),
+            "updated": cam.get("lastUpdatedOn") or "",
+        })
+    rows = [[c["lat"], c["lon"], c["title"], c["place"], i] for i, c in enumerate(answer["cams"])]
+    answer["layer"] = {"key": "webcams", "label": CAMS["label"], "colour": CAMS["colour"], "ok": ok, "note": note,
+                       "how": [], "age": 0, "count": len(rows), "rows": rows,
+                       "file": str(table("webcams", rows, now, CAMS)) if rows else ""}
+    return answer
+
+
+# --- aircraft around a place, now
+
+
+ADSBLOL = "https://api.adsb.lol/v2/point"
+LIVE = {"label": "Aircraft, live (adsb.lol)", "colour": "#7dcfff", "size": 0.0065, "lift": 0.2}
+
+
+def live(lat, lon, km):
+    """Every aircraft adsb.lol hears within km of a place, as of now. No key, and no copy:
+    the page asks every ten seconds while it is zoomed in, and a copy would only be older.
+    adsb.lol takes a radius in nautical miles, at most 250."""
+    lat = max(-90.0, min(90.0, lat))
+    lon = (lon + 180) % 360 - 180
+    nm = int(max(1, min(250, km / 1.852)))
+    answer = {"centre": [round(lat, 2), round(lon, 2)], "km": round(nm * 1.852), "ok": True, "note": ""}
+    rows = []
+    try:
+        found = json.loads(fetch("live", f"{ADSBLOL}/{lat:.4f}/{lon:.4f}/{nm}"))
+        for a in found.get("ac") or []:
+            if a.get("lat") is None or a.get("lon") is None or a.get("alt_baro") == "ground":
+                continue
+            parts = [a.get("t") or "", a.get("r") or ""]
+            if isinstance(a.get("alt_baro"), (int, float)):
+                parts.append(f"{round(a['alt_baro'] * 0.3048 / 100) * 100:,} m")
+            if isinstance(a.get("gs"), (int, float)):
+                parts.append(f"{round(a['gs'] * 1.852)} km/h")
+            hexcode = re.sub(r"[^0-9a-f]", "", str(a.get("hex") or "").lower())[:6]
+            rows.append([round(a["lat"], 4), round(a["lon"], 4), (a.get("flight") or "").strip() or hexcode,
+                         " · ".join(p for p in parts if p), hexcode, a.get("track")])
+    except Exception as error:
+        answer.update(ok=False, note=f"adsb.lol could not be asked: {str(error)[:80]}")
+    stamp = int(time.time() * 1000)
+    answer["layer"] = {"key": "live", "label": LIVE["label"], "colour": LIVE["colour"], "ok": answer["ok"], "note": answer["note"],
+                       "how": [], "age": 0, "count": len(rows), "rows": rows,
+                       "file": str(table("live", rows, stamp, LIVE)) if rows else ""}
+    return answer
+
+
+# --- keeping them
+
+
+def keep(path, text):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".part")
+    temporary.write_text(text)
+    temporary.replace(path)
+
+
+def read_copy(name):
+    try:
+        copy = json.loads((CACHE / f"{name}.json").read_text())
+        return copy if isinstance(copy.get("rows"), list) else None
+    except (OSError, ValueError):
+        return None
+
+
+def table(name, rows, stamp, look=None):
+    """The layer as FileInstancing reads it. A new name for new data, so the page reloads."""
+    look = look or LAYERS[name]
+    lines = ["<InstanceTable>"]
+    for row in rows:
+        x, y, z = position(row[0], row[1], look["lift"])
+        # A quake's dot grows with its magnitude; nothing else's does.
+        size = look["size"] * (1 + max(0, row[4] - 2.5) * 0.9) if name == "quakes" else look["size"]
+        lines.append(f'<Instance position="{x:.2f} {y:.2f} {z:.2f}" scale="{size:.4f} {size:.4f} {size:.4f}" color="{look["colour"]}"/>')
+    lines.append("</InstanceTable>\n")
+    path = CACHE / f"{name}.{stamp}.xml"
+    for old in CACHE.glob(f"{name}.*.xml*"):
+        if old != path:
+            old.unlink(missing_ok=True)
+    if not path.exists():
+        keep(path, "\n".join(lines))
+    return path
+
+
+def layer(name, offline):
+    now = int(time.time())
+    look = LAYERS[name]
+    copy = read_copy(name)
+    answer = {"key": name, "label": look["label"], "colour": look["colour"], "ok": True, "note": NOTES.get(name, ""), "how": []}
+    if not offline and (not copy or now - copy["at"] >= look["every"]):
+        try:
+            copy = {"at": now, "rows": FEEDS[name]()}
+            keep(CACHE / f"{name}.json", json.dumps(copy))
+        except LookupError:
+            # Not connected is not broken: it says what would connect it.
+            answer.update(ok=False, how=HOW.get(name, []), note="Not connected")
+            copy = None
+        except Exception as error:
+            answer.update(ok=False, note=f"Unreachable, showing the last copy: {str(error)[:80]}" if copy else f"Unreachable: {str(error)[:80]}")
+    rows = copy["rows"] if copy else []
+    answer["age"] = now - copy["at"] if copy else None
+    answer["count"] = len(rows)
+    answer["rows"] = rows
+    answer["file"] = str(table(name, rows, copy["at"])) if rows else ""
+    return answer
+
+
+def near_wifi():
+    """The networks this machine hears right now, from NetworkManager's last scan."""
+    if not shutil.which("nmcli"):
+        return []
+    try:
+        out = subprocess.run(["nmcli", "-t", "-e", "yes", "-f", "SSID,SIGNAL,SECURITY", "device", "wifi", "list", "--rescan", "no"],
+                             capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    seen = {}
+    for line in out.splitlines():
+        parts = line.replace("\\:", "\0").split(":")
+        if len(parts) < 3:
+            continue
+        ssid = parts[0].replace("\0", ":") or "(hidden)"
+        signal = int(parts[1]) if parts[1].isdigit() else 0
+        if ssid not in seen or seen[ssid]["signal"] < signal:
+            seen[ssid] = {"ssid": ssid, "signal": signal, "security": parts[2].replace("\0", ":")}
+    return sorted(seen.values(), key=lambda n: -n["signal"])
+
+
+def main():
+    if "--live" in sys.argv:
+        args = sys.argv[sys.argv.index("--live") + 1 :] + ["0", "0", "100"]
+        try:
+            lat, lon, km = float(args[0]), float(args[1]), float(args[2])
+        except ValueError:
+            sys.exit("usage: desktop-scanner --live LAT LON KM")
+        print(json.dumps(live(lat, lon, km), separators=(",", ":")))
+        return
+    if "--webcams" in sys.argv:
+        args = sys.argv[sys.argv.index("--webcams") + 1 :] + ["0", "0", "50"]
+        try:
+            lat, lon, km = float(args[0]), float(args[1]), float(args[2])
+        except ValueError:
+            sys.exit("usage: desktop-scanner --webcams LAT LON KM")
+        print(json.dumps(webcams(lat, lon, km), separators=(",", ":")))
+        return
+    if "--aircraft" in sys.argv:
+        args = sys.argv[sys.argv.index("--aircraft") + 1 :]
+        print(json.dumps(aircraft(args[0] if args else "", args[1] if len(args) > 1 else "")))
+        return
+    if "--json" not in sys.argv:
+        sys.exit(__doc__)
+    offline = "--cached" in sys.argv
+    with concurrent.futures.ThreadPoolExecutor(len(LAYERS)) as pool:
+        layers = list(pool.map(lambda name: layer(name, offline), LAYERS))
+    spot = home()
+    print(json.dumps({"connected": True, "checked": int(time.time()), "layers": layers, "near": near_wifi(),
+                      "home": {"lat": spot[0], "lon": spot[1]} if spot else None}, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

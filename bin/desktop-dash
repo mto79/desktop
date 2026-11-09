@@ -6,6 +6,7 @@
 #   desktop-dash watch     --json    software worth keeping an eye on, and what is new
 #   desktop-dash infra     --json    the clusters, and this machine
 #   desktop-dash home      --json    domotics: the house, from Home Assistant
+#   desktop-dash security  --json    this machine's verdicts, and what the journal shows
 #   desktop-dash health    --json    activity, from an export you keep
 #   desktop-dash finance   --json    money, from an export you keep
 #   desktop-dash news      --json    the headlines: Tweakers, and five more worth reading
@@ -55,6 +56,23 @@ cached() { # name max-age-seconds
 keep() { # name  (stdin: the answer)
   mkdir -p "$CACHE" 2>/dev/null || { cat; return; }
   tee "$CACHE/$1.json.part" && mv -f "$CACHE/$1.json.part" "$CACHE/$1.json"
+}
+
+# ------------------------------------------------------------------------------- security
+
+# The state of the machine and what the journal shows, as one answer. `attention` is what
+# puts a dot on the tab: a finding to act on, or an alert from the rules. The scanner's
+# globe is not in here: it asks for itself, since its feeds can take twenty seconds.
+cmd_security() {
+  local posture events
+  posture=$(desktop-security check --json 2>/dev/null) || posture=null
+  events=$(desktop-security-events --json 2>/dev/null) || events=null
+  jq -cn --argjson posture "${posture:-null}" --argjson events "${events:-null}" '{
+    connected: true,
+    posture: $posture,
+    events: $events,
+    attention: ((($posture.findings // []) | map(select(.level == "bad")) | length) + (($events.alerts // []) | length))
+  }'
 }
 
 # ---------------------------------------------------------------------------------- watch
@@ -279,6 +297,9 @@ sample() { # tab
         {label: "Solar", kind: "power", value: "1840", unit: "W"},
         {label: "House", kind: "power", value: "420", unit: "W"}]}'
     ;;
+  security)
+    jq -cn '{connected: false, how: ["desktop-security could not be asked."], posture: null, events: null, attention: 0}'
+    ;;
   health)
     jq -cn '{connected: false, how: [
         "Keep a file ~/.local/state/desktop/dashboard/health.json in the shape shown here -- written by a Strava or Garmin export you trust.",
@@ -315,15 +336,18 @@ start) desktop-brief --json | jq -c '. + {connected: true}' ;;
 watch) cmd_watch ;;
 infra) cmd_infra ;;
 home) cmd_home ;;
+security) cmd_security ;;
 health) from_file health ;;
 finance) from_file finance ;;
 news) cmd_news ;;
 # What you typed to the coding agents. Its own reader: three agents, three shapes.
 ai) desktop-dash-prompts ;;
-# Not tabs: a heading of the AI tab and one of the infrastructure tab, each asked for on
-# its own.
+# Not tabs: headings of the AI, infrastructure and security tabs, each asked for on its own.
 agents) desktop-dash-agents ;;
+rights) desktop-dash-rights ;;
 network) desktop-dash-network ;;
-tabs) printf '%s\n' start ai home infra health finance watch news ;;
-*) die "usage: desktop-dash <start|ai|home|infra|health|finance|watch|news> [--json|--sample]" ;;
+# A heading of the security tab, and also what puts a dot on it.
+advisories) desktop-advisories --json ;;
+tabs) printf '%s\n' start ai home infra security health finance watch news ;;
+*) die "usage: desktop-dash <start|ai|home|infra|security|health|finance|watch|news> [--json|--sample]" ;;
 esac

@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+
+"""Detection rules over the journal, in the manner of a SIEM.
+
+    desktop-security-events --json              # the last 24 hours
+    desktop-security-events --json --hours 72
+    desktop-security-events --json --from FILE  # journalctl -o json lines, for the test
+
+desktop-security says what state the machine is in. This says what has been happening: each
+line of the journal that a rule recognises becomes an event with a severity and, where one
+fits, a MITRE ATT&CK technique, and a run of events inside a window becomes an alert -- the
+same shape as Elastic Security's rules and alerts, without a cluster to keep alive for one
+laptop. It reads, and only reads: nothing is stored, the journal is the store.
+
+A rule that recognises nothing stays listed with a count of zero. "Nothing happened" and
+"nobody was looking" must not read the same, so the page can show what was looked for.
+"""
+
+import json
+import re
+import subprocess
+import sys
+import time
+
+# id, title, severity, MITRE technique, where it comes from, what the line says.
+RULES = [
+    ("ssh-accepted", "SSH login accepted", "high", "T1021.004", r"^sshd", r"Accepted (password|publickey)"),
+    ("ssh-failed", "SSH login failed", "medium", "T1110", r"^sshd", r"Failed password|Invalid user"),
+    ("sudo-denied", "sudo authentication failed", "medium", "T1548.003", r"^sudo$", r"authentication failure|incorrect password"),
+    ("su-denied", "su authentication failed", "medium", "T1548", r"^su$", r"authentication failure|FAILED SU"),
+    ("polkit-denied", "polkit authentication failed", "medium", "T1548", r"^polkit", r"authentication failure|Operator of .* FAILED"),
+    ("login-failed", "Login failed", "medium", "T1110", r"^(login|hyprlock|sddm|greetd)", r"authentication failure|FAILED LOGIN"),
+    ("avc-denied", "SELinux denied an action", "medium", "T1068", r"^(audit|kernel|setroubleshoot)$", r"avc:\s+denied"),
+    ("module-unsigned", "Kernel module failed verification", "medium", "T1547.006", r"^kernel$", r"module verification failed"),
+    ("firewall-drop", "Firewall refused a connection", "low", "T1046", r"^kernel$", r"filter_\w+_(REJECT|DROP)|FINAL_(REJECT|DROP)"),
+    ("usb-new", "New USB device", "low", "T1200", r"^kernel$", r"New USB device found"),
+    ("segfault", "A program crashed on a bad memory access", "low", "", r"^kernel$", r"segfault at"),
+    ("coredump", "A program dumped core", "low", "", r"^systemd-coredump$", r"dumped core"),
+    ("oom", "Out of memory: a program was killed", "low", "", r"^(kernel|systemd-oomd)$", r"Out of memory: Killed|Killed .* due to memory"),
+    ("sudo-run", "A command ran through sudo", "info", "T1548.003", r"^sudo$", r"COMMAND="),
+    ("session-new", "A session started", "info", "T1078", r"^systemd-logind$", r"New session"),
+]
+COMPILED = [(r[0], r[1], r[2], r[3], re.compile(r[4]), re.compile(r[5])) for r in RULES]
+
+# Rule id, how many, inside how many seconds, and what that is called when it happens.
+THRESHOLDS = [
+    ("sudo-denied", 5, 600, "high", "Repeated sudo failures: someone is guessing the password"),
+    ("ssh-failed", 10, 600, "high", "Repeated SSH failures: password guessing"),
+    ("login-failed", 5, 600, "high", "Repeated login failures at this machine"),
+    ("coredump", 10, 3600, "medium", "Crash loop: one program keeps dying"),
+    ("avc-denied", 20, 3600, "medium", "A burst of SELinux denials"),
+]
+
+SEVERITIES = ["high", "medium", "low", "info"]
+# How far back the page lists; the counts and the timeline see everything.
+SHOWN = 300
+
+
+def journal(hours):
+    # The sources the rules read and no others: a full day of every service's chatter is
+    # tens of megabytes of JSON to read for lines nobody wrote a rule for.
+    args = ["journalctl", "-o", "json", "--no-pager", "--since", f"-{hours}h"]
+    for field in ("SYSLOG_IDENTIFIER=sudo", "SYSLOG_IDENTIFIER=su", "SYSLOG_IDENTIFIER=sshd", "SYSLOG_IDENTIFIER=sshd-session",
+                  "SYSLOG_IDENTIFIER=polkitd", "SYSLOG_IDENTIFIER=login", "SYSLOG_IDENTIFIER=hyprlock",
+                  "SYSLOG_IDENTIFIER=systemd-coredump", "SYSLOG_IDENTIFIER=systemd-logind", "SYSLOG_IDENTIFIER=systemd-oomd",
+                  "SYSLOG_IDENTIFIER=setroubleshoot", "_TRANSPORT=audit", "_TRANSPORT=kernel"):
+        args += [field, "+"]
+    args.pop()
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=30).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
+def text_of(value):
+    # The journal hands over a message it thinks is binary as a list of bytes.
+    if isinstance(value, list):
+        return bytes(b for b in value if isinstance(b, int)).decode("utf-8", "replace")
+    return str(value or "")
+
+
+def recognise(identifier, message):
+    for rule, title, severity, technique, source, says in COMPILED:
+        if source.search(identifier) and says.search(message):
+            return rule, severity
+    return None
+
+
+def source_of(entry):
+    if entry.get("_TRANSPORT") == "audit":
+        return "audit"
+    if entry.get("_TRANSPORT") == "kernel":
+        return "kernel"
+    return text_of(entry.get("SYSLOG_IDENTIFIER"))
+
+
+def events_from(lines):
+    found = []
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        identifier, message = source_of(entry), text_of(entry.get("MESSAGE"))
+        hit = recognise(identifier, message)
+        if hit:
+            found.append({"at": int(entry.get("__REALTIME_TIMESTAMP", 0)) // 1000000, "rule": hit[0], "severity": hit[1],
+                          "source": identifier, "message": message[:300]})
+    found.sort(key=lambda e: e["at"])
+    return found
+
+
+def alerts_from(events):
+    alerts = []
+    for rule, many, window, severity, title in THRESHOLDS:
+        times = [e["at"] for e in events if e["rule"] == rule]
+        start = 0
+        # Each stretch over the threshold is one alert, however long it goes on for.
+        while start + many <= len(times):
+            if times[start + many - 1] - times[start] <= window:
+                end = start + many
+                while end < len(times) and times[end] - times[end - 1] <= window:
+                    end += 1
+                alerts.append({"rule": rule, "severity": severity, "title": title, "count": end - start, "from": times[start], "to": times[end - 1]})
+                start = end
+            else:
+                start += 1
+    alerts.sort(key=lambda a: -a["to"])
+    return alerts
+
+
+def buckets_from(events, hours, now):
+    """An hour each, oldest first, with what they held by severity. The page's timeline."""
+    out = []
+    for back in range(hours - 1, -1, -1):
+        end = now - back * 3600
+        start = end - 3600
+        inside = [e for e in events if start < e["at"] <= end]
+        row = {"label": time.strftime("%H:00", time.localtime(start)), "value": len(inside)}
+        for severity in SEVERITIES:
+            row[severity] = sum(e["severity"] == severity for e in inside)
+        out.append(row)
+    return out
+
+
+def main():
+    args = sys.argv[1:]
+    if "--json" not in args:
+        sys.exit(__doc__)
+    hours = int(args[args.index("--hours") + 1]) if "--hours" in args else 24
+    if "--from" in args:
+        with open(args[args.index("--from") + 1]) as source:
+            lines = source.read().splitlines()
+    else:
+        lines = journal(hours)
+    now = int(time.time())
+    events = events_from(lines)
+    counts = {}
+    for event in events:
+        counts[event["rule"]] = counts.get(event["rule"], 0) + 1
+    print(json.dumps({
+        "hours": hours,
+        "total": len(events),
+        "severity": {s: sum(e["severity"] == s for e in events) for s in SEVERITIES},
+        "alerts": alerts_from(events),
+        "rules": [{"id": r[0], "title": r[1], "severity": r[2], "technique": r[3], "count": counts.get(r[0], 0)} for r in RULES],
+        "timeline": buckets_from(events, min(hours, 48), now),
+        "events": events[-SHOWN:][::-1],
+    }, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

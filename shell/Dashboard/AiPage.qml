@@ -6,8 +6,9 @@ import qs.Ui
 
 // AI: the assistant itself, and what passes between you and it.
 //
-// Three headings. "Presence" is the voice drawn as large as the page allows, with what it
-// is doing and who would hear a sentence the list does not know. "Voice commands" is
+// "Presence" is the voice drawn as large as the page allows, with what it is doing and who
+// would hear a sentence the list does not know. "Rights" is what each coding agent is able
+// to do on this laptop, in the sections OpenShell governs. "Voice commands" is
 // what it has learned to understand, what it could not make out, and your own phrases --
 // each to be kept, corrected or thrown out. "Prompts" is everything you typed to a
 // coding agent: Claude Code, opencode and Codex each keep that in a place of their own,
@@ -20,15 +21,18 @@ ColumnLayout {
   property var info: null
   // The agents' statistics, asked separately and more often than the prompts.
   property var stats: null
+  // What each agent is able to do here, asked only while that heading is showing.
+  property var rights: null
   property bool active: false
   // What is left of the window under the tabs.
   property real room: 700
   property double clock: Date.now()
 
-  readonly property var headings: ["presence", "agents", "voice", "prompts"]
+  readonly property var headings: ["presence", "agents", "rights", "voice", "prompts"]
   readonly property var titles: ({
       "presence": "Presence",
       "agents": "Agents",
+      "rights": "Rights",
       "voice": "Voice commands",
       "prompts": "Prompts"
     })
@@ -54,6 +58,16 @@ ColumnLayout {
 
   // The room under the row of headings, for whichever of the three is showing.
   readonly property real below: Math.max(Style.rowHeight * 6, room - strip.implicitHeight - spacing)
+
+  // A section of the rights, in words. OpenShell's own names are kept where they compare.
+  readonly property var sectionWords: ({
+      "filesystem": "Files",
+      "landlock": "Kernel sandbox",
+      "process": "Runs as",
+      "network": "Network",
+      "inference": "Talks to",
+      "keys": "Keys"
+    })
 
   readonly property var agents: info && info.agents ? info.agents : []
   // The prompts of the agent chosen, or of all of them together, newest first. Not every
@@ -125,6 +139,11 @@ ColumnLayout {
 
   function toneOf(key) {
     return key === "claude" ? Color.popupAccent : key === "opencode" ? Color.good : Color.caution;
+  }
+
+  // A word from the rights reader, as the colour that says it.
+  function toneColor(tone) {
+    return tone === "danger" ? Color.popupUrgent : tone === "caution" ? Color.caution : tone === "good" ? Color.good : Color.popupText;
   }
 
   function ago(at) {
@@ -709,6 +728,174 @@ ColumnLayout {
     }
   }
 
+  // --- rights --------------------------------------------------------------------------
+  // The gate is what an agent has promised itself, the rows below it what the kernel would
+  // actually stop. Kept apart on the card because only the second is a limit.
+  GridLayout {
+    id: allowed
+
+    readonly property bool on: page.active && page.heading === "rights"
+
+    visible: page.heading === "rights"
+    Layout.fillWidth: true
+    columns: page.width > 1500 ? 4 : (page.width > 900 ? 2 : 1)
+    columnSpacing: Style.overviewSpacing
+    rowSpacing: Style.overviewSpacing
+
+    Card {
+      order: 0
+      appear: allowed.on
+      Layout.columnSpan: allowed.columns
+      icon: "\u{f0483}"
+      title: "Who holds them to anything"
+      figure: page.rights ? page.rights.sandboxed + " of " + page.rights.agents.length + " sandboxed" : ""
+      tone: page.rights && page.rights.sandboxed === page.rights.agents.length ? Color.good : Color.popupUrgent
+
+      Quiet {
+        text: !page.rights ? "Measuring…" : page.rights.sandboxed === page.rights.agents.length ? "The kernel holds every agent to its policy." : "An agent without a sandbox can do what " + page.rights.user + " can. Its prompts are its own: it asks because it is written to, and the kernel would not stop it."
+      }
+    }
+
+    Repeater {
+      model: page.rights ? page.rights.agents : []
+
+      delegate: Card {
+        id: holder
+
+        required property var modelData
+        required property int index
+
+        order: 1 + index
+        appear: allowed.on
+        Layout.alignment: Qt.AlignTop
+        icon: "\u{f06a9}"
+        title: modelData.name
+        figure: modelData.sandboxed ? "sandboxed" : modelData.commands_only ? "commands only" : modelData.partly ? "partly sandboxed" : "no sandbox"
+        tone: modelData.sandboxed ? Color.good : modelData.commands_only || modelData.partly ? Color.caution : Color.popupUrgent
+
+        Entry {
+          name: "Its own rules"
+          value: holder.modelData.gate.text
+          tone: holder.modelData.gate.tone
+        }
+        Quiet {
+          visible: holder.modelData.gate.note.length > 0
+          text: holder.modelData.gate.note.join("  ·  ")
+          font.pixelSize: Style.fontSize - 1
+          bottomPadding: 6
+        }
+        Repeater {
+          model: holder.modelData.rows
+
+          delegate: Entry {
+            required property var modelData
+
+            name: page.sectionWords[modelData.section] || modelData.section
+            value: modelData.text
+            tone: modelData.tone
+          }
+        }
+        Quiet {
+          topPadding: 6
+          text: holder.modelData.running > 0 ? holder.modelData.running + " running, measured just now" : "Not running: this is what it would have"
+          font.pixelSize: Style.fontSize - 1
+        }
+      }
+    }
+
+    Card {
+      order: 6
+      appear: allowed.on
+      Layout.columnSpan: Math.min(2, allowed.columns)
+      icon: "\u{f0770}"
+      title: "Sensitive places"
+      figure: page.rights ? page.rights.places.filter(function (place) {
+        return place.read;
+      }).length + " of " + page.rights.places.length + " open" : ""
+      tone: Color.popupUrgent
+
+      Repeater {
+        model: page.rights ? page.rights.places : []
+
+        delegate: Entry {
+          required property var modelData
+
+          name: modelData.label
+          value: (modelData.read ? "read" : "no read") + (modelData.write ? " · write" : "")
+          tone: modelData.read ? "danger" : "good"
+        }
+      }
+      Quiet {
+        topPadding: 6
+        text: "Tested with your account, without opening anything. Places not on this machine are left out."
+        font.pixelSize: Style.fontSize - 1
+      }
+    }
+
+    Card {
+      order: 7
+      appear: allowed.on
+      Layout.columnSpan: Math.min(2, allowed.columns)
+      icon: "\u{f0483}"
+      title: "What your account brings"
+      figure: page.rights ? String(page.rights.powers.filter(function (power) {
+        return power.tone === "danger";
+      }).length) + " serious" : ""
+      tone: Color.popupUrgent
+
+      Repeater {
+        model: page.rights ? page.rights.powers : []
+
+        delegate: Entry {
+          required property var modelData
+
+          name: modelData.name
+          value: modelData.can
+          tone: modelData.tone
+        }
+      }
+    }
+
+    Card {
+      order: 8
+      appear: allowed.on
+      Layout.columnSpan: allowed.columns
+      icon: "\u{f0493}"
+      title: "With OpenShell"
+      figure: !page.rights ? "" : page.rights.openshell.installed ? page.rights.openshell.version : "not installed"
+      tone: page.rights && page.rights.openshell.installed ? Color.good : Color.caution
+
+      Repeater {
+        model: page.rights ? page.rights.openshell.spec : []
+
+        delegate: Entry {
+          required property var modelData
+
+          name: modelData.section + "  ·  " + modelData.when
+          value: modelData["with"]
+          tone: ""
+        }
+      }
+      Quiet {
+        topPadding: 6
+        bottomPadding: 6
+        text: page.rights ? "From its documentation for " + page.rights.openshell.spec_version + ". An agent then runs from a container image in a sandbox, not as the program on this laptop." : ""
+        font.pixelSize: Style.fontSize - 1
+      }
+      Repeater {
+        model: page.rights ? page.rights.openshell.needs : []
+
+        delegate: Entry {
+          required property var modelData
+
+          name: modelData.what
+          value: (modelData.ok ? "ready" : "missing") + (modelData.detail !== "" ? "  ·  " + modelData.detail : "")
+          tone: modelData.ok ? "good" : "caution"
+        }
+      }
+    }
+  }
+
   // --- prompts -------------------------------------------------------------------------
   GridLayout {
     id: asked
@@ -795,6 +982,36 @@ ColumnLayout {
         visible: page.prompts.length === 0
         text: page.info ? "Nothing asked here yet." : "Reading what you asked…"
       }
+    }
+  }
+
+  // One right: what it is about on the left, how it stands on the right.
+  component Entry: RowLayout {
+    property string name: ""
+    property string value: ""
+    property string tone: ""
+
+    width: parent ? parent.width : 0
+    spacing: Style.sectionSpacing
+
+    Text {
+      Layout.alignment: Qt.AlignTop
+      text: parent.name
+      textFormat: Text.PlainText
+      color: Color.popupMuted
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize
+    }
+    Text {
+      Layout.fillWidth: true
+      Layout.alignment: Qt.AlignTop
+      horizontalAlignment: Text.AlignRight
+      text: parent.value
+      textFormat: Text.PlainText
+      color: page.toneColor(parent.tone)
+      font.family: Style.fontFamily
+      font.pixelSize: Style.fontSize
+      wrapMode: Text.WordWrap
     }
   }
 

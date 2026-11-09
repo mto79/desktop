@@ -12,6 +12,17 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Live aircraft on the Security tab's globe: zoomed in to a region, positions from
+  adsb.lol every ten seconds instead of OpenSky's five minutes. And NASA EONET's natural
+  events going on now, such as wildfires, storms, volcanoes and sea ice, as a layer of their own.
+- Public webcams on the Security tab's globe: zoomed in to a region, the cameras registered
+  with Windy around the middle of the view, with their pictures. A click opens a pop-up with
+  the picture and the day's timelapse; they are fetched before you are zoomed in all the
+  way, so they are there when you are. Needs a free Windy key.
+- A Rights heading on the dashboard's AI tab: per coding agent, what it can reach on this
+  laptop and whether anything holds it to that, in the sections OpenShell governs. It also
+  lists the sensitive places open to your account, what your groups bring, and what OpenShell
+  would need here.
 - A log of what came and went on the network and over Bluetooth: each scan says which
   devices are new, back or gone since the last one, and the dashboard keeps the history
   under each radar.
@@ -57,6 +68,13 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- NCSC-NL's security advisories on the dashboard's Security tab, with their rating, a filter
+  for those naming something installed here, and a dot on the tab for a recent high/high.
+- A Security tab on the dashboard. Posture shows what `desktop-security` found. Events runs
+  rules over the journal, with alerts, a timeline and a search. Scanner is a 3D globe of the
+  aircraft, ships, malware servers and earthquakes that public feeds report, with Wi-Fi
+  from WiGLE for those with an account. It zooms from orbit to a region, and a click on an
+  aircraft says what it is and where it usually flies. QtQuick3D is installed.
 - The screen stays on during a call or a screen share, shown by a coffee cup on the bar.
   Clicking the cup, or `SUPER + CTRL + I`, keeps the screen on at any other time.
 - kubeseal, for sealing Kubernetes secrets so they can be committed: 0.40.0, checked

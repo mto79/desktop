@@ -1,0 +1,579 @@
+#!/usr/bin/env python3
+
+# desktop-dash-rights: what each coding agent is able to do on this laptop, for the Rights
+# heading of the dashboard's AI tab.
+#
+#   desktop-dash-rights          one JSON object
+#
+# Said in the sections NVIDIA's OpenShell governs -- filesystem_policy, landlock, process,
+# network_policies, and providers for inference and keys -- so that this page and a policy
+# written later talk about the same things. OpenShell itself is not needed to read this.
+#
+# Two kinds of limit are kept apart on purpose, because they are not worth the same:
+#
+#   the gate      what the agent has promised itself: its prompts, its rules. The agent
+#                 enforces it, and a bug or a flag undoes it.
+#   the boundary  what the kernel holds it to. Read from /proc for each running process.
+#
+# Everything is measured or read from the agent's own settings, and it only ever looks.
+# Three things it deliberately does not do:
+#
+#   - open a secret. Places are tested with access(2), the environment is reduced to the
+#     names of its variables, and the keyring is asked only whether it is locked;
+#   - run sudo to see whether it would ask. A failed `sudo -n` is a line in the journal,
+#     which the Security tab reads, and this runs every minute;
+#   - wake anything up. The keyring is asked only when already on the bus, without
+#     activation: a page that started it would be measuring itself.
+
+import glob
+import grp
+import json
+import os
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+import tomllib
+from urllib.parse import urlparse
+
+PROC = os.environ.get("DESKTOP_RIGHTS_PROC", "/proc")
+HOME = os.path.expanduser("~")
+
+# The ones this laptop has reason to run. The name is what /proc/<pid>/comm says.
+AGENTS = (
+    {"key": "claude", "name": "Claude Code", "binary": "claude"},
+    {"key": "codex", "name": "Codex", "binary": "codex"},
+    {"key": "opencode", "name": "OpenCode", "binary": "opencode"},
+    {"key": "copilot", "name": "Copilot", "binary": "copilot"},
+)
+
+# What an agent would be after, if it were after anything. Only the place, never its contents.
+PLACES = (
+    ("All your files", "~"),
+    ("SSH keys", "~/.ssh"),
+    ("GPG keys", "~/.gnupg"),
+    ("Kubernetes logins", "~/.kube"),
+    ("AWS logins", "~/.aws"),
+    ("GitHub login", "~/.config/gh"),
+    ("Container registry logins", "~/.config/containers/auth.json"),
+    ("Docker logins", "~/.docker/config.json"),
+    ("Password store", "~/.password-store"),
+    ("Keyring files", "~/.local/share/keyrings"),
+    ("Firefox profile", "~/.mozilla"),
+    ("Chrome profile", "~/.config/google-chrome"),
+    ("Chromium profile", "~/.config/chromium"),
+    ("Brave profile", "~/.config/BraveSoftware"),
+    ("Shell history", "~/.local/share/fish/fish_history"),
+    ("What runs at login", "~/.config/systemd/user"),
+    ("Claude's login", "~/.claude/.credentials.json"),
+    ("Codex's login", "~/.codex/auth.json"),
+    ("OpenCode's logins", "~/.local/share/opencode/auth.json"),
+    ("System password hashes", "/etc/shadow"),
+)
+
+SECRET_NAME = re.compile(r"(?:^|_)(?:API_?KEY|KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)(?:_|$)")
+
+# What OpenShell would hold each right to, as its documentation for v0.1.6 has it. "when"
+# is when the section can change: a filesystem rule is fixed when the sandbox starts.
+SPEC = (
+    {"section": "filesystem_policy", "when": "at sandbox start", "with": "Only the paths listed in read_only and read_write. Anything else cannot be opened."},
+    {"section": "landlock", "when": "at sandbox start", "with": "The kernel enforces those paths. hard_requirement refuses to start without it."},
+    {"section": "process", "when": "at sandbox start", "with": "A non-root run_as_user and run_as_group, none of your groups. Root is refused."},
+    {"section": "network_policies", "when": "live", "with": "Nothing goes out by default. A rule names the programs and the hosts, down to method and path."},
+    {"section": "providers", "when": "live", "with": "The agent sees a placeholder. The real key is added on the way out, for that endpoint only."},
+)
+
+
+def run(*command, wait=3):
+    """stdout and exit code, or ("", None) when the command is missing or hangs."""
+    try:
+        done = subprocess.run(command, capture_output=True, text=True, timeout=wait)
+        return done.stdout, done.returncode
+    except (OSError, subprocess.TimeoutExpired):
+        return "", None
+
+
+def read_json(path):
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def read_toml(path):
+    try:
+        with open(path, "rb") as handle:
+            return tomllib.load(handle)
+    except (OSError, ValueError):
+        return {}
+
+
+def host_of(url):
+    try:
+        return urlparse(url).hostname or ""
+    except (ValueError, AttributeError):
+        return ""
+
+
+def plural(count, word):
+    return f"{count} {word}" + ("" if count == 1 else "s")
+
+
+# --- the processes ------------------------------------------------------------------------
+def status_of(pid):
+    fields = {}
+    try:
+        with open(f"{PROC}/{pid}/status", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                name, _, value = line.partition(":")
+                fields[name] = value.strip()
+    except OSError:
+        return None
+    return fields
+
+
+def read_process_file(pid, name):
+    try:
+        with open(f"{PROC}/{pid}/{name}", "rb") as handle:
+            return handle.read()
+    except OSError:
+        return b""
+
+
+def all_processes():
+    """Every process: its name, parent and status."""
+    found = {}
+    try:
+        names = os.listdir(PROC)
+    except OSError:
+        return found
+    for pid in names:
+        if not pid.isdigit():
+            continue
+        status = status_of(pid)
+        if status:
+            found[int(pid)] = status
+    return found
+
+
+def descendants(pids, processes):
+    """These and everything they started: a connection a child opens is the agent's too,
+    which is also how OpenShell binds a program to an endpoint."""
+    children = {}
+    for pid, status in processes.items():
+        try:
+            children.setdefault(int(status.get("PPid", "0")), []).append(pid)
+        except ValueError:
+            pass
+    seen, waiting = set(), list(pids)
+    while waiting:
+        pid = waiting.pop()
+        if pid not in seen:
+            seen.add(pid)
+            waiting.extend(children.get(pid, []))
+    return seen
+
+
+def mount_namespace(pid):
+    try:
+        return os.readlink(f"{PROC}/{pid}/ns/mnt")
+    except OSError:
+        return ""
+
+
+def confined(pid, status):
+    """Whether the kernel holds this process to anything.
+
+    Landlock has no line in /proc to read, but it can only be entered after no_new_privs
+    or with CAP_SYS_ADMIN, and no_new_privs is never cleared. A process with neither was
+    not put under it, so this cannot call a Landlocked process free.
+    """
+    if status.get("NoNewPrivs", "0") != "0" or status.get("Seccomp", "0") != "0":
+        return True
+    ours, theirs = mount_namespace("self"), mount_namespace(pid)
+    return bool(ours and theirs and ours != theirs)
+
+
+def secret_names(pids):
+    """Names of the variables that look like keys. The values are dropped unread."""
+    names = set()
+    for pid in pids:
+        for entry in read_process_file(pid, "environ").split(b"\0"):
+            name = entry.partition(b"=")[0].decode("ascii", "replace")
+            if SECRET_NAME.search(name):
+                names.add(name)
+    return sorted(names)
+
+
+def connections():
+    """(pid, remote address) of each connection established to another machine."""
+    out, _ = run("ss", "-tnpH", "state", "established")
+    found = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        peer = parts[3].rpartition(":")[0].strip("[]")
+        if peer.startswith("127.") or peer in ("::1", "::ffff:127.0.0.1"):
+            continue
+        found.extend((int(pid), peer) for pid in re.findall(r"pid=(\d+)", line))
+    return found
+
+
+# --- the account ----------------------------------------------------------------------------
+def places():
+    found = []
+    for label, shown in PLACES:
+        path = os.path.expanduser(shown)
+        try:
+            is_dir = stat.S_ISDIR(os.stat(path).st_mode)
+        except PermissionError:
+            found.append({"label": label, "path": shown, "read": False, "write": False})
+            continue
+        except OSError:
+            continue  # Not here: nothing to reach.
+        wanted = os.R_OK | os.X_OK if is_dir else os.R_OK
+        found.append({"label": label, "path": shown,
+                      "read": os.access(path, wanted),
+                      "write": os.access(path, os.W_OK)})
+    return found
+
+
+def account_groups():
+    names = set()
+    for gid in os.getgroups():
+        try:
+            names.add(grp.getgrgid(gid).gr_name)
+        except KeyError:
+            pass
+    return names
+
+
+def keyring_state():
+    """"open", "locked", or "" when nothing is running to ask."""
+    out, _ = run("busctl", "--user", "--no-pager", "--no-legend", "list")
+    running = any(len(line.split()) > 1 and line.split()[0] == "org.freedesktop.secrets" and line.split()[1].isdigit()
+                  for line in out.splitlines())
+    if not running:
+        return ""
+    out, code = run("busctl", "--user", "--auto-start=no", "get-property", "org.freedesktop.secrets",
+                    "/org/freedesktop/secrets/aliases/default", "org.freedesktop.Secret.Collection", "Locked")
+    if code != 0:
+        return ""
+    return "open" if out.strip() == "b false" else "locked"
+
+
+def ssh_keys_loaded():
+    if not os.environ.get("SSH_AUTH_SOCK"):
+        return 0
+    out, code = run("ssh-add", "-l")
+    return len(out.splitlines()) if code == 0 else 0
+
+
+def powers(groups):
+    """What belonging to this account brings, besides its files. Worst first."""
+    found = []
+
+    def add(tone, name, can):
+        found.append({"tone": tone, "name": name, "can": can})
+
+    if "docker" in groups:
+        add("danger", "docker group", "Root in all but name: a container can mount the whole disk.")
+    if "libvirt" in groups and os.path.exists("/run/libvirt/libvirt-sock"):
+        add("danger", "libvirt group", "Root in all but name: a virtual machine can be given any disk.")
+    if "input" in groups and any(os.access(path, os.R_OK) for path in glob.glob("/dev/input/event*")):
+        add("danger", "input group", "Read every key you press, passwords included, and any mouse.")
+    keyring = keyring_state()
+    if keyring == "open":
+        add("danger", "Keyring", "Open: saved passwords can be read without a prompt.")
+    keys = ssh_keys_loaded()
+    if keys:
+        add("danger", "SSH agent", f"Sign in as you, with {plural(keys, 'key')} loaded.")
+    if "wheel" in groups or "sudo" in groups:
+        add("caution", "wheel group", "Become root with sudo, once it has your password.")
+    if "wireshark" in groups and shutil.which("dumpcap"):
+        add("caution", "wireshark group", "Record the network traffic of the whole machine.")
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if any(os.access(path, os.W_OK) for path in glob.glob(f"{runtime}/hypr/*/.socket.sock")):
+        add("caution", "Hyprland socket", "Start programs, move windows, read the screen and the clipboard.")
+    units = os.path.join(HOME, ".config/systemd/user")
+    if os.access(units if os.path.isdir(units) else HOME, os.W_OK):
+        add("caution", "User services", "Start something at every login, long after the agent has gone.")
+    if shutil.which("podman"):
+        add("caution", "Podman", "Run containers as you, with your files mounted.")
+    if keyring == "locked":
+        add("good", "Keyring", "Locked: saved passwords need it opened first.")
+    try:
+        with open(f"{PROC}/sys/kernel/yama/ptrace_scope", encoding="ascii") as handle:
+            if int(handle.read().strip()) >= 1:
+                add("good", "Other programs' memory", "Out of reach: yama allows only its own children.")
+            else:
+                add("danger", "Other programs' memory", "Readable: yama allows any program of yours.")
+    except (OSError, ValueError):
+        pass
+    return found
+
+
+# --- each agent's own gate ------------------------------------------------------------------
+def flags_of(pids):
+    flags = set()
+    for pid in pids:
+        flags.update(read_process_file(pid, "cmdline").decode("utf-8", "replace").split("\0")[1:])
+    return flags
+
+
+def claude_gate(flags):
+    settings = read_json(os.path.join(HOME, ".claude/settings.json"))
+    rules = settings.get("permissions") or {}
+    mode = rules.get("defaultMode", "default")
+    notes = []
+    for kind in ("allow", "deny"):
+        if rules.get(kind):
+            notes.append(f"{plural(len(rules[kind]), kind + ' rule')}")
+    soft = (settings.get("autoMode") or {}).get("soft_deny") or []
+    if soft:
+        notes.append(f"{plural(len(soft), 'auto-mode refusal')}")
+    bash_sandbox = (settings.get("sandbox") or {}).get("enabled") is True
+    notes.append("its commands in its own sandbox" if bash_sandbox else "its sandbox for commands is off")
+    if "--dangerously-skip-permissions" in flags or mode == "bypassPermissions" or "bypassPermissions" in flags:
+        return {"tone": "danger", "text": "Asks nothing: started skipping its permission prompts", "note": notes}
+    if "--allow-dangerously-skip-permissions" in flags:
+        return {"tone": "caution", "text": "Asks first, but its prompts can be switched off inside a session", "note": notes}
+    return {"tone": "caution", "text": f"Asks first ({mode} mode)", "note": notes}
+
+
+def codex_state(flags):
+    """Its sandbox mode and whether its commands have the network. Flags win over the file."""
+    config = read_toml(os.path.join(HOME, ".codex/config.toml"))
+    mode = config.get("sandbox_mode") or "workspace-write"
+    if "--dangerously-bypass-approvals-and-sandbox" in flags or "--yolo" in flags:
+        mode = "danger-full-access"
+    else:
+        for name in ("read-only", "workspace-write", "danger-full-access"):
+            if name in flags or f"--sandbox={name}" in flags:
+                mode = name
+    network = (config.get("sandbox_workspace_write") or {}).get("network_access") is True
+    return config, mode, network
+
+
+def codex_gate(flags):
+    config, mode, _ = codex_state(flags)
+    approval = config.get("approval_policy") or "on-request"
+    notes = [f"asks: {approval}"]
+    trusted = [path for path, entry in (config.get("projects") or {}).items()
+               if isinstance(entry, dict) and entry.get("trust_level") == "trusted"]
+    if trusted:
+        notes.append(f"{plural(len(trusted), 'trusted folder')}")
+    if HOME in trusted:
+        notes.append("your whole home is one of them")
+    if mode == "danger-full-access":
+        return {"tone": "danger", "text": "No sandbox for its commands, and may ask nothing", "note": notes}
+    tone = "good" if mode == "read-only" else "caution"
+    return {"tone": tone, "text": f"Runs its commands in its own {mode} sandbox", "note": notes}
+
+
+def opencode_gate(_flags):
+    config = read_json(os.path.join(HOME, ".config/opencode/opencode.json"))
+    permission = config.get("permission")
+    if permission in ("deny", "ask"):
+        return {"tone": "caution", "text": f"Set to {permission} for everything", "note": []}
+    if isinstance(permission, dict) and permission:
+        return {"tone": "caution", "text": f"{plural(len(permission), 'permission rule')} set", "note": []}
+    return {"tone": "danger", "text": "Asks almost nothing: no rules set, and its default is to allow",
+            "note": ["asks before leaving the project, or repeating itself"]}
+
+
+def copilot_gate(flags):
+    if flags & {"--allow-all-tools", "--allow-all", "--yolo"}:
+        return {"tone": "danger", "text": "Asks nothing: started allowing every tool", "note": []}
+    if not os.path.isdir(os.path.join(HOME, ".copilot")):
+        return {"tone": "", "text": "Never set up here. Asks before each tool once it is", "note": []}
+    return {"tone": "caution", "text": "Asks before each tool", "note": []}
+
+
+GATES = {"claude": claude_gate, "codex": codex_gate, "opencode": opencode_gate, "copilot": copilot_gate}
+
+
+# --- where each sends its inference, and where its keys are ---------------------------------
+def routes(key):
+    """[(what it talks to, host)] from its own settings, and its key files."""
+    if key == "claude":
+        settings = read_json(os.path.join(HOME, ".claude/settings.json"))
+        host = host_of((settings.get("env") or {}).get("ANTHROPIC_BASE_URL", "")) or "api.anthropic.com"
+        return [host], ["~/.claude/.credentials.json"]
+    if key == "codex":
+        config = read_toml(os.path.join(HOME, ".codex/config.toml"))
+        provider = (config.get("model_providers") or {}).get(config.get("model_provider", ""), {})
+        host = host_of(provider.get("base_url", "")) if isinstance(provider, dict) else ""
+        return [host or "api.openai.com"], ["~/.codex/auth.json"]
+    if key == "opencode":
+        hosts = []
+        for name in ("opencode.json", "local.json"):
+            for provider in (read_json(os.path.join(HOME, ".config/opencode", name)).get("provider") or {}).values():
+                host = host_of((provider.get("options") or {}).get("baseURL", "")) if isinstance(provider, dict) else ""
+                if host and host not in hosts:
+                    hosts.append(host)
+        files = ["~/.local/share/opencode/auth.json"]
+        files += ["~/" + os.path.relpath(path, HOME) for path in sorted(glob.glob(os.path.join(HOME, ".config/opencode/*.key")))]
+        return hosts or ["the providers you log it in to"], files
+    return ["api.githubcopilot.com"], ["~/.copilot"]
+
+
+def rights_of(agent, processes, opened, reached, groups, ours):
+    """One agent's card: the gate, the boundary, then a row per OpenShell section."""
+    key = agent["key"]
+    pids = [pid for pid, status in processes.items() if status.get("Name") == agent["binary"]]
+    tree = descendants(pids, processes)
+    flags = flags_of(pids)
+    held = [pid for pid in pids if confined(pid, processes[pid])]
+    sandboxed = bool(pids) and len(held) == len(pids)
+
+    readable = sum(1 for place in reached if place["read"])
+    writable = sum(1 for place in reached if place["write"])
+    capabilities = [processes[pid].get("CapEff", "0") for pid in pids]
+    has_capabilities = any(value.strip("0") for value in capabilities)
+    routes_to, key_files = routes(key)
+    key_files = [path for path in key_files if os.path.exists(os.path.expanduser(path))]
+    secrets = secret_names(pids)
+    links = [peer for pid, peer in opened if pid in tree]
+
+    rows = []
+
+    def row(section, tone, text):
+        rows.append({"section": section, "tone": tone, "text": text})
+
+    _, mode, network = codex_state(flags) if key == "codex" else ({}, "", False)
+    own_sandbox = key == "codex" and mode != "danger-full-access"
+
+    if sandboxed:
+        row("filesystem", "good", "Held to what its sandbox's policy lists")
+    elif own_sandbox:
+        where = "nothing" if mode == "read-only" else "the project and /tmp"
+        row("filesystem", "caution", f"Its commands read {readable} of {len(reached)} sensitive places, and write only {where}")
+    else:
+        row("filesystem", "danger", f"Reads {readable} of {len(reached)} sensitive places, writes {writable}")
+
+    if sandboxed:
+        row("landlock", "good", "Its processes run under a sandbox")
+    elif own_sandbox:
+        row("landlock", "caution", "Only around its commands, and set up by Codex itself")
+    elif pids:
+        row("landlock", "danger", "None: measured on what is running now")
+    else:
+        row("landlock", "danger", "None: nothing would start it inside one")
+
+    risky = sorted(groups & {"wheel", "sudo", "libvirt", "input", "docker", "wireshark"})
+    who = f"{ours}, not root" + (" · has capabilities" if has_capabilities else " · no capabilities")
+    who += " · also in " + ", ".join(risky) if risky else ""
+    row("process", "danger" if has_capabilities or set(risky) & {"libvirt", "input", "docker"} else "caution", who)
+
+    count = len(links)
+    now = f"{plural(len(set(links)), 'host')} now" if pids else "not running"
+    if sandboxed:
+        row("network", "good", f"Held to what its policy lists · {now}")
+    elif own_sandbox and not network:
+        row("network", "caution", f"Its commands have none. Codex itself goes anywhere · {now}")
+    else:
+        row("network", "danger", f"Any host, any program · {now}" + (f" over {plural(count, 'connection')}" if count > len(set(links)) else ""))
+
+    row("inference", "", " · ".join(routes_to))
+
+    keys = []
+    if key_files:
+        keys.append(f"{plural(len(key_files), 'key file')} it can read")
+    if secrets:
+        keys.append(f"{plural(len(secrets), 'secret')} in its environment")
+    row("keys", "danger" if keys and not sandboxed else "", " · ".join(keys) if keys else "None found")
+
+    return {
+        "key": key,
+        "name": agent["name"],
+        "running": len(pids),
+        "sandboxed": sandboxed,
+        # Its commands in a sandbox it sets up itself, and itself in none.
+        "commands_only": own_sandbox and not sandboxed,
+        # Some of its processes in a sandbox and some not is the unsandboxed answer.
+        "partly": bool(held) and not sandboxed,
+        "gate": GATES[key](flags),
+        "rows": rows,
+        "secrets": secrets,
+        "key_files": key_files,
+    }
+
+
+# --- OpenShell ------------------------------------------------------------------------------
+def kernel_ok():
+    match = re.match(r"(\d+)\.(\d+)", os.uname().release)
+    return bool(match) and (int(match[1]), int(match[2])) >= (6, 2)
+
+
+def lsm_has_landlock():
+    try:
+        with open("/sys/kernel/security/lsm", encoding="ascii") as handle:
+            return "landlock" in handle.read().split(",")
+    except OSError:
+        return False
+
+
+def podman_major():
+    out, _ = run("podman", "--version")
+    match = re.search(r"(\d+)\.\d+", out)
+    return int(match[1]) if match else 0
+
+
+def openshell():
+    """Is it here, and what it would need to be."""
+    version = ""
+    if shutil.which("openshell"):
+        out, code = run("openshell", "--version")
+        version = out.strip() if code == 0 else "installed"
+    socket_out, _ = run("systemctl", "--user", "is-active", "podman.socket")
+    major = podman_major()
+    return {
+        "installed": bool(version),
+        "version": version,
+        "spec_version": "v0.1.6",
+        "spec": list(SPEC),
+        "needs": [
+            {"what": "Linux 6.2 or newer", "ok": kernel_ok(), "detail": os.uname().release},
+            {"what": "Landlock in the kernel", "ok": lsm_has_landlock(), "detail": ""},
+            {"what": "Podman 5, rootless", "ok": major >= 5, "detail": f"version {major}" if major else "not installed"},
+            {"what": "Podman's user socket", "ok": socket_out.strip() == "active", "detail": socket_out.strip()},
+            {"what": "cgroups v2", "ok": os.path.exists("/sys/fs/cgroup/cgroup.controllers"), "detail": ""},
+        ],
+    }
+
+
+def main():
+    processes = all_processes()
+    groups = account_groups()
+    try:
+        ours = pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        ours = str(os.getuid())
+    reached = places()
+    opened = connections()
+    agents = [rights_of(agent, processes, opened, reached, groups, ours)
+              for agent in AGENTS if shutil.which(agent["binary"])]
+    answer = {
+        "connected": True,
+        "checked": int(time.time()),
+        "user": ours,
+        "sandboxed": sum(1 for agent in agents if agent["sandboxed"]),
+        "running": sum(1 for agent in agents if agent["running"]),
+        "agents": agents,
+        "places": reached,
+        "powers": powers(groups),
+        "openshell": openshell(),
+    }
+    json.dump(answer, sys.stdout, separators=(",", ":"))
+    print()
+
+
+if __name__ == "__main__":
+    main()

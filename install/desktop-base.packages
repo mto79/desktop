@@ -119,6 +119,8 @@ qt6-qtsvg
 qt6-qtvirtualkeyboard
 qt6-qtmultimedia
 qt6-qtwayland
+qt6-qtquick3d
+qt6-qtshadertools
 quickshell
 unzip
 usbutils

@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+
+"""NCSC-NL's security advisories, and which of them name something on this machine.
+
+    desktop-advisories --json             # from the feed, at most every half hour
+    desktop-advisories --json --from FILE # an RSS file, for the test
+
+The NCSC's title carries its verdict: "NCSC-2026-0461 [1.00] [M/H] Kwetsbaarheden verholpen
+in Linux kernel" is version 1.00, medium likelihood, high damage, and it is about the Linux
+kernel. That is taken apart here, and the product is compared with what is installed.
+
+A match says an advisory names something you have, and no more: not that your version is
+affected, or that it is not already patched. It is whole words against package and command
+names, because a guess that cries wolf gets ignored by the second week. Software only you
+would know about -- what you run at work, say -- goes in a list of your own, outside this
+public repository, in ~/.config/desktop/dashboard/advisories.json: {"watch": ["OpenShift"]}.
+
+The feed is someone else's XML, so it is read by a parser, shown as plain text, and a link
+is only kept if it goes to the NCSC. If it cannot be reached the last copy stays, marked.
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.request
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
+from pathlib import Path
+
+FEED = "https://advisories.ncsc.nl/rss/advisories"
+SITE = "https://advisories.ncsc.nl/"
+HOME = Path.home()
+CACHE = Path(os.environ.get("XDG_CACHE_HOME") or HOME / ".cache") / "desktop" / "advisories.xml"
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "desktop" / "dashboard" / "advisories.json"
+EVERY = 1800
+# How long a high/high that names something here keeps a dot on the tab.
+RECENT = 14 * 86400
+
+TITLE = re.compile(r"^(NCSC-\d{4}-\d+)\s*\[([\d.]+)\]\s*\[([LMH])/([LMH])\]\s*(.*)$", re.S)
+# What comes before the product in the NCSC's sentence, and after it.
+LEAD = re.compile(r"^(meerdere\s+)?(kwetsba\w+|kritieke\s+kwetsba\w+)(\s+verholpen)?\s+in\s+", re.I)
+TAIL = re.compile(r"\s+(door|van)\s+.*$", re.I)
+# Words that name no product. "core" is Drupal Core, "server" is anyone's.
+NOISE = {"apple", "oracle", "google", "microsoft", "linux", "server", "core", "data", "and", "en", "series", "enterprise",
+         "community", "modules", "module", "plugin", "plugins", "secure", "remote", "support", "manager", "analytics",
+         "network", "networking", "communications", "software", "open", "the", "suite",
+         # "red" is a command on Fedora, a restricted ed, which made Red Hat yours on every machine.
+         "red", "hat"}
+# A name that is not the package's: Java is java-21-openjdk.
+FAMILY = {"java": "java-", "chromium": "chromium", "postgresql": "postgresql"}
+
+
+def read_feed(args):
+    """The XML and how old it is. A failure with a copy keeps the copy; without one, raises."""
+    if "--from" in args:
+        return Path(args[args.index("--from") + 1]).read_text(), None, True
+    now = time.time()
+    try:
+        age = now - CACHE.stat().st_mtime
+    except OSError:
+        age = None
+    if age is not None and age < EVERY:
+        return CACHE.read_text(), age, True
+    try:
+        request = urllib.request.Request(FEED, headers={"User-Agent": "desktop-advisories (personal dashboard)"})
+        with urllib.request.urlopen(request, timeout=15) as answer:
+            text = answer.read().decode("utf-8", "replace")
+        ET.fromstring(text)
+        CACHE.parent.mkdir(parents=True, exist_ok=True)
+        part = CACHE.with_suffix(".part")
+        part.write_text(text)
+        part.replace(CACHE)
+        return text, 0, True
+    except Exception:
+        if age is None:
+            raise
+        return CACHE.read_text(), age, False
+
+
+def installed():
+    try:
+        out = subprocess.run(["rpm", "-qa", "--qf", "%{NAME}\n"], capture_output=True, text=True, timeout=15).stdout
+        return set(out.split())
+    except (OSError, subprocess.SubprocessError):
+        return set()
+
+
+def watched():
+    try:
+        return [str(w) for w in json.loads(CONFIG.read_text()).get("watch", [])]
+    except (OSError, ValueError, AttributeError):
+        return []
+
+
+def product_of(title):
+    return TAIL.sub("", LEAD.sub("", title.strip())).strip()
+
+
+def matches(product, packages, watch):
+    """What on this machine, or on your list, the product names. Whole words only."""
+    words = []
+    for word in re.findall(r"[a-z0-9][a-z0-9+_.-]*", product.lower()):
+        # "Brotli-decoder" is about brotli; the whole word first, then its first part.
+        words += [word, word.split("-")[0]]
+    words = [w for w in dict.fromkeys(words) if w not in NOISE and len(w) >= 3]
+    found = []
+    for word in words:
+        family = FAMILY.get(word)
+        if word in packages or shutil.which(word) or (family and any(p.startswith(family) for p in packages)):
+            found.append(word)
+    for item in watch:
+        if re.search(r"(?<![a-z0-9])" + re.escape(item.lower()) + r"(?![a-z0-9])", product.lower()):
+            found.append(item)
+    return list(dict.fromkeys(found))
+
+
+def read_items(text, packages, watch):
+    items = []
+    for item in ET.fromstring(text).findall("./channel/item"):
+        hit = TITLE.match((item.findtext("title") or "").strip())
+        if not hit:
+            continue
+        identifier, version, likelihood, damage, title = hit.groups()
+        link = (item.findtext("link") or "").strip()
+        try:
+            at = int(parsedate_to_datetime((item.findtext("pubDate") or "").strip()).timestamp())
+        except (TypeError, ValueError):
+            at = 0
+        product = product_of(title)
+        items.append({
+            "id": identifier,
+            "version": version,
+            "likelihood": likelihood,
+            "damage": damage,
+            "title": title.strip(),
+            "product": product,
+            "summary": re.sub(r"<[^>]+>", "", item.findtext("description") or "").strip(),
+            "link": link if link.startswith(SITE) else "",
+            "at": at,
+            "updated": version != "1.00",
+            "mine": matches(product, packages, watch),
+        })
+    return items
+
+
+def main():
+    args = sys.argv[1:]
+    if "--json" not in args:
+        sys.exit(__doc__)
+    try:
+        text, age, fresh = read_feed(args)
+    except Exception as error:
+        print(json.dumps({"connected": False, "how": [f"The NCSC's feed could not be reached: {str(error)[:80]}"], "items": [], "attention": 0}))
+        return
+    try:
+        items = read_items(text, installed(), watched())
+    except ET.ParseError as error:
+        print(json.dumps({"connected": False, "how": [f"The NCSC's feed could not be read: {str(error)[:80]}"], "items": [], "attention": 0}))
+        return
+    now = time.time()
+    urgent = [i for i in items if i["mine"] and i["likelihood"] == "H" and i["damage"] == "H" and now - i["at"] < RECENT]
+    print(json.dumps({"connected": True, "fresh": fresh, "age": None if age is None else int(age), "items": items,
+                      "highHigh": sum(i["likelihood"] == "H" and i["damage"] == "H" for i in items),
+                      "mine": sum(bool(i["mine"]) for i in items), "attention": len(urgent)}, separators=(",", ":")))
+
+
+if __name__ == "__main__":
+    main()

@@ -57,6 +57,16 @@ tracing to a process's own children, so no program of yours can read another's m
 `strace -p`, py-spy) needs sudo. `kptr_restrict = 1` hides kernel addresses, so `perf`
 run as yourself shows no kernel symbols.
 
+`desktop-security-events` looks at what has been happening rather than the state things
+are in: fifteen rules over the journal, each with a severity and where one fits a MITRE
+ATT&CK technique, and thresholds that turn a run of events into one alert. It is the shape
+of Elastic Security's rules and alerts without a cluster to keep alive for one laptop, and
+it stores nothing, because the journal is the store. Both are drawn on the dashboard's
+Security tab; see [shell.md](shell.md).
+
+    desktop-security-events --json              # the last 24 hours
+    desktop-security-events --json --hours 72
+
 `desktop-reboot-check` answers a different question: will this machine come back up? It
 runs after every update.
 
