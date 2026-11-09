@@ -91,4 +91,54 @@ rm -f "$sandbox/jumped"
 sessions PICK=other </dev/null >/dev/null 2>&1
 check "a session in another tmux server is not switched to here" test ! -e "$sandbox/jumped"
 
+# --- prefix + N ------------------------------------------------------------------------------
+
+# A tmux that remembers the last pane gone to, says which tab is unread, and writes down
+# what it was asked to show.
+cat >"$sandbox/path/tmux" <<'STUB'
+#!/usr/bin/env bash
+args="$*"
+case "$args" in
+*socket_path*) echo "$SANDBOX/own-socket" ;;
+*show-options*@agent_next_last*) cat "$SANDBOX/last" 2>/dev/null ;;
+*set-option*@agent_next_last*) echo "${args##* }" >"$SANDBOX/last" ;;
+*display-message*-p*)
+  pane=${args##*-t }
+  pane=${pane%% *}
+  # The unread finished turn carries its mark on the tab; the others none.
+  [[ $pane == %delta ]] && printf 'delta:1.2\tdone\n' || echo "${pane#%}:1.2" ;;
+*display-message*) echo "${args##*display-message }" >>"$SANDBOX/said" ;;
+esac
+STUB
+
+at() { # name state pane seconds-ago
+  printf '{"agent":"claude","session":"%s","state":"%s","since":%d,"cwd":"/home/u/%s","pane":"%s","socket":"%s","pid":%d}\n' \
+    "$1" "$2" $(($(date +%s) - $4)) "$1" "$3" "$sandbox/own-socket" "$pid" >"$sandbox/runtime/desktop/agents/$1.json"
+}
+rm -f "$sandbox/runtime/desktop/agents/"*.json "$sandbox/jumped"
+at newer waiting %newer 60
+at older waiting %older 600
+at delta done %delta 30
+at busy working %busy 900
+touch -d '-20 minutes' "$sandbox/runtime/desktop/agents/busy.json"
+at fine working %fine 900
+at far waiting %far 9000
+sed -i "s|own-socket|another-socket|" "$sandbox/runtime/desktop/agents/far.json"
+
+ARGS=(--next /dev/pts/9)
+for _ in 1 2 3 4 5; do sessions >/dev/null; done
+check "it goes to the agent waiting longest first, then the newer, then the unread, then the stuck" \
+  test "$(paste -sd' ' "$sandbox/jumped")" = "%older %newer %delta %busy %older"
+check "it names the client that pressed it" grep -q '^-c /dev/pts/9 ' "$sandbox/said"
+check "and says where it went and how many there are" grep -q ' 1/4  waiting 10m  older$' "$sandbox/said"
+check "a stuck agent is said to be stuck" grep -q ' 4/4  stuck .*busy$' "$sandbox/said"
+check "an agent on another tmux server is not gone to" lacks '%far' "$sandbox/jumped"
+check "nor one busy and heard from" lacks '%fine' "$sandbox/jumped"
+
+rm -f "$sandbox/runtime/desktop/agents/"*.json "$sandbox/said" "$sandbox/jumped"
+sessions >/dev/null
+check "with nobody needing you it says so and goes nowhere" \
+  grep -q 'No agent needs you' "$sandbox/said"
+check "and jumps nowhere" test ! -e "$sandbox/jumped"
+
 finish

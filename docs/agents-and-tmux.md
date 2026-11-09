@@ -27,10 +27,147 @@ holds tabs too, through `desktop-terminal-tabs`.
 | Key (after the tmux prefix, `Ctrl-a`) | Does |
 |---|---|
 | `t`, `Tab`, `x` | New terminal tab, next tab, close the tab on top |
-| `e` | The sidebar: every session, its windows and their agents |
+| `e` | The sidebar: a row per session, with its agents' state (see below) |
+| `N` | Go to the agent needing you most; press again for the next |
+| `g` | Every agent on this machine in a list, needing you first |
 | `s`, `S` | Pick a session, pick a tab |
 | `D` | Finish the task this window is on |
 | `?` | Every key this desktop adds (`desktop-tmux-keys`) |
+
+## The sidebar
+
+The sidebar is on from the moment the tmux server starts: `tmux.conf` runs
+`desktop-tmux-sidebar --on`, which a reload of the file leaves alone. `prefix + e` takes
+the column away from every window, and puts it back. It is on or off for the whole tmux server, not for one window:
+a pane lives in one window, so a single column would vanish the moment you used it to go
+somewhere else.
+
+     SPACES                    20
+     ● checkmk                       its dot: the agent in it most in need of you
+       main
+    ▌● desktop              2 5m     the session you are in, on a bar: two blocked, 5m
+    ▌  feat/sidebar +42 −7           its branch, and what the branch changed
+     ● ocp-helm-charts        7m     stuck (peach): working, but silent for 7 minutes
+       main
+     · home                          no agents at all
+
+     AGENTS               desktop    the agents of one session:
+     ● claude 1               5m     model and tab, and how long
+       blocked · fix-runner          its state in herdr's word, and its task
+     ○ opencode 1
+       idle                          idle, or an agent that reports nothing
+
+     ⏎ go  p peek  v more  q hide
+
+It is drawn as herdr's sidebar is, as near as a terminal pane allows: two sections, each
+entry on two lines, a coloured dot for the state, the active row on a bar, Catppuccin
+Mocha's colours (the nearest of the 256) and the keys along the bottom. A window that
+missed its column -- the restore builds windows at login, before any client can give them
+room -- gets one the first time it is looked at, behind a `@sidebar_held` mark so looking
+at one that has its column costs nothing. The restore leaves the column out of what it
+saves; the sidebar puts it back.
+
+It is in two parts, as herdr's sidebar is. **On top, a row per session.** Windows are not
+listed; a session's windows are on its own tab bar. The sessions an agent column or a
+terminal pane's tabs are made of (`ai-desktop-12-claude`, `term-…`) are not listed either:
+their agents belong to the session whose window holds that column.
+
+**Underneath, the agents of one session**, each on a row of its own: the session under the
+cursor, or the one you are in. Move the cursor over the sessions and the agents follow;
+move on down into them and they stay. Every tab of an agent column is listed, in tab order,
+by its model and number as on the column's own tab bar, and by its task when it works in
+a worktree. An agent in a plain pane is named after its window. When a session has agents
+in more than one window, each says which: `2:claude 1`. opencode and codex send no hooks,
+so their tabs are always shown idle.
+
+Each agent's name is drawn in its own colour, the one its tabs and pane border have:
+`@agent-claude-colour`, `@agent-codex-colour` and `@agent-opencode-colour`, set by the theme
+(`themes/<theme>/tmux.conf`). They are hex, and the sidebar draws the nearest of the
+terminal's 256 colours; switching theme recolours an open sidebar at its next refresh. The
+mark and the time keep the colour of the state.
+
+A session's dot is the state of the agent in it that needs you most, with the number of
+agents in that same state when there is more than one, and how long it has been so; its
+second line is the branch of its directory and the lines it changed. An agent's dot is its
+own, said in a word on its second line:
+
+| Dot | Word | Means | Order |
+|---|---|---|---|
+| red `●` | blocked | waiting on you: a permission prompt or a question | first |
+| red `✗` | crashed | | |
+| peach `●` | stuck | working, but no sign of life for five minutes | |
+| green `●` | done | finished, and you have not looked yet | |
+| yellow `●` | working | | last |
+| `○` | idle | at its prompt, or a finished turn already read | |
+| `·` | | a session with no agent at all | |
+
+A session whose dot is `○` or `·` is one you can leave alone.
+
+| Key in the sidebar | Does |
+|---|---|
+| click, `Enter`, `l` | Go to the session; on an agent, straight to that agent |
+| `j` `k`, arrows, wheel | Move; the agents shown follow the session under the cursor |
+| `p` | Peek: the agent's screen in a popup, to answer it from there |
+| `v` | More: each session's review and pipeline, and its other checkouts; under each agent its last prompt |
+| `r` | Read everything again now |
+| `q` | Close the sidebar, in every window |
+
+The sidebar's keys are also on `prefix + ?`, under the prefix keys.
+
+Going to an agent goes through `desktop-agent-tabs jump`, so an agent in a column's tabs
+is reached by bringing its tab to the top of the column in the window holding it.
+
+**Peek** (`p`, `desktop-agent-peek`) opens an agent in a popup -- on an agent's row that
+agent, on a session's row the one marked there: its screen, read
+again every second. In the popup:
+
+| Key | Does |
+|---|---|
+| `1`–`9` | Typed into the agent: Claude Code's prompts take one key |
+| `Enter`, `↑` `↓` | Passed on, for a menu |
+| `i` | Type a line of reply, sent with Enter |
+| `g` | Go to the agent and close the popup |
+| `q`, `Esc` | Close, sending the agent nothing |
+
+So a permission prompt in another session is answered without leaving the window you are
+in. Esc closes rather than being passed on, because an Esc would cancel what the agent
+asked; an agent that needs one is one to go to.
+
+**The detailed view** (`v`) adds, under each agent, the prompt its turn began with, and
+under each session a line for every checkout its agents work in, or the session's own
+directory when it has none:
+
+      desktop
+        fix-runner  +42 −7  !12 ✗
+
+The numbers are the lines the branch changed since it left the default branch, committed or
+not. `!12` is the merge request (`#12` a pull request), followed by its pipeline (`✓`
+passed, `✗` failed, `…` running) or by `merged` or `closed`. A checkout is named when that is
+what tells it apart: a task's worktree, or more than one in a session. `v` switches every
+window's column at once.
+
+That line comes from `desktop-branch-status <dir>`, which prints it as JSON. Git it asks
+every ten seconds at most. The forge (glab, or gh for GitHub) it asks in the background,
+at most every three minutes, and keeps the answer under `$XDG_RUNTIME_DIR/desktop/
+branch-status`, so a forge behind the VPN never holds the sidebar up. A forge that does not
+answer leaves what it said before; only an answer can say a review is gone. Forgejo goes
+without a review, since tea cannot ask for the review of a branch.
+
+Only the columns on screen read tmux and the agents again, every two seconds; the others
+ask nothing.
+
+## Getting to the agent that needs you
+
+`prefix + N` goes straight there, with no list in between: to the agent waiting longest,
+then to a finished turn nobody has read (newest first), then to a stuck one. Pressed again,
+it goes on to the next; the status line says which it is and how many there are
+(`1/3  waiting 4m  checkmk`). When nothing needs you it says so and stays where it is. It
+is `N` because `n` opens a new session.
+
+`prefix + g` shows the same agents as a list to pick from, and the sidebar keeps them in
+view.
+
+## Saving and restoring
 
 `desktop-tmux-restore` writes down what is open and rebuilds it at login, because a tmux
 server does not survive a reboot.
@@ -61,6 +198,13 @@ calls `desktop-agent-state`, which keeps one JSON file per session under
 The record holds the tmux pane and its server's socket, so a panel can jump straight to
 the session, and the agent's pid, so a crashed session can be told from a quiet one: a
 crash fires no `SessionEnd`.
+
+Every hook also touches the record, even when the state stays the same, so its mtime is the
+last sign of life. A session "working" with no hook for five minutes
+(`DESKTOP_AGENT_STUCK_AFTER`, in seconds) is stuck: a tool call that has not come back, a
+turn interrupted with Esc, which fires no Stop, or a very long think. Its state stays
+"working"; `desktop-agent-sessions` adds `"stuck": true`, and the sidebar marks it ⧗ with
+how long it has been quiet.
 
 The same state is shown in the tmux tab of the window, in the sidebar, on the bar
 (`desktop-status-ai`), in the AI panel (`desktop-agent-sessions`), as a notification when

@@ -1,16 +1,49 @@
 #!/usr/bin/env python3
 
-"""A column down the left of every tmux window: the sessions, their windows, their agents.
+"""A column down the left of every tmux window: your sessions, and what their agents are doing.
 
     desktop-tmux-sidebar --toggle          # prefix + e: on or off, everywhere at once
     desktop-tmux-sidebar --on              # on, and left on if it is; tmux.conf runs it
     desktop-tmux-sidebar                   # the column itself; the toggle runs this
     desktop-tmux-sidebar --attach <window> # give one window a column (the new-window hook)
 
-Sessions in bold with their windows underneath, the window you are in marked, and each
-window carrying the state of the agent in it -- ● waiting on you, · working, ✓ done and
-not yet seen -- from the records the tabs and the bar already read. Click a row to go
-there, or move with j/k and press Enter.
+Drawn as herdr draws its sidebar: SPACES on top, two lines each, and AGENTS underneath --
+those of one session, two lines each too. Catppuccin colours, the session you are in on a
+bar, and the keys along the bottom:
+
+     SPACES                    20
+     ● checkmk                       its dot: the agent in it most in need of you
+       main
+    ▌● desktop              2 5m     the session you are in; two blocked, for 5m
+    ▌  feat/sidebar +42 −7           its branch, and what the branch changed
+     · home                          no agents at all
+
+     AGENTS               desktop
+     ● claude 1               5m     model and tab, and how long
+       blocked · fix-runner          herdr's word for its state, and its task
+     ○ opencode 1
+       idle
+
+     ⏎ go  p peek  v more  q hide
+
+Windows are not listed -- a session's windows are on its own tab bar -- and neither are the
+sessions behind an agent column or a terminal's tabs (ai-desktop-12-claude, term-...):
+their agents belong to the session whose window holds the column. The agents shown are
+those of the session under the cursor, or of the one you are in. A session with agents in
+more than one window says which: "2:claude 1".
+
+    red ●     blocked: waiting on you      yellow ●  working
+    peach ●   stuck: silent for minutes    green ●   done: finished, not yet read
+    red ✗     crashed                      ○         idle        ·  no agent
+
+On a session's row an idle agent, or a finished turn you have read, is a quiet ○.
+
+    click, Enter, l   go to the session, or straight to the agent
+    j k, ↑ ↓, wheel   move; the agents shown follow the session under the cursor
+    p                 peek: the agent's screen in a popup, where it can be answered
+    v                 more: reviews and other checkouts, and each agent's last prompt
+    r                 read everything again now
+    q                 close the sidebar, in every window
 
 prefix + s and prefix + g show the same things, one at a time and only when asked. This
 is for having them in view while working, which is what herdr's sidebar is for.
@@ -18,12 +51,15 @@ is for having them in view while working, which is what herdr's sidebar is for.
 It is on or off for the whole server rather than for one window, because a pane belongs to
 one window: a single column would vanish the moment it was used to switch away from the
 window holding it. So the toggle puts one in every window and hooks new ones, and switching
-around lands somewhere that has its own. They all read the same tmux, so they all agree.
+around lands somewhere that has its own -- a window that missed one, built at login before
+any client could give it room, gets it the first time it is looked at. They all read the same tmux, so they all agree.
 
 A column that is not being looked at asks tmux nothing: only the ones on screen refresh.
 """
 
 import curses
+import importlib.machinery
+import importlib.util
 import json
 import os
 import subprocess
@@ -36,10 +72,122 @@ REFRESH_SECONDS = 2
 # A window opened while the sidebar is on gets one too. The index keeps these out of the
 # way of the hooks tmux.conf sets on the same events.
 HOOKS = ("after-new-window[50]", "after-new-session[50]")
+# And a window that missed its column gets one when it is looked at. At login the restore
+# builds windows before any client exists, some too narrow to split, and a column asked for
+# then is not made; nothing asked again. Behind the window's @sidebar_held mark, so looking
+# at a window that has its column, or is an agent column's tab, costs tmux a format and no
+# python start.
+VIEW_HOOKS = ("client-session-changed[50]", "session-window-changed[50]", "client-attached[50]")
+HELD = "@sidebar_held"
 
-# The marks the window tabs use, so a row reads the same as the tab it belongs to.
-MARKS = {"waiting": "●", "working": "·", "done": "✓", "failed": "✗", "ready": "○"}
-COLOURS = {"waiting": 3, "working": 4, "done": 2, "failed": 3, "ready": 0}
+# Drawn as herdr draws its sidebar: a coloured dot per state, and the state said in a word
+# on the line under the name. herdr's words, where it has one -- "blocked" is waiting on you,
+# "done" a finished turn not yet read, "idle" one that has been.
+DOTS = {"waiting": "●", "working": "●", "stuck": "●", "done": "●", "failed": "✗"}
+WORDS = {"waiting": "blocked", "working": "working", "stuck": "stuck", "done": "done",
+         "failed": "crashed", "": "idle"}
+COLOURS = {"waiting": "red", "working": "yellow", "stuck": "peach", "done": "green",
+           "failed": "red"}
+CHECKS = {"passed": ("✓", "green"), "failed": ("✗", "red"), "running": ("…", "yellow")}
+
+# Catppuccin Mocha, herdr's default theme, as the nearest of the 256 xterm colours; the
+# plain eight where a terminal has no more. The bar behind the session you are in is
+# "surface", the cursor's "overlay", and "accent" the section headers -- herdr's cyan.
+PALETTE = {"red": "#f38ba8", "yellow": "#f9e2af", "peach": "#fab387", "green": "#a6e3a1",
+           "blue": "#89b4fa", "accent": "#89dceb", "dim": "#7f849c", "text": "#cdd6f4",
+           "surface": "#313244", "overlay": "#45475a"}
+BASIC = {"red": curses.COLOR_RED, "yellow": curses.COLOR_YELLOW, "peach": curses.COLOR_YELLOW,
+         "green": curses.COLOR_GREEN, "blue": curses.COLOR_BLUE, "accent": curses.COLOR_CYAN,
+         "dim": -1, "text": -1, "surface": -1, "overlay": -1}
+
+# The keys, pinned under everything as herdr pins its own.
+FOOTER = "⏎ go  p peek  v more  q hide"
+
+# Each agent in its own colour, the one its tabs and its pane border have: the theme sets
+# them as @agent-<model>-colour. Without 256 colours to come near a theme's hex, the plain
+# colours closest to the stock theme's.
+AGENT_PAIRS = ("claude", "codex", "opencode")
+AGENT_FALLBACK = {"claude": curses.COLOR_YELLOW, "codex": curses.COLOR_WHITE,
+                  "opencode": curses.COLOR_BLUE}
+
+# The detailed view is a server option rather than a variable here, so that every column
+# shows the same view: there is one in each window, and v in one should hold in all.
+VIEW = "@sidebar_view"
+# How often a checkout's diff is counted again. desktop-branch-status keeps its own cache,
+# and the forge it only ever asks in the background, so this is only to spare git: every
+# session's branch is on its second line, and all of them take a quarter of a second.
+BRANCH_SECONDS = 30
+
+
+def xterm(colour):
+    """The nearest of the 256 xterm colours to a "#rrggbb", or None for anything else."""
+    colour = colour.strip().lstrip("#")
+    if len(colour) != 6:
+        return None
+    try:
+        red, green, blue = (int(colour[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+    levels = [0, 95, 135, 175, 215, 255]
+
+    def nearest(value):
+        return min(range(6), key=lambda i: abs(levels[i] - value))
+
+    cube = [nearest(red), nearest(green), nearest(blue)]
+    cube_rgb = [levels[i] for i in cube]
+    grey = max(0, min(23, round((sum((red, green, blue)) / 3 - 8) / 10)))
+    grey_rgb = [8 + grey * 10] * 3
+
+    def distance(other):
+        return sum((a - b) ** 2 for a, b in zip((red, green, blue), other))
+
+    if distance(grey_rgb) < distance(cube_rgb):
+        return 232 + grey
+    return 16 + 36 * cube[0] + 6 * cube[1] + cube[2]
+
+
+def agent_colours():
+    """The theme's colour per agent, as tmux has it: {"claude": "#ff9e64", ...}."""
+    asked = "\t".join(f"#{{@agent-{model}-colour}}" for model in AGENT_PAIRS)
+    said = tmux("display-message", "-p", asked).split("\t")
+    return dict(zip(AGENT_PAIRS, said + [""] * len(AGENT_PAIRS)))
+
+
+INKS = {}
+PAIRS = {}
+
+
+def paint(colours):
+    """The colour of each name an attribute is asked for by: the palette's and the agents'."""
+    rich = curses.COLORS >= 256
+    for name, hex_colour in PALETTE.items():
+        INKS[name] = (xterm(hex_colour) if rich else None) or BASIC[name]
+    for model in AGENT_PAIRS:
+        near = xterm(colours.get(model, "")) if rich else None
+        INKS[model] = near if near is not None else AGENT_FALLBACK[model]
+    PAIRS.clear()
+
+
+def ink(name, bar=None):
+    """The attribute for text in a named colour, on one of the bars or on nothing.
+
+    Pairs are made as they are first asked for: every colour can sit on either bar, and
+    numbering them all up front would be most of the pairs a terminal has.
+    """
+    fg, bg = INKS.get(name, -1), INKS.get(bar, -1) if bar else -1
+    attr = curses.A_DIM if name == "dim" and fg == -1 else 0
+    if (fg, bg) == (-1, -1):
+        return attr
+    if (fg, bg) not in PAIRS:
+        number = len(PAIRS) + 1
+        if number >= curses.COLOR_PAIRS:
+            return attr
+        try:
+            curses.init_pair(number, fg, bg)
+        except curses.error:
+            return attr
+        PAIRS[(fg, bg)] = number
+    return curses.color_pair(PAIRS[(fg, bg)]) | attr
 
 
 def tmux(*args):
@@ -53,12 +201,64 @@ def tmux(*args):
 # --- what to draw --------------------------------------------------------------------------
 
 
-def agents():
-    """Agent state per "session:window", for the agents on this tmux server.
+def branch_status_module():
+    """desktop-branch-status, loaded rather than run: a python start per agent per refresh
+    would make the column stutter."""
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "desktop-branch-status")
+    try:
+        loader = importlib.machinery.SourceFileLoader("branch_status", path)
+        spec = importlib.util.spec_from_loader("branch_status", loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        return module
+    except (OSError, SyntaxError, ImportError):
+        return None
 
-    Keyed by window: one agent to a window, and the pane it sits in is not worth a column
-    this narrow. Agents on another server -- a second tmux, or one in a container -- are
-    left out, since nothing here could switch to them.
+
+BRANCHES = {}
+
+
+def branch(cwd, module, now=None):
+    """What a checkout changed and its review, from desktop-branch-status, kept a while."""
+    now = time.time() if now is None else now
+    if not cwd or module is None:
+        return {}
+    kept = BRANCHES.get(cwd)
+    if kept and now - kept[0] < BRANCH_SECONDS:
+        return kept[1]
+    try:
+        found = module.status(cwd, now)
+    except Exception:  # A sidebar that dies on one odd checkout is worse than a blank row.
+        found = {}
+    BRANCHES[cwd] = (now, found)
+    return found
+
+
+def detail_of(found, named=True):
+    """A checkout's branch, what it changed and its review, in parts with their colours."""
+    parts = []
+    if named and found.get("branch"):
+        parts.append((found["branch"], "dim"))
+    added, removed = found.get("added") or 0, found.get("removed") or 0
+    if added or removed:
+        parts.append((f"+{added}", "green"))
+        parts.append((f"−{removed}", "red"))
+    review = found.get("review")
+    if review and review.get("number"):
+        sign = "#" if "/pull/" in (review.get("url") or "") else "!"
+        parts.append((f"{sign}{review['number']}", "blue"))
+        if review.get("state") and review["state"] not in ("open", "opened"):
+            parts.append((review["state"], "dim"))
+        elif review.get("checks") in CHECKS:
+            parts.append(CHECKS[review["checks"]])
+    return parts
+
+
+def agents():
+    """Agent records per "session:window", for the agents on this tmux server.
+
+    Agents on another server -- a second tmux, or one in a container -- are left out,
+    since nothing here could switch to them.
     """
     socket = tmux("display-message", "-p", "#{socket_path}")
     try:
@@ -76,153 +276,403 @@ def agents():
     return found
 
 
-def rows(here):
-    """The tree as rows to draw: a session, then its windows, then the next session."""
-    states = agents()
-    # @ai_group and @ai_model are session options, so a window of an agent column's tabs
-    # carries them here: that is what tells a row apart from an ordinary window, and it is
-    # why clicking one has to go through the column rather than switch to the session.
+def owners():
+    """Which session each agent column and each terminal's tabs belong to.
+
+    Those tabs are sessions of their own (ai-desktop-12-claude, term-...), shown by a client
+    inside a pane. Listed loose they were a second entry for every project, under a name
+    nobody chose; what they belong to is the session holding that pane.
+    """
+    listing = tmux("list-panes", "-a", "-F",
+                   "#{session_name}\t#{@ai_column}\t#{@term_tabs}\t#{window_index}")
+    found = {}
+    for line in listing.splitlines():
+        name, column, tabs, window = (line.split("\t") + ["", "", ""])[:4]
+        for group in (column, tabs):
+            if group:
+                found.setdefault(group, (name, window))
+    return found
+
+
+# Which agent a session's row speaks for, when it has several: the one most in need of you.
+# A finished turn counts only until it has been read, and an agent sitting at its prompt
+# not at all -- a row marked for every idle agent would be marked always.
+URGENCY = {"waiting": 0, "failed": 1, "stuck": 2, "done": 3, "working": 4}
+
+
+def state_of(record, mark):
+    """One agent's state as the sidebar shows it, from its record and its tab's mark."""
+    state = record.get("state") or mark
+    if state == "working" and record.get("stuck"):
+        return "stuck"
+    if state == "done" and not (record.get("unseen") or mark == "done"):
+        return ""
+    return state if state in URGENCY else ""
+
+
+def collect():
+    """Every session with the agents working for it, as tmux and the agents' records say.
+
+    The part that asks tmux, done on the refresh timer. Laying it out is layout()'s, which
+    is redone on every move of the cursor, since the agents shown follow it.
+    """
+    records = agents()
+    belong = owners()
     listing = tmux("list-windows", "-a", "-F",
-                   "#{session_name}\t#{window_index}\t#{window_name}\t#{@agent_state}"
-                   "\t#{@ai_group}\t#{@ai_model}\t#{b:@worktree}\t#{@term_group}")
+                   "#{session_name}\t#{window_index}\t#{@agent_state}\t#{@ai_group}"
+                   "\t#{@term_group}\t#{session_path}\t#{@ai_model}\t#{b:@worktree}"
+                   "\t#{window_name}")
     sessions = {}
     for line in listing.splitlines():
-        parts = line.split("\t")
-        if len(parts) < 6:
+        parts = (line.split("\t") + [""] * 9)[:9]
+        name, index, mark, group, tabs, path, model, task, window = parts
+        if group or tabs:
+            owner, where = belong.get(group or tabs) or (None, "")
+            if not owner:
+                continue  # Tabs whose column has closed: nowhere to show them.
+        else:
+            owner, where = name, index
+            sessions.setdefault(owner, {"path": path, "agents": []})["path"] = path
+        session = sessions.setdefault(owner, {"path": "", "agents": []})
+        record = records.get(f"{name}:{index}", {})
+        state = state_of(record, mark)
+        # Every tab of an agent column is an agent, whether or not it reports: opencode and
+        # codex send no hooks, and are listed idle. Elsewhere only a pane that has said it
+        # runs one.
+        if not (record or state or group):
             continue
-        name, index, window, state, group, model = parts[:6]
-        # The tabs of a terminal pane are a session too, and not one to go to: it is the
-        # inside of a pane, already on show in the window that holds it.
-        if len(parts) > 7 and parts[7]:
-            continue
-        # A tab is named after its model, like every other tab of its column. One working
-        # in a worktree has something better to say: which task it is.
-        if group and len(parts) > 6 and parts[6]:
-            window = parts[6]
-        agent = states.get(f"{name}:{index}", {})
-        sessions.setdefault(name, []).append({
-            "kind": "window", "session": name, "index": index, "text": window,
-            "state": agent.get("state") or state, "for": agent.get("for", ""),
-            "current": f"{name}:{index}" == here, "tabs": group, "model": model,
+        # What to call it: a column's tab by its model and number, as on the column's own
+        # tab bar, and by its task when it works in one; an agent in a plain pane by the
+        # window it is in.
+        kind = (model if group else "") or record.get("agent") or "agent"
+        if group:
+            label = f"{kind} {index}"
+        else:
+            label = f"{kind} · {'terminal' if tabs else window}"
+        session["agents"].append({
+            "state": state, "pane": record.get("pane") or f"{name}:{index}",
+            "for": record.get("quiet" if state == "stuck" else "for", ""),
+            "cwd": record.get("cwd", ""), "label": label, "task": task,
+            "asked": record.get("asked", ""),
+            "where": number(where), "tab": number(index), "model": kind,
         })
+    # In the order they sit on screen: by the window holding them, then by tab. A session
+    # with agents in more than one window says which, as tmux numbers them: "2:claude 1".
+    for session in sessions.values():
+        session["agents"].sort(key=lambda a: (a["where"], a["label"].split(" ")[0], a["tab"]))
+        if len({a["where"] for a in session["agents"]}) > 1:
+            for agent in session["agents"]:
+                agent["label"] = f"{agent['where']}:{agent['label']}"
+    return sessions
 
-    out = []
+
+def number(text):
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+
+
+def layout(sessions, here, detailed=False, module=None, selected=None):
+    """The rows to draw: the sessions, then the agents of the selected one.
+
+    As herdr's sidebar is laid out. Under SPACES a session takes two lines: its dot, the
+    state of the agent in it that needs you most, with its name, and under that its branch
+    and what the branch changed. Under AGENTS, the agents of one session -- the one under
+    the cursor, or the one you are in -- each a dot and a name, and under that the state in
+    a word and the task. Detailed (v), a session's review and its other checkouts follow,
+    and an agent's last prompt.
+    """
+    here_session = here.split(":")[0]
+    if selected not in sessions:
+        selected = here_session if here_session in sessions else next(iter(sorted(sessions)), None)
+
+    out = [{"kind": "header", "session": "", "text": "SPACES", "right": str(len(sessions)),
+            "current": False}]
     for name in sorted(sessions):
-        windows = sessions[name]
-        # A column's tabs are a session named after the window that holds them, which is
-        # not a name worth reading. "desktop-3 · claude" is.
-        group = windows[0]["tabs"]
+        found = sessions[name]
+        # Within a state, one whose record says for how long, so the row can say it too.
+        busy = sorted((a for a in found["agents"] if a["state"]),
+                      key=lambda a: (URGENCY[a["state"]], not a["for"]))
+        top = busy[0] if busy else None
         out.append({
-            "kind": "session", "session": name,
-            "text": f"{group} · {windows[0]['model']}" if group else name,
-            "waiting": sum(1 for w in windows if w["state"] == "waiting"),
-            "current": name == here.split(":")[0], "tabs": group,
+            "kind": "session", "session": name, "text": name,
+            "state": top["state"] if top else "",
+            "idle": bool(found["agents"]) and not top,
+            "count": sum(1 for a in busy if top and a["state"] == top["state"]),
+            "for": top["for"] if top else "",
+            "pane": (top or (found["agents"] or [{}])[0]).get("pane", ""),
+            "current": name == here_session, "selected": name == selected,
         })
-        out.extend(windows)
+        # The second line: the branch of the session's own directory and what it changed,
+        # and detailed, its review. A session whose directory is no checkout keeps to one.
+        own = branch(found["path"], module) if found["path"] else {}
+        parts = detail_of(own) if own.get("branch") else []
+        if not detailed:
+            parts = parts[:next((i for i, part in enumerate(parts) if part[1] == "blue"), len(parts))]
+        if parts:
+            out.append({"kind": "sub", "session": name, "parts": parts,
+                        "current": name == here_session, "pane": out[-1]["pane"]})
+        if detailed:
+            # A row per other checkout, since a session's tasks each have a worktree of
+            # their own, named by it.
+            places = []
+            for agent in found["agents"]:
+                if agent["cwd"] and agent["cwd"] not in places and agent["cwd"] != found["path"]:
+                    places.append(agent["cwd"])
+            for place in places:
+                parts = detail_of(branch(place, module), named=False)
+                parts.insert(0, (os.path.basename(place.rstrip("/")), "dim"))
+                out.append({"kind": "detail", "session": name, "parts": parts,
+                            "current": False, "pane": out[-1]["pane"]})
+
+    if selected is None:
+        return out
+    listed = sessions[selected]["agents"]
+    out.append({"kind": "gap", "session": selected, "current": False})
+    out.append({"kind": "header", "session": selected, "text": "AGENTS", "right": selected,
+                "current": False})
+    if not listed:
+        out.append({"kind": "sub", "session": selected, "parts": [("no agents", "dim")],
+                    "current": False, "pane": ""})
+    for agent in listed:
+        out.append({
+            "kind": "agent", "session": selected, "text": agent["label"],
+            "state": agent["state"], "for": agent["for"], "pane": agent["pane"],
+            "model": agent["model"], "current": False,
+        })
+        state = agent["state"]
+        parts = [(WORDS.get(state, "idle"), COLOURS.get(state, "dim"))]
+        if agent.get("task"):
+            parts.append((f"· {agent['task']}", "dim"))
+        out.append({"kind": "sub", "session": selected, "parts": parts,
+                    "current": False, "pane": agent["pane"]})
+        if detailed and agent["asked"]:
+            out.append({"kind": "detail", "session": selected, "parts": [(agent["asked"], "dim")],
+                        "current": False, "pane": agent["pane"]})
+    return out
+
+
+def rows(here, detailed=False, module=None, selected=None):
+    return layout(collect(), here, detailed, module, selected)
+
+
+# Where a row's text starts: the dot, then the name a space after it.
+DOT, NAME = 1, 3
+SELECTABLE = ("session", "agent")
+
+
+def pieces(row, width):
+    """A row as the pieces it is drawn in: (column, text, colour name), left to right."""
+    kind = row["kind"]
+    if kind == "gap":
+        return []
+    if kind == "header":
+        right = row.get("right", "")
+        room = width - len(row["text"]) - 4
+        right = right if len(right) <= room else right[:max(0, room - 1)] + "…"
+        return [(1, row["text"], "accent"), (width - 1 - len(right), right, "dim")]
+    if kind in ("sub", "detail"):
+        out, column = [], NAME + (2 if kind == "detail" else 0)
+        parts = list(row["parts"])
+        # A long branch gives way to what follows it, rather than cutting a count in half.
+        over = column + sum(len(text) + 1 for text, _ in parts) - 1 - (width - 1)
+        if over > 0 and len(parts) > 1 and len(parts[0][0]) > over + 1:
+            parts[0] = (parts[0][0][:len(parts[0][0]) - over - 1] + "…", parts[0][1])
+        for text, colour in parts:
+            if column >= width - 1:
+                break
+            out.append((column, text[:width - 1 - column], colour))
+            column += len(text) + 1
+        return out
+
+    state = row["state"]
+    if state:
+        dot = (DOTS[state], COLOURS[state])
+    elif kind == "agent" or row.get("idle"):
+        dot = ("○", "dim")  # an agent at its prompt: there, and wanting nothing
+    else:
+        dot = ("·", "dim")  # no agent at all, but still a row of its own, not a second line
+    # On the right, how many more are in the same state, and how long it has been so.
+    right = ""
+    if kind == "session" and state and row["count"] > 1:
+        right = f"{row['count']}"
+    if row["for"] and state in ("waiting", "working", "stuck"):
+        right += (" " if right else "") + row["for"]
+    room = width - NAME - (len(right) + 2 if right else 1)
+    name = row["text"]
+    if len(name) > room:
+        name = name[:max(0, room - 1)] + "…"
+    model = row.get("model")
+    out = [(DOT, dot[0], dot[1]),
+           (NAME, name, model if kind == "agent" and model in AGENT_PAIRS else "text")]
+    if right:
+        out.append((width - 1 - len(right), right, COLOURS.get(state, "dim")))
     return out
 
 
 def line_of(row, width):
-    """A row as the text and the colour pair to draw it in."""
-    if row["kind"] == "session":
-        text = f" {row['text']}"
-        if row["waiting"]:
-            text += f"  {MARKS['waiting']}{row['waiting']}"
-        return text[:width].ljust(width), curses.color_pair(3 if row["waiting"] else 1) | curses.A_BOLD
-
-    mark = MARKS.get(row["state"], " ")
-    text = f"{'▸' if row['current'] else ' '}  {mark} {row['text']}"
-    # How long it has been waiting or working, when there is room for it.
-    if row["for"] and row["state"] in ("waiting", "working"):
-        room = width - len(text) - len(row["for"]) - 1
-        if room > 0:
-            text += " " * room + row["for"]
-    colour = curses.color_pair(COLOURS.get(row["state"], 0))
-    return text[:width].ljust(width), colour | (curses.A_BOLD if row["current"] else 0)
+    """A row as plain text, the width of the column: what the tests read."""
+    line = [" "] * width
+    for column, text, _ in pieces(row, width):
+        for i, char in enumerate(text):
+            if 0 <= column + i < width:
+                line[column + i] = char
+    if row.get("current") and row["kind"] in ("session", "sub"):
+        line[0] = "▌"
+    return "".join(line), 0
 
 
-def draw(screen, listed, cursor, offset):
+def draw(screen, listed, cursor, offset, focused=True):
     height, width = screen.getmaxyx()
     screen.erase()
-    for line, row in enumerate(listed[offset:offset + height]):
-        text, colour = line_of(row, width)
-        if offset + line == cursor:
-            colour |= curses.A_REVERSE
+    for line, row in enumerate(listed[offset:offset + max(1, height - 2)]):
+        # The session you are in sits on a bar, both its lines, as herdr's active row does;
+        # the cursor on a brighter one, and only while the column has the keys.
+        index = offset + line
+        bar = "surface" if row.get("current") and row["kind"] in ("session", "sub") else None
+        if focused and index == cursor:
+            bar = "overlay"
         try:
-            screen.addstr(line, 0, text, colour)
+            if bar:
+                screen.addstr(line, 0, " " * (width - 1), ink("text", bar))
+            if row.get("current") and row["kind"] in ("session", "sub"):
+                screen.addstr(line, 0, "▌", ink("accent", bar))
+            for column, text, colour in pieces(row, width):
+                attr = ink(colour, bar)
+                if colour == "accent" or (row["kind"] == "session" and row.get("current")
+                                          and colour == "text"):
+                    attr |= curses.A_BOLD
+                screen.addstr(line, column, text[:max(0, width - 1 - column)], attr)
+            if bar and INKS.get(bar, -1) == -1:
+                # No colours to draw a bar in: the cursor reversed, the current row bold.
+                screen.chgat(line, 0, width - 1, curses.A_REVERSE if bar == "overlay" else curses.A_BOLD)
         except curses.error:
             pass  # The bottom right cell cannot be written; the row is drawn regardless.
+    try:
+        screen.addstr(height - 1, 1, FOOTER[:max(0, width - 2)], ink("dim"))
+    except curses.error:
+        pass
     screen.refresh()
 
 
-def go(row, here):
-    """Switch to what was picked. The window first, so it is one jump and not two."""
-    # Named, because a command run from inside a pane has no client of its own: without
-    # -c tmux switches whichever client it decides is current, and the one looking at
-    # this sidebar stays where it was. The busiest client of this session is the one
-    # whose window the sidebar is in.
+def client_of(here):
+    """The client looking at this sidebar.
+
+    Named, because a command run from inside a pane has no client of its own: without -c
+    tmux switches whichever client it decides is current, and the one looking at this
+    sidebar stays where it was. The busiest client of this session is the one whose window
+    the sidebar is in.
+    """
     clients = tmux("list-clients", "-t", here.split(":")[0], "-F", "#{client_activity} #{client_tty}")
     busiest = sorted(line.split(" ", 1) for line in clients.splitlines() if " " in line)
-    client = busiest[-1][1] if busiest else ""
+    return busiest[-1][1] if busiest else ""
 
-    # A tab of an agent column is not somewhere a client can simply be switched to: that
-    # session is as narrow as the column and already has the column's own client on it.
-    if row.get("tabs"):
-        target = f"{row['session']}:{row['index']}" if row["kind"] == "window" else f"{row['session']}:"
+
+def peek(row, here):
+    """The agent a row speaks for, in a popup on this client, to be read and answered."""
+    if not row.get("pane"):
+        tmux("display-message", "-c", client_of(here), f" No agent in {row['session']}")
+        return
+    client = client_of(here)
+    command = f"desktop-agent-peek '{row['pane']}' '{client}'"
+    tmux("display-popup", *(["-c", client] if client else []), "-E", "-w", "90%", "-h", "75%",
+         "-T", f" {row['session']} ", command)
+
+
+def step(listed, cursor, delta):
+    """Up or down a row, over the second lines, the details and the headers: only sessions
+    and agents are anywhere to go."""
+    moved = cursor + delta
+    while 0 <= moved < len(listed) and listed[moved]["kind"] not in SELECTABLE:
+        moved += delta
+    return moved if 0 <= moved < len(listed) else cursor
+
+
+def owner_of(listed, index):
+    """The session or agent a row belongs to: itself, or the one above its second line."""
+    while index > 0 and listed[index]["kind"] not in SELECTABLE:
+        index -= 1
+    return index if listed and listed[index]["kind"] in SELECTABLE else None
+
+
+def go(row, here):
+    """Switch the client looking at this sidebar to the session of the row, or the agent."""
+    client = client_of(here)
+    if row["kind"] == "agent":
+        # Through desktop-agent-tabs, which knows an agent in a column's tabs is reached by
+        # bringing its tab to the top of the column, not by switching to its own session.
         try:
-            subprocess.run(["desktop-agent-tabs", "jump", target, client],
+            subprocess.run(["desktop-agent-tabs", "jump", row["pane"], *([client] if client else [])],
                            capture_output=True, timeout=5)
         except (OSError, subprocess.SubprocessError):
             pass
         return
-
-    if row["kind"] == "window":
-        tmux("select-window", "-t", f"{row['session']}:{row['index']}")
-    if client:
-        tmux("switch-client", "-c", client, "-t", row["session"])
+    if row["kind"] != "session":
+        return
+    tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
 
 
 def sidebar(screen):
     curses.curs_set(0)
     curses.use_default_colors()
-    for pair, colour in enumerate(
-            [curses.COLOR_BLUE, curses.COLOR_GREEN, curses.COLOR_RED, curses.COLOR_YELLOW], 1):
-        curses.init_pair(pair, colour, -1)
+    colours = agent_colours()
+    paint(colours)
     curses.mousemask(curses.BUTTON1_CLICKED | curses.BUTTON4_PRESSED | curses.BUTTON5_PRESSED)
     screen.timeout(200)
 
     pane = os.environ.get("TMUX_PANE", "")
     where = ["display-message", "-p", "-t", pane, "#{session_name}:#{window_index}"]
     room = ["display-message", "-p", "-t", pane, "#{window_width}"]
-    visible = ["display-message", "-p", "-t", pane, "#{&&:#{window_active},#{session_attached}}"]
+    visible = ["display-message", "-p", "-t", pane,
+               "#{&&:#{window_active},#{session_attached}}#{pane_active}"]
 
+    module = branch_status_module()
+    detailed = tmux("show-options", "-gqv", VIEW) == "detail"
     here = tmux(*where)
-    listed = rows(here)
-    cursor = next((i for i, row in enumerate(listed) if row["current"] and row["kind"] == "window"), 0)
+    data = collect()
+    selected = here.split(":")[0]
+    listed = layout(data, here, detailed, module, selected)
+    cursor = next((i for i, row in enumerate(listed) if row["current"]), step(listed, 0, 1))
     offset = 0
+    focused = False
     last = time.time()
     dirty = True
 
     while True:
-        height = screen.getmaxyx()[0]
+        # The agents underneath follow the session under the cursor. Sessions come first
+        # and their rows do not move when the agents below change, so the cursor stays put.
+        if listed and listed[cursor]["kind"] == "session" and listed[cursor]["session"] != selected:
+            selected = listed[cursor]["session"]
+            listed, dirty = layout(data, here, detailed, module, selected), True
+        height = max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
         if cursor < offset:
             offset = cursor
         elif cursor >= offset + height:
             offset = cursor - height + 1
         if dirty:
-            draw(screen, listed, cursor, offset)
+            draw(screen, listed, cursor, offset, focused)
             dirty = False
 
         key = screen.getch()
+        if key != -1 and key != curses.KEY_RESIZE and not focused:
+            focused, dirty = True, True
         if key == ord("q"):
             # The same as the key that opened it: one column is never wanted on its own,
             # so q closes them all rather than leaving the other windows with theirs.
             toggle()
             return
         elif key in (ord("j"), curses.KEY_DOWN):
-            cursor, dirty = min(cursor + 1, len(listed) - 1), True
+            cursor, dirty = step(listed, cursor, 1), True
         elif key in (ord("k"), curses.KEY_UP):
-            cursor, dirty = max(cursor - 1, 0), True
+            cursor, dirty = step(listed, cursor, -1), True
+        elif key == ord("p"):
+            if listed:
+                peek(listed[cursor], here)
+        elif key == ord("v"):
+            detailed = not detailed
+            tmux("set-option", "-gq", VIEW, "detail" if detailed else "compact")
+            last = 0
         elif key in (ord("\n"), curses.KEY_ENTER, ord("l"), curses.KEY_RIGHT):
             if listed:
                 go(listed[cursor], here)
@@ -242,22 +692,33 @@ def sidebar(screen):
             except curses.error:
                 continue
             if state & curses.BUTTON4_PRESSED:
-                cursor, dirty = max(cursor - 1, 0), True
+                cursor, dirty = step(listed, cursor, -1), True
             elif state & curses.BUTTON5_PRESSED:
-                cursor, dirty = min(cursor + 1, len(listed) - 1), True
-            elif 0 <= offset + row < len(listed):
-                cursor, dirty = offset + row, True
-                draw(screen, listed, cursor, offset)
+                cursor, dirty = step(listed, cursor, 1), True
+            elif 0 <= offset + row < len(listed) and owner_of(listed, offset + row) is not None:
+                # A click on a second line is a click on what it belongs to.
+                cursor, dirty = owner_of(listed, offset + row), True
+                draw(screen, listed, cursor, offset, focused)
                 go(listed[cursor], here)
 
         # On a timer, because an agent that starts waiting has to appear on its own and
         # tmux has no hook for that. Skipped entirely while this window is not on screen.
         if time.time() - last >= REFRESH_SECONDS:
             last = time.time()
-            if tmux(*visible) != "1":
+            seen = tmux(*visible)
+            if focused != (seen == "11"):
+                focused, dirty = seen == "11", True
+            if not seen.startswith("1"):
                 continue
             here = tmux(*where)
-            fresh = rows(here)
+            detailed = tmux("show-options", "-gqv", VIEW) == "detail"
+            data = collect()
+            fresh = layout(data, here, detailed, module, selected)
+            # A theme switched meanwhile brings its own agent colours.
+            if agent_colours() != colours:
+                colours = agent_colours()
+                paint(colours)
+                dirty = True
             if fresh != listed:
                 listed, dirty = fresh, True
                 cursor = min(cursor, max(0, len(listed) - 1))
@@ -272,10 +733,28 @@ def panes():
     return [line.split("\t")[0] for line in listing.splitlines() if line.endswith("\t1")]
 
 
+def inside_a_pane(window):
+    """Whether a window is a tab of an agent column or of a terminal pane.
+
+    Those are sessions of their own, shown by a client inside a pane of another window,
+    so a column in them would be a second one, drawn inside the agent column. The tabs
+    mark their session, but only after making it -- several tmux calls later, and seconds
+    later during a restore -- while the new-session hook runs at once. Waiting for the
+    mark lost that race, so a name in their pattern is enough.
+    """
+    marks = "#{session_name}\t#{@ai_group}#{@term_group}"
+    name, _, marked = tmux("display-message", "-p", "-t", window, marks).partition("\t")
+    return bool(marked) or name.startswith(("ai-", "term-"))
+
+
 def attach(window):
     """Open a sidebar down the left of one window, unless it has one already."""
+    if inside_a_pane(window):
+        tmux("set-option", "-wq", "-t", window, HELD, "1")
+        return
     held = tmux("list-panes", "-t", window, "-F", "#{@sidebar}")
     if "1" in held.splitlines():
+        tmux("set-option", "-wq", "-t", window, HELD, "1")
         return
     # -f so the column is the height of the window rather than of whichever pane is
     # active, and -d so opening one does not move the cursor out of the work.
@@ -284,6 +763,7 @@ def attach(window):
     if pane:
         tmux("set-option", "-p", "-t", pane, "@sidebar", "1")
         tmux("set-option", "-p", "-t", pane, "remain-on-exit", "off")
+        tmux("set-option", "-wq", "-t", window, HELD, "1")
 
 
 def toggle():
@@ -291,8 +771,10 @@ def toggle():
     if panes():
         for pane in panes():
             tmux("kill-pane", "-t", pane)
-        for event in HOOKS:
+        for event in HOOKS + VIEW_HOOKS:
             tmux("set-hook", "-gu", event)
+        for window in tmux("list-windows", "-a", "-F", "#{window_id}").splitlines():
+            tmux("set-option", "-wqu", "-t", window, HELD)
         return
     on()
 
@@ -308,6 +790,10 @@ def on():
     hook = f"run-shell -b '{sys.argv[0]} --attach \"#{{hook_window}}\"'"
     for event in HOOKS:
         tmux("set-hook", "-g", event, hook)
+    looked_at = (f"if -F '#{{{HELD}}}' '' "
+                 f"\"run-shell -b '{sys.argv[0]} --attach #{{window_id}}'\"")
+    for event in VIEW_HOOKS:
+        tmux("set-hook", "-g", event, looked_at)
     for window in tmux("list-windows", "-a", "-F", "#{session_name}:#{window_index}").splitlines():
         attach(window)
 

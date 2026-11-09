@@ -127,9 +127,16 @@ mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 # Nothing to do when the state is what it already was -- the common case by far, since a
 # busy turn is mostly PostToolUse after PostToolUse. That also keeps "since" where it was,
 # so "working for 12s" does not keep resetting to 0s.
+#
+# The file is still touched, though: its mtime is when the agent last gave a sign of life,
+# and a session "working" with no hook for minutes on end is stuck on something --
+# desktop-agent-sessions reads that. A touch is the cheapest write there is.
 current=""
 [[ -f $file ]] && current=$(<"$file")
-[[ $current == *"\"state\":\"$state\""* ]] && exit 0
+if [[ $current == *"\"state\":\"$state\""* ]]; then
+  touch -c "$file" 2>/dev/null
+  exit 0
+fi
 
 now=$(date +%s)
 previous_state=""

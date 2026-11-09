@@ -3,7 +3,8 @@
 # desktop-tmux-keys: the tmux keys this desktop adds, on one screen.
 #
 #   desktop-tmux-keys          # prefix + ?, in a popup: the list, then any key to close
-#   desktop-tmux-keys --list   # "key<TAB>shown as<TAB>what it does", for the test
+#   desktop-tmux-keys --list     # "key<TAB>shown as<TAB>what it does", for the test
+#   desktop-tmux-keys --sidebar  # the sidebar's own keys, the same way
 #
 # Agents, tabs and tasks put fifteen keys on the prefix, and the place they were explained
 # was the comments of tmux.conf. Only those: tmux's own are in `tmux list-keys`.
@@ -25,6 +26,7 @@ BTab	Shift+Tab	previous tab
 a	a	next model: claude, opencode, codex
 A	A	pick a model from a menu
 g	g	every agent on this machine; Enter goes to it
+N	N	the agent needing you most; again for the next
 S	S	every AI tab, by column and model
 # Tasks -- a change in a worktree of its own
 T	T	new task: a branch name, and a tab whose agent works there
@@ -39,15 +41,32 @@ Q	Q	every session: the tmux server itself
 # Getting around
 s	s	the sessions you work in
 f	f	sessionizer: a repository or a task, laid out
-e	e	sidebar of sessions, windows and agents, on or off
+e	e	sidebar: a row per session and its agents, on or off
 Space	Space	the window you were in before
 r	r	reload tmux.conf
 ?	?	this list
 KEYS
 }
 
+# Inside the sidebar, with no prefix: what the column itself answers to. The first column
+# is the key as desktop-tmux-sidebar reads it, so the test can find it there.
+sidebar_keys() {
+  cat <<'KEYS'
+Enter	click, Enter	go to the session, or straight to the agent
+j	j k, wheel	move; the agents shown follow the session
+p	p	peek at the agent, and answer it there
+v	v	reviews and checkouts, and each agent's last prompt
+r	r	read everything again now
+q	q	close the sidebar in every window
+KEYS
+}
+
 if [[ ${1:-} == --list ]]; then
   keys | grep -v '^#'
+  exit 0
+fi
+if [[ ${1:-} == --sidebar ]]; then
+  sidebar_keys
   exit 0
 fi
 
@@ -60,6 +79,11 @@ while IFS=$'\t' read -r bound shown what; do
     printf '   %sprefix %-10s%s %s\n' "$bold" "$shown" "$plain" "$what"
   fi
 done < <(keys)
+
+printf '\n %sIn the sidebar (prefix e) -- ● red blocked  yellow working  green done  ○ idle%s\n' "$dim" "$plain"
+while IFS=$'\t' read -r _ shown what; do
+  printf '   %s%-17s%s %s\n' "$bold" "$shown" "$plain" "$what"
+done < <(sidebar_keys)
 
 # In the popup the list would be gone the moment it was drawn.
 [[ -t 1 ]] && read -r -n 1 -s

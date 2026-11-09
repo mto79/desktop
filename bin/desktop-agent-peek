@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+
+# desktop-agent-peek: an agent's screen in a popup, and a way to answer it from there.
+#
+#   desktop-agent-peek <pane> [client]    # p in the sidebar
+#
+# What it shows is the pane itself, read again every second, so a permission prompt can be
+# read and answered without leaving the window you are working in:
+#
+#   1-9          the digit, as if typed there: Claude Code's prompts take one key
+#   Enter        Enter
+#   ↑ ↓          the arrows, for a menu
+#   i            a line of text, then Enter: a reply to a question
+#   g            go to the agent instead, and close this
+#   q, Esc       close
+#
+# Esc closes rather than being passed on, because a popup that cannot be closed with Esc is
+# a trap; an agent that needs an Esc is one to go to.
+#
+# The client is the one to move when g is pressed. Without it tmux moves whichever client
+# it thinks is current, which from a popup is not reliably the one the popup is on.
+
+set -uo pipefail
+
+pane=${1:?usage: desktop-agent-peek <pane> [client]}
+client=${2:-}
+
+tmux display-message -p -t "$pane" '#{pane_id}' >/dev/null 2>&1 || {
+  echo "That pane has closed."
+  read -rsn1 -t 3
+  exit 0
+}
+
+# What is under that pane's cursor goes nowhere near this terminal's, so the cursor is put
+# away and given back however this ends.
+tput civis 2>/dev/null
+trap 'tput cnorm 2>/dev/null; printf "\e[0m"' EXIT
+
+send() { tmux send-keys -t "$pane" "$@" 2>/dev/null; }
+
+draw() {
+  local rows cols top
+  rows=$(tput lines 2>/dev/null) cols=$(tput cols 2>/dev/null)
+  rows=${rows:-24} cols=${cols:-80}
+  top=$(tmux display-message -p -t "$pane" '#{session_name}:#{window_index}  #{b:pane_current_path}' 2>/dev/null) || exit 0
+  printf '\e[H\e[0m\e[7m %s\e[K\e[0m\n' "${top:0:$((cols - 2))}"
+  # The last screenful that fits under the heading and over the keys, colours and all.
+  tmux capture-pane -p -e -t "$pane" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' |
+    tail -n $((rows - 2)) | while IFS= read -r line; do
+      printf '%s\e[0m\e[K\n' "$line"
+    done
+  printf '\e[J\e[%d;1H\e[2m 1-9 answer · Enter · ↑↓ · i type · g go there · q close\e[0m\e[K' "$rows"
+}
+
+while true; do
+  draw
+  IFS= read -rsn1 -t 1 key
+  status=$?
+  ((status > 128)) && continue # the timeout: read the pane again
+  # The input gone -- the popup closed under it. An empty key would otherwise be Enter,
+  # sent to the agent once a second for ever.
+  ((status != 0)) && exit 0
+  case "$key" in
+  [1-9]) send "$key" ;;
+  "") send Enter ;;
+  q) exit 0 ;;
+  g)
+    desktop-agent-tabs jump "$pane" "$client" >/dev/null 2>&1
+    exit 0
+    ;;
+  i)
+    tput cnorm 2>/dev/null
+    printf '\e[%d;1H\e[K> ' "$(tput lines 2>/dev/null || echo 24)"
+    IFS= read -re reply
+    tput civis 2>/dev/null
+    if [[ -n $reply ]]; then
+      send -l "$reply"
+      send Enter
+    fi
+    ;;
+  $'\e')
+    # An arrow arrives as Esc and two more bytes at once; Esc on its own arrives alone.
+    IFS= read -rsn2 -t 0.05 rest
+    case "$rest" in
+    "[A") send Up ;;
+    "[B") send Down ;;
+    *) exit 0 ;;
+    esac
+    ;;
+  esac
+done

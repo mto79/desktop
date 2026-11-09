@@ -10,13 +10,41 @@ Add a line under the current month in the same commit as the change it describes
 
 ## 2026-11
 
+### Added
+
+- prefix + N in tmux goes straight to the agent needing you most -- waiting longest, then a
+  finished turn not yet read, then a stuck one -- and on to the next when pressed again.
+- p in the tmux sidebar shows an agent's screen in a popup, where its prompt can be answered
+  with a digit, Enter or a typed line without leaving the window you are in.
+- v in the tmux sidebar adds each session's merge or pull request with the pipeline's
+  state (`!12 ✓`), its tasks' other checkouts, and each agent's last prompt.
+- An agent working but silent for five minutes is marked stuck in the sidebar, with how
+  long it has been quiet.
+- Under the sessions, the tmux sidebar lists the agents of one session on rows of their own,
+  as herdr does: each by its model, tab and task, with its own state. They follow the
+  session under the cursor, and a click goes straight to the agent. Each agent's name is in
+  its own colour, the same as its tabs': claude, codex and opencode as the theme sets them.
+
 ### Changed
 
+- The tmux sidebar looks like herdr's: SPACES and AGENTS, each entry on two lines -- a
+  coloured dot and the name, then a session's branch and diff or an agent's state in a word
+  and its task -- the session you are in on a bar, and the keys along the bottom.
+- The tmux sidebar lists sessions only, one row each, carrying the state of the agent in it
+  that needs you most. Windows are no longer listed, and an agent column is no longer an
+  entry of its own: its agents count towards the session it is in. An idle agent, or a
+  finished turn you have read, is a quiet ○.
 - The tmux sidebar is on from the start, in every window; prefix + e still closes it, and
   reloading tmux.conf no longer matters to it.
 
 ### Fixed
 
+- The tmux sidebar is in every window after a login, not only the few made after it: a
+  window built before it had room gets its column the first time it is looked at.
+- The tmux sidebar (prefix + e) opens once, down the left of the window, instead of a
+  second copy inside the agent column and in every terminal pane with tabs.
+- A newly opened or restored agent column no longer gets a tmux sidebar of its own; it
+  sometimes did when the sidebar asked before the column had finished setting up.
 - Restoring tmux after a login no longer brings a sidebar column back as an empty shell
   pane beside the new one, nor lays a window out with a cell for it.
 - The AI columns' top bars no longer cost two cores: their limits and token counts are

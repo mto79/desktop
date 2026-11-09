@@ -107,6 +107,20 @@ event PostToolUse
 check "another tool call does not reset how long it has been working" \
   test "$(jq -r .since "$records/s1.json")" = "$since"
 
+# The record's mtime is the last sign of life, which is how a stuck agent is told from a
+# busy one: every tool call has to move it, even the ones that change nothing else.
+touch -d '-10 minutes' "$records/s1.json"
+event PostToolUse
+check "a tool call that changes no state still marks the agent as heard from" \
+  test $(($(date +%s) - $(stat -c %Y "$records/s1.json"))) -lt 60
+DESKTOP_AGENT_STUCK_AFTER=300 python3 "$SESSIONS" --json >"$sandbox/stuck.json"
+check "and an agent heard from just now is not stuck" \
+  test "$(jq -r '.sessions[] | select(.session == "s1") | .stuck' "$sandbox/stuck.json")" = false
+touch -d '-10 minutes' "$records/s1.json"
+DESKTOP_AGENT_STUCK_AFTER=300 python3 "$SESSIONS" --json >"$sandbox/stuck.json"
+check "one working and silent for longer than that is stuck, and still working" \
+  test "$(jq -r '.sessions[] | select(.session == "s1") | "\(.state) \(.stuck)"' "$sandbox/stuck.json")" = "working true"
+
 event Stop
 check "the end of a turn makes it done" test "$(state)" = done
 event Notification '"notification_type":"auth_success"'

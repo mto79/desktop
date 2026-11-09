@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+
+"""What a checkout has changed, and the review it is in, as one line of JSON.
+
+    desktop-branch-status <dir>     # {"branch", "added", "removed", "review"}
+
+What the sidebar's detailed view shows under an agent: "+42 −7  !12 ✓". The lines are
+everything the branch changes against where it forked from the default branch -- commits
+and the working tree together, since to whoever reads the row both are "what this agent
+did". On the default branch itself that is only what is not committed yet.
+
+The review is the merge request (glab) or pull request (gh) of the branch, with the state
+of its pipeline or checks. It is asked of the forge in a detached process and kept under
+$XDG_RUNTIME_DIR, because the sidebar asks every two seconds and a forge behind a VPN can
+take twenty to say nothing. So the first answer has no review in it, and later ones carry
+what the forge said last. A forge that does not answer leaves what it said before alone:
+only an answer can say a review is gone.
+
+The forge is chosen from origin's URL as desktop-worktree chooses it, and Forgejo goes
+without: tea has no way to ask for the review of a branch.
+"""
+
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+DIFF_SECONDS = 10
+FORGE_SECONDS = 180
+FORGE_TIMEOUT = 20
+
+
+def cache_dir():
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desktop" / "branch-status"
+
+
+def git(directory, *args):
+    try:
+        done = subprocess.run(["git", "-C", directory, *args],
+                              capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def default_branch(directory):
+    ref = git(directory, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+    if ref:
+        return ref
+    for name in ("origin/main", "origin/master", "main", "master"):
+        if git(directory, "rev-parse", "--verify", "--quiet", name) is not None:
+            return name
+    return None
+
+
+def diff(directory, branch):
+    """Lines added and removed since the branch left the default one."""
+    base = default_branch(directory)
+    fork = git(directory, "merge-base", "HEAD", base) if base else None
+    stat = git(directory, "diff", "--shortstat", fork or "HEAD") or ""
+    added = removed = 0
+    for part in stat.split(","):
+        words = part.split()
+        if len(words) >= 2 and words[0].isdigit():
+            if words[1].startswith("insertion"):
+                added = int(words[0])
+            elif words[1].startswith("deletion"):
+                removed = int(words[0])
+    return added, removed
+
+
+def forge_of(directory):
+    url = git(directory, "config", "--get", "remote.origin.url") or ""
+    if not url:
+        return None
+    if "github.com:" in url or "github.com/" in url:
+        return "gh"
+    if "codeberg.org" in url:
+        return None
+    return "glab"
+
+
+def checks_of_gh(rollup):
+    """GitHub's checks folded into one word: failed beats running beats passed."""
+    words = set()
+    for check in rollup or []:
+        # A check run has a status and, once it has finished, a conclusion; a commit
+        # status has only a state.
+        value = (check.get("conclusion") or check.get("state") or check.get("status") or "").upper()
+        if value in ("FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"):
+            words.add("failed")
+        elif value in ("SUCCESS", "NEUTRAL", "SKIPPED"):
+            words.add("passed")
+        elif value:
+            words.add("running")
+    for word in ("failed", "running", "passed"):
+        if word in words:
+            return word
+    return ""
+
+
+def checks_of_glab(status):
+    status = (status or "").lower()
+    if status == "success":
+        return "passed"
+    if status in ("failed", "canceled", "cancelled"):
+        return "failed"
+    if status in ("running", "pending", "created", "preparing", "waiting_for_resource",
+                  "scheduled", "manual"):
+        return "running"
+    return ""
+
+
+def ask_forge(directory, branch):
+    """The review of a branch, None when there is none, or False when nobody answered."""
+    forge = forge_of(directory)
+    if forge == "gh":
+        command = ["gh", "pr", "view", branch, "--json", "number,state,url,statusCheckRollup"]
+    elif forge == "glab":
+        command = ["glab", "mr", "view", branch, "-F", "json"]
+    else:
+        return None
+    try:
+        done = subprocess.run(command, cwd=directory, capture_output=True, text=True,
+                              timeout=FORGE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    try:
+        found = json.loads(done.stdout)
+    except ValueError:
+        said = (done.stderr + done.stdout).lower()
+        if "no pull requests found" in said or "no open merge request" in said:
+            return None
+        return False
+    if not isinstance(found, dict):
+        return False
+    if forge == "gh":
+        return {"number": found.get("number"), "state": (found.get("state") or "").lower(),
+                "url": found.get("url") or "", "checks": checks_of_gh(found.get("statusCheckRollup"))}
+    pipeline = found.get("head_pipeline") or found.get("pipeline") or {}
+    return {"number": found.get("iid"), "state": (found.get("state") or "").lower(),
+            "url": found.get("web_url") or "", "checks": checks_of_glab(pipeline.get("status"))}
+
+
+def load(path):
+    try:
+        found = json.loads(path.read_text())
+        return found if isinstance(found, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save(path, record):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(f".{os.getpid()}")
+    temporary.write_text(json.dumps(record))
+    temporary.replace(path)
+
+
+def refresh_forge(directory, branch, path):
+    """The detached half: ask the forge and keep its answer."""
+    review = ask_forge(directory, branch)
+    record = load(path)
+    record["asked"] = time.time()
+    if review is not False:
+        record["review"] = review
+    save(path, record)
+    try:
+        path.with_suffix(".asking").unlink()
+    except OSError:
+        pass
+
+
+def status(directory, now=None):
+    now = time.time() if now is None else now
+    top = git(directory, "rev-parse", "--show-toplevel")
+    if not top:
+        return {}
+    branch = git(top, "symbolic-ref", "--short", "HEAD") or ""
+    key = hashlib.sha1(f"{top}\0{branch}".encode()).hexdigest()[:16]
+    path = cache_dir() / f"{key}.json"
+    record = load(path)
+
+    if now - record.get("counted", 0) >= DIFF_SECONDS:
+        record["added"], record["removed"] = diff(top, branch)
+        record["counted"] = now
+        save(path, record)
+
+    base = (default_branch(top) or "").split("/")[-1]
+    if branch and branch != base and now - record.get("asked", 0) >= FORGE_SECONDS:
+        # One question at a time per branch. A lock older than the timeout is from a
+        # process that died, and is no reason to never ask again.
+        asking = path.with_suffix(".asking")
+        try:
+            fresh = now - asking.stat().st_mtime < FORGE_TIMEOUT + 10
+        except OSError:
+            fresh = False
+        if not fresh:
+            asking.parent.mkdir(parents=True, exist_ok=True)
+            asking.touch()
+            # This file and not sys.argv[0]: the sidebar loads it rather than running it.
+            subprocess.Popen([os.path.realpath(__file__), "--forge", top, branch, str(path)],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+
+    return {"branch": branch, "added": record.get("added", 0), "removed": record.get("removed", 0),
+            "review": record.get("review") if branch != base else None}
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) == 4 and args[0] == "--forge":
+        refresh_forge(args[1], args[2], Path(args[3]))
+        return 0
+    if len(args) != 1:
+        print("usage: desktop-branch-status <dir>", file=sys.stderr)
+        return 2
+    print(json.dumps(status(args[0])))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

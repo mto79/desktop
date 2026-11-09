@@ -6,6 +6,7 @@
     desktop-agent-sessions --json         # what the bar and the AI panel read
     desktop-agent-sessions --tmux-status  # "● 1 waiting · 2 working", for tmux's status-right
     desktop-agent-sessions --pick         # choose one in fzf and jump to its pane
+    desktop-agent-sessions --next <client> # prefix + N: go to the one needing you most
 
 Read from the records desktop-agent-state writes from Claude Code's hooks, one per session.
 Those are only ever removed by a SessionEnd hook, and a session that crashes, is killed, or
@@ -16,6 +17,12 @@ reused and a stale record must not come back to life when an unrelated process t
 
 Sessions that sent no pid -- a hook run somewhere the claude process could not be found --
 cannot be checked, and are kept for a day before being treated as gone.
+
+A session can also be alive and stuck: "working", and no hook heard from it for minutes.
+Every tool call fires one, so that silence is a tool call that has not come back, a turn
+interrupted with Esc (which fires no Stop), or a very long think. desktop-agent-state
+touches the record on every hook, so its mtime is the last sign of life. The state stays
+"working" -- that is what the agent last said -- and "stuck" is added next to it.
 """
 
 import json
@@ -28,6 +35,7 @@ from pathlib import Path
 # Needing you first, then busy, then finished, then untouched.
 ORDER = {"waiting": 0, "working": 1, "done": 2, "ready": 3}
 UNVERIFIABLE_SECONDS = 24 * 3600
+STUCK_SECONDS = int(os.environ.get("DESKTOP_AGENT_STUCK_AFTER") or 300)
 
 
 def state_dir():
@@ -114,6 +122,11 @@ def sessions(now=None, targets=True):
                 pass
             continue
 
+        try:
+            heard = path.stat().st_mtime
+        except OSError:
+            heard = since
+        quiet = max(0, now - heard)
         cwd = record.get("cwd") or ""
         target, mark = pane_target(record.get("pane"), record.get("socket")) if targets else (None, "")
         found.append({
@@ -131,6 +144,10 @@ def sessions(now=None, targets=True):
             # Finished, and nobody has been to look. "done" alone also covers a session
             # that finished hours ago and was read then.
             "unseen": record["state"] == "done" and mark == "done",
+            "stuck": record["state"] == "working" and quiet >= STUCK_SECONDS,
+            "quiet": duration(quiet),
+            # The prompt the turn began with, cut short by desktop-agent-state.
+            "asked": record.get("asked") or "",
         })
 
     found.sort(key=lambda s: (ORDER[s["state"]], -s["since"]))
@@ -218,11 +235,63 @@ def pick():
     return 0
 
 
+def tmux_out(*args):
+    try:
+        done = subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def queue(listed, socket):
+    """The sessions that need you, in the order prefix + N visits them.
+
+    Waiting first, longest waiting first: that one has been held up the longest. Then the
+    turns that finished and nobody has looked at, newest first, then the stuck ones. Only
+    this tmux server's, since a client here cannot be switched to a pane of another.
+    """
+    here = [s for s in listed if s["target"]
+            and (not s["socket"] or not socket
+                 or os.path.realpath(s["socket"]) == os.path.realpath(socket))]
+    waiting = sorted((s for s in here if s["state"] == "waiting"), key=lambda s: s["since"])
+    unseen = sorted((s for s in here if s["unseen"]), key=lambda s: -s["since"])
+    stuck = sorted((s for s in here if s["stuck"]), key=lambda s: s["since"])
+    return waiting + unseen + stuck
+
+
+def next_up(client):
+    """prefix + N: go to the session needing you most, and on to the next on pressing again.
+
+    The pane it went to last is kept in a server option. Arriving at a waiting agent does
+    not stop it waiting -- answering does -- so without that, pressing again would land on
+    the same one every time.
+    """
+    socket = tmux_out("display-message", "-p", "#{socket_path}")
+    line = queue(sessions(), socket)
+    say = ["display-message"] + (["-c", client] if client else [])
+    if not line:
+        tmux_out(*say, " No agent needs you")
+        return 0
+    last = tmux_out("show-options", "-gqv", "@agent_next_last")
+    panes = [s["pane"] for s in line]
+    at = (panes.index(last) + 1) % len(line) if last in panes else 0
+    chosen = line[at]
+    tmux_out("set-option", "-gq", "@agent_next_last", chosen["pane"])
+    what = "stuck" if chosen["stuck"] and chosen["state"] == "working" else chosen["state"]
+    subprocess.run(["desktop-agent-tabs", "jump", chosen["pane"], *([client] if client else [])],
+                   capture_output=True)
+    tmux_out(*say, f" {at + 1}/{len(line)}  {what} {chosen['for']}  {chosen['project']}")
+    return 0
+
+
 def main():
     if "--tmux-status" in sys.argv[1:]:
         return tmux_status()
     if "--pick" in sys.argv[1:]:
         return pick()
+    if "--next" in sys.argv[1:]:
+        rest = sys.argv[sys.argv.index("--next") + 1:]
+        return next_up(rest[0] if rest else "")
     listed = sessions()
     if "--json" in sys.argv[1:]:
         counts = {state: sum(1 for s in listed if s["state"] == state) for state in ORDER}

@@ -27,6 +27,24 @@ for key in t T Tab x a A S g D Z; do
   check "prefix + $key is on the list" grep -qP "^\\Q$key\\E\t" <<<"$("$KEYS" --list)"
 done
 
+# The sidebar's own keys, against the keys the sidebar reads. Enter is read as "\n".
+SIDEBAR="$ROOT/bin/desktop-tmux-sidebar"
+handled() {
+  local key=$1
+  [[ $key == Enter ]] && key='\n'
+  grep -qF "ord(\"$key\")" "$SIDEBAR"
+}
+count=0
+while IFS=$'\t' read -r key shown what; do
+  count=$((count + 1))
+  check "the sidebar answers to $shown" handled "$key"
+  check "and the list says what $shown does there" test -n "$what"
+done < <("$KEYS" --sidebar)
+check "the sidebar's keys are on the list" test "$count" -ge 5
+check "peek and the detailed view among them" \
+  test "$("$KEYS" --sidebar | cut -f1 | grep -cx 'p\|v')" = 2
+check "they are shown in the popup" grep -q 'In the sidebar' <<<"$("$KEYS" </dev/null)"
+
 check "prefix + ? shows it" grep -q '^bind-key ? display-popup .*desktop-tmux-keys' "$CONF"
 check "piped, it prints and does not wait for a key" test -n "$("$KEYS" </dev/null)"
 
