@@ -64,9 +64,20 @@ desktop-terminal-tabs new "$shell"                                           # a
 tm new-window -d -t work: -n git -c "$sandbox/work" lazygit
 tm new-session -d -s notes -n scratch -c "$sandbox/notes" -x 200 -y 50
 tm split-window -d -t notes:scratch -c "$sandbox/notes"
+# A window with the sidebar's column in it, which is the sidebar's to put back, not this.
+tm new-window -d -t notes: -n side -c "$sandbox/notes"
+tm split-window -d -fhb -l 30 -t notes:side "sleep 300"
+tm set-option -p -t "$(tm list-panes -t notes:side -F '#{pane_id}' | head -1)" @sidebar 1
 
 "$RESTORE" save
 before=$(shape)
+side=$(python3 -c 'import json, sys
+for s in json.load(open(sys.argv[1]))["sessions"]:
+    for w in s["windows"]:
+        if w["name"] == "side":
+            print(len(w["panes"]), repr(w.get("layout")))' "$sandbox/state/desktop/tmux/last.json")
+check "the sidebar's column is not saved as a pane of its window" test "${side%% *}" = 1
+check "nor is a layout that counts it" test "${side#* }" = "''"
 check "the picture has both sessions" test "$(grep -c '^[a-z]' <<<"$before")" = 2
 check "the agent window is known for what it is, tabs and all" \
   grep -qE '^  ide +agent window  .*claude x3' <<<"$before"

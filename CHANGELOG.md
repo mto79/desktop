@@ -17,6 +17,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Restoring tmux after a login no longer brings a sidebar column back as an empty shell
+  pane beside the new one, nor lays a window out with a cell for it.
 - The AI columns' top bars no longer cost two cores: their limits and token counts are
   worked out once every thirty seconds, not once per attached tab every five.
 

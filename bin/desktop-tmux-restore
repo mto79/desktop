@@ -91,8 +91,10 @@ def terminal_tabs(group):
 
 
 def window_record(session, index, name, worktree, layout):
-    panes = rows(tmux("list-panes", "-t", f"={session}:{index}", "-F",
-                      "#{@ai_column}\t#{@ai_dir}\t#{@ai_model}\t#{@term_tabs}\t#{pane_start_path}"
+    # Not the sidebar's column: it is put back by the sidebar itself, in every window, and
+    # saved as a pane of the window it came back as a second one beside the new.
+    panes = rows(tmux("list-panes", "-t", f"={session}:{index}", "-f", "#{!=:#{@sidebar},1}",
+                      "-F", "#{@ai_column}\t#{@ai_dir}\t#{@ai_model}\t#{@term_tabs}\t#{pane_start_path}"
                       "\t#{pane_start_command}"))
     record = {"name": name}
     column = next((pane for pane in panes if pane[0]), None)
@@ -106,6 +108,12 @@ def window_record(session, index, name, worktree, layout):
         record.update(kind="agent", dir=directory, model=model, tabs=column_tabs(group),
                       terminals=terminal_tabs(terminal) if terminal else 1)
     else:
+        # A layout counts the sidebar's column too, and laid over one pane fewer it is refused
+        # and leaves the panes tiled anyway. Without it they are evened out, which is right
+        # for the one or two a plain window has.
+        if len(panes) != int(tmux("display-message", "-p", "-t", f"={session}:{index}",
+                                  "#{window_panes}") or 0):
+            layout = ""
         record.update(kind="plain", layout=layout, panes=[
             {"dir": pane[4], "command": pane[5].strip('"') if pane[5].strip('"') in RERUN else ""}
             for pane in panes])
