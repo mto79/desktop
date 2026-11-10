@@ -175,6 +175,27 @@ is `N` because `n` opens a new session.
 `prefix + g` shows the same agents as a list to pick from, and the sidebar keeps them in
 view.
 
+## Agents talking to each other
+
+Claude Code sessions on this machine can message each other by name, the name the sidebar
+shows after the model and tab (`claude 1 vm-6a`). Ask one in plain words -- "ask vm-6a
+which branch it is on" -- and the message arrives at the other between its turns, and the
+answer comes back the same way. Nothing here is needed for that.
+
+opencode and codex have no such thing, so `desktop-agent-send` types into their pane
+instead, addressed as the sidebar shows them:
+
+    desktop-agent-send vm "opencode 1" "the image builder's API changed, rebase"
+    desktop-agent-send opentofu-monorepo claude-2 < notes.md
+    desktop-agent-send --list
+
+The text goes in as one bracketed paste, so a message of several lines is one message, and
+then Enter. Sent from an agent's own pane, it is headed with who sent it and the command to
+answer with, since the agent at the other end has no other way to know. The address is the
+session and either the label (`opencode 1`, typed with or without its space) or a Claude
+agent's name. It cannot tell whether opencode or codex is in the middle of a turn -- they
+report nothing -- so a message to a busy one is handled however that agent handles typing.
+
 ## Saving and restoring
 
 `desktop-tmux-restore` writes down what is open and rebuilds it at login, because a tmux

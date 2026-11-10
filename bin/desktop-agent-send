@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+
+"""desktop-agent-send: type a message into another coding agent, as you would.
+
+    desktop-agent-send <session> <agent> [message]   # the message, or stdin without one
+    desktop-agent-send --list                         # every agent, as it is addressed
+
+An agent is addressed the way the tmux sidebar shows it: the session, then the agent's
+label or, for Claude Code, its name for messages.
+
+    desktop-agent-send vm "opencode 1" "the image builder's API changed, rebase"
+    desktop-agent-send opentofu-monorepo opentofu-monorepo-b1 < notes.md
+
+Claude Code sessions can already message each other by name, and do it better: the
+message arrives between turns and the reply comes back the same way. This is for the
+agents that cannot -- opencode and codex -- and for a script or a shell that wants to
+reach any of them. It pastes the text into the agent's pane as one bracketed paste, so a
+message of several lines is one message, and then presses Enter.
+
+The message is headed with who sent it and the command to answer with, when it is sent
+from an agent's pane: the agent at the other end has no other way to know.
+
+It cannot tell whether opencode or codex is in the middle of a turn -- they report nothing
+-- so what happens to a message typed into a busy one is up to that agent. A Claude Code
+agent that is working gets it queued, as typed input is.
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+import time
+
+
+def sidebar():
+    """desktop-tmux-sidebar, for its view of the sessions and their agents: what the
+    column shows is what can be addressed here, and by the same words."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    loader = importlib.machinery.SourceFileLoader("sidebar", os.path.join(here, "desktop-tmux-sidebar"))
+    spec = importlib.util.spec_from_loader("sidebar", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def plain(text):
+    """An agent's label or name as typed: case, spaces and dashes left out, so
+    "opencode 1", "opencode-1" and "OpenCode1" are the same agent."""
+    return re.sub(r"[\s_-]+", "", text).lower()
+
+
+def everyone(side):
+    """(session, agent) for every agent the sidebar knows of."""
+    for session, found in sorted(side.collect().items()):
+        for agent in found["agents"]:
+            yield session, agent
+
+
+def find(side, session, wanted):
+    """The one agent in a session going by that label or name, or why there is not one."""
+    listed = [agent for name, agent in everyone(side) if name == session]
+    if not listed:
+        return None, f"no agents in a session called {session}"
+    key = plain(wanted)
+    # The label as drawn, "2:claude 1" where a session has agents in several windows, or
+    # without its window when that is still only one; or the name for messages.
+    hits = [a for a in listed if key in (plain(a["label"]), plain(a.get("name", "")))]
+    if not hits:
+        hits = [a for a in listed if plain(a["label"].split(":", 1)[-1]) == key]
+    if len(hits) == 1:
+        return hits[0], ""
+    known = ", ".join(address(a) for a in listed)
+    if hits:
+        return None, f"{wanted} is more than one agent in {session}: {known}"
+    return None, f"no agent {wanted} in {session}; it has {known}"
+
+
+def address(agent):
+    return agent["label"] + (f" ({agent['name']})" if agent.get("name") else "")
+
+
+def sender(side):
+    """Who is sending, said as the address to reply to, when it is an agent's pane."""
+    pane = os.environ.get("TMUX_PANE", "")
+    if not pane:
+        return None
+    target = side.tmux("display-message", "-p", "-t", pane, "#{session_name}:#{window_index}")
+    for session, agent in everyone(side):
+        if agent["pane"].rsplit(".", 1)[0] == target:
+            return session, agent
+    return None
+
+
+def deliver(side, target, text):
+    """Paste text into a pane as one bracketed paste, then press Enter.
+
+    A paste rather than typed keys: the newlines in it stay newlines instead of each
+    sending what came before. Out of copy mode first, or the paste goes nowhere.
+    """
+    if side.tmux("display-message", "-p", "-t", target, "#{pane_in_mode}") == "1":
+        side.tmux("send-keys", "-t", target, "-X", "cancel")
+    buffer = f"desktop-agent-send-{os.getpid()}"
+    loaded = subprocess.run(["tmux", "load-buffer", "-b", buffer, "-"], input=text,
+                            text=True, capture_output=True)
+    if loaded.returncode != 0:
+        return False
+    pasted = subprocess.run(["tmux", "paste-buffer", "-p", "-d", "-b", buffer, "-t", target],
+                            capture_output=True)
+    if pasted.returncode != 0:
+        subprocess.run(["tmux", "delete-buffer", "-b", buffer], capture_output=True)
+        return False
+    # A TUI takes a moment over a paste; Enter in the middle of it would land inside.
+    time.sleep(0.3)
+    return subprocess.run(["tmux", "send-keys", "-t", target, "Enter"],
+                          capture_output=True).returncode == 0
+
+
+def main(argv):
+    if argv[:1] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    side = sidebar()
+    if argv[:1] == ["--list"]:
+        for session, agent in everyone(side):
+            print(f"{session}\t{address(agent)}")
+        return 0
+    if len(argv) < 2:
+        print("usage: desktop-agent-send <session> <agent> [message]", file=sys.stderr)
+        return 2
+
+    session, wanted = argv[0], argv[1]
+    agent, why = find(side, session, wanted)
+    if not agent:
+        print(f"desktop-agent-send: {why}", file=sys.stderr)
+        return 1
+    text = " ".join(argv[2:]) if len(argv) > 2 else sys.stdin.read()
+    text = text.strip("\n")
+    if not text.strip():
+        print("desktop-agent-send: nothing to send", file=sys.stderr)
+        return 2
+
+    me = sender(side)
+    if me:
+        mine, them = me
+        if them["pane"] == agent["pane"]:
+            print("desktop-agent-send: that is this agent", file=sys.stderr)
+            return 1
+        reply = f'desktop-agent-send {mine} "{them["label"]}"'
+        text = (f"[A message from the agent {address(them)} in {mine}. "
+                f"To answer, run: {reply} \"...\"]\n\n{text}")
+
+    if not deliver(side, agent["pane"], text):
+        print(f"desktop-agent-send: could not type into {agent['pane']}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
