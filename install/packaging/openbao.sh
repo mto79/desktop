@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-# No repo needed: openbao is in the official Fedora repos (and EPEL).
-
-echo "Installing OpenBao..."
-sudo dnf install -y openbao
-
-echo
-echo "OpenBao installed:"
-bao -version
+# The OpenBao client, bao. desktop-update-openbao does the work, so that an install and every
+# update after it agree on which version that is -- see there for why the minor version is
+# pinned, and why not Fedora's openbao package.
+"$DESKTOP_PATH/bin/desktop-update-openbao"

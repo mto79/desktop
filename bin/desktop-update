@@ -17,6 +17,9 @@ desktop-migrate
 desktop-update-cargo
 desktop-update-oc
 desktop-update-kubectl
+desktop-update-hashicorp packer
+desktop-update-hashicorp vault
+desktop-update-openbao
 desktop-update-releases
 desktop-update-npm
 desktop-update-flatpak

@@ -14,6 +14,10 @@ Add a line under the current month in the same commit as the change it describes
 
 - The tmux sidebar shows each Claude agent's name for messages after its model and tab --
   `claude 1 vm-6a` -- so "ask vm-6a what it changed" can be read straight off the column.
+- Packer is installed, and kept on the newest 1.16 release by `desktop-update`; so are the
+  Vault client, on 2.2, and the OpenBao client, on 2.7 from OpenBao itself rather than
+  Fedora's package a minor behind. Each download is checked against its publisher's signed
+  checksums, by the key's fingerprint, before it is put in place.
 - `desktop-agent-send` types a message into another agent's pane, opencode and codex
   included, addressed as the sidebar shows it: `desktop-agent-send vm "opencode 1" "..."`.
   Sent from an agent, it says who sent it and how to answer.

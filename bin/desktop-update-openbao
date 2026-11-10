@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+
+# desktop-update-openbao: keep the OpenBao client, bao, on the newest release of one minor.
+#
+#   desktop-update-openbao            # install or update bao to the newest 2.7.z
+#   desktop-update-openbao --check    # say what is installed and what is current, change nothing
+#
+# As desktop-update-hashicorp keeps vault, and for the same reasons: the minor version is
+# pinned here and the patch release follows it, so fixes arrive and the next minor does not
+# without this line being changed.
+#
+# Not Fedora's openbao package, which openbao.sh used to install: Fedora carries it a minor
+# behind upstream (2.6 while OpenBao released 2.7), and a client is chosen for the servers it
+# talks to, not for when Fedora gets round to it. From OpenBao's GitHub releases instead.
+#
+# Verified the way OpenBao documents (https://openbao.org/docs/install/): the archive against
+# checksums.txt, and checksums.txt against its signature, by the key whose fingerprint is
+# written down here -- the one that page prints -- rather than trusted for having been
+# downloaded beside the files it signs.
+
+set -euo pipefail
+
+MINOR="${DESKTOP_OPENBAO_MINOR:-2.7}"
+API="${DESKTOP_OPENBAO_API:-https://api.github.com/repos/openbao/openbao/releases?per_page=100}"
+DOWNLOADS="${DESKTOP_OPENBAO_DOWNLOADS:-https://github.com/openbao/openbao/releases/download}"
+KEY_URL="${DESKTOP_OPENBAO_KEY_URL:-https://openbao.org/assets/openbao-gpg-pub-20240618.asc}"
+FINGERPRINT="${DESKTOP_OPENBAO_FINGERPRINT:-66D15FDD87287219C8E15478D200CD702853E6D0}"
+TARGET="${DESKTOP_OPENBAO_TARGET:-/usr/local/bin/bao}"
+
+case "$(uname -m)" in
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
+*)
+  echo "desktop-update-openbao: no bao build for $(uname -m)" >&2
+  exit 0
+  ;;
+esac
+
+# "OpenBao v2.7.2 ('…'), built …": the number after the v.
+version_of() {
+  "$1" version 2>/dev/null | sed -n 's/^OpenBao v\([0-9][0-9.]*\).*/\1/p' | head -1
+}
+
+installed() {
+  [[ -x $TARGET ]] || return 0
+  version_of "$TARGET"
+}
+
+# The newest release of the pinned minor. Not a draft or a prerelease, and a plain number:
+# betas carry a dash and a date.
+current() {
+  curl -fsSL --max-time 30 "$API" |
+    jq -r '.[] | select((.draft | not) and (.prerelease | not)) | .tag_name' |
+    sed 's/^v//' |
+    grep -E "^${MINOR//./\\.}\\.[0-9]+$" |
+    sort -V | tail -1
+}
+
+echo -e "\e[32m\nUpdate bao ($MINOR)\e[0m"
+
+have=$(installed)
+want=$(current 2>/dev/null) || want=""
+if [[ -z $want ]]; then
+  # No network, or GitHub is away or rationing its API: not a reason to fail the update.
+  echo "could not ask GitHub what the newest OpenBao $MINOR is; bao left at ${have:-nothing}"
+  exit 0
+fi
+
+if [[ ${1:-} == --check ]]; then
+  echo "installed: ${have:-none}"
+  echo "current:   $want"
+  exit 0
+fi
+
+if [[ $have == "$want" ]]; then
+  echo "bao $have is current"
+  exit 0
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+archive="openbao_${want}_linux_${arch}.tar.gz"
+base="$DOWNLOADS/v$want"
+
+echo "bao ${have:-not installed} -> $want"
+curl -fSL --max-time 600 --progress-bar -o "$work/$archive" "$base/$archive"
+curl -fsSL --max-time 30 -o "$work/checksums.txt" "$base/checksums.txt"
+curl -fsSL --max-time 30 -o "$work/checksums.txt.gpgsig" "$base/checksums.txt.gpgsig"
+curl -fsSL --max-time 30 -o "$work/key.asc" "$KEY_URL"
+
+# The signature, by that key and no other: a keyring of its own, and the signer's primary
+# fingerprint compared to the one above -- a subkey signs, so it is the primary that is
+# looked at, the last field of gpg's VALIDSIG line.
+export GNUPGHOME="$work/gnupg"
+mkdir -m 0700 "$GNUPGHOME"
+gpg --batch --quiet --import "$work/key.asc" 2>/dev/null
+signer=$(gpg --batch --status-fd 1 --verify "$work/checksums.txt.gpgsig" "$work/checksums.txt" 2>/dev/null |
+  awk '$2 == "VALIDSIG" { print $NF }' | head -1)
+[[ $signer == "$FINGERPRINT" ]] || {
+  echo "desktop-update-openbao: checksums.txt is not signed by OpenBao's key; nothing installed" >&2
+  exit 1
+}
+
+sum=$(awk -v name="$archive" '$2 == name { print $1 }' "$work/checksums.txt")
+[[ -n $sum ]] || {
+  echo "desktop-update-openbao: checksums.txt lists no checksum for $archive; nothing installed" >&2
+  exit 1
+}
+echo "$sum  $work/$archive" | sha256sum --check --quiet || {
+  echo "desktop-update-openbao: checksum mismatch; nothing installed" >&2
+  exit 1
+}
+
+tar -xzf "$work/$archive" -C "$work" bao
+got=$(version_of "$work/bao")
+[[ $got == "$want" ]] || {
+  echo "desktop-update-openbao: the archive holds bao $got, not $want; nothing installed" >&2
+  exit 1
+}
+
+# Without sudo where that is enough: a bao put there by hand may be the user's own file.
+if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
+  install -m 0755 "$work/bao" "$TARGET.new" 2>/dev/null && mv -f "$TARGET.new" "$TARGET" ||
+    cp -f "$work/bao" "$TARGET"
+else
+  sudo install -m 0755 "$work/bao" "$TARGET"
+fi
+
+now=$(installed)
+echo "bao $now installed"
+
+notify-send -a "Updates" -i software-update-available "bao updated" \
+  "OpenBao ${have:-not installed} → $now ($MINOR)" 2>/dev/null || true

@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+
+# desktop-update-hashicorp: keep a HashiCorp tool on the newest release of one minor version.
+#
+#   desktop-update-hashicorp packer            # install or update packer to the newest 1.16.z
+#   desktop-update-hashicorp vault             # install or update vault to the newest 2.2.z
+#   desktop-update-hashicorp vault --check     # what is installed and what is current, no change
+#
+# The way desktop-update-oc keeps oc: the minor version is pinned here and the patch release
+# follows it, so every desktop-update picks up fixes and none of them moves to the next minor
+# without this table being changed. A minor release of Packer can change what a template
+# means, and of Vault what a client sends a server it shares a version window with; a move
+# between them is a decision.
+#
+# Not HashiCorp's dnf repository, which terraform.sh adds: through it every system update
+# would take whatever is newest, minor versions included. From releases.hashicorp.com
+# instead, whose index lists every version of each product.
+#
+# Trusted the way HashiCorp means it to be: the archive against SHA256SUMS, and SHA256SUMS
+# against its signature, by the key whose fingerprint is written down here rather than
+# taken from wherever the key was fetched. A Packer build holds cloud and hypervisor
+# credentials, and a Vault client the tokens to everything else.
+
+set -euo pipefail
+
+# product, the minor it follows.
+declare -A MINORS=(
+  [packer]=1.16
+  [vault]=2.2
+)
+
+product=${1:-}
+[[ -n $product && -n ${MINORS[$product]:-} ]] || {
+  names=$(IFS='|'; echo "${!MINORS[*]}")
+  echo "usage: desktop-update-hashicorp <$names> [--check]" >&2
+  exit 2
+}
+shift
+
+upper=${product^^}
+minor_var="DESKTOP_${upper}_MINOR" target_var="DESKTOP_${upper}_TARGET"
+MINOR="${!minor_var:-${MINORS[$product]}}"
+TARGET="${!target_var:-/usr/local/bin/$product}"
+RELEASES="${DESKTOP_HASHICORP_RELEASES:-https://releases.hashicorp.com}/$product"
+KEY_URL="${DESKTOP_HASHICORP_KEY_URL:-https://www.hashicorp.com/.well-known/pgp-key.txt}"
+# HashiCorp Security's signing key, as https://www.hashicorp.com/security publishes it.
+FINGERPRINT="${DESKTOP_HASHICORP_FINGERPRINT:-C874011F0AB405110D02105534365D9472D7468F}"
+
+case "$(uname -m)" in
+x86_64) arch=amd64 ;;
+aarch64) arch=arm64 ;;
+*)
+  echo "desktop-update-hashicorp: no $product build for $(uname -m)" >&2
+  exit 0
+  ;;
+esac
+
+# "Packer v1.16.2", "Vault v2.2.1 ('…'), built …": the number after the v.
+version_of() {
+  "$1" version 2>/dev/null | sed -n 's/^[A-Za-z]* v\([0-9][0-9.]*\).*/\1/p' | head -1
+}
+
+installed() {
+  [[ -x $TARGET ]] || return 0
+  version_of "$TARGET"
+}
+
+# The newest release of the pinned minor: no betas, release candidates or enterprise
+# builds, which the index lists alongside the rest with a dash or a plus in their number.
+current() {
+  curl -fsSL --max-time 30 "$RELEASES/index.json" |
+    jq -r '.versions | keys[]' |
+    grep -E "^${MINOR//./\\.}\\.[0-9]+$" |
+    sort -V | tail -1
+}
+
+echo -e "\e[32m\nUpdate $product ($MINOR)\e[0m"
+
+have=$(installed)
+want=$(current 2>/dev/null) || want=""
+if [[ -z $want ]]; then
+  # No network, or the release site is away: not a reason to fail the whole update.
+  echo "could not ask HashiCorp what the newest $product $MINOR is; $product left at ${have:-nothing}"
+  exit 0
+fi
+
+if [[ ${1:-} == --check ]]; then
+  echo "installed: ${have:-none}"
+  echo "current:   $want"
+  exit 0
+fi
+
+if [[ $have == "$want" ]]; then
+  echo "$product $have is current"
+  exit 0
+fi
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+archive="${product}_${want}_linux_${arch}.zip"
+sums="${product}_${want}_SHA256SUMS"
+
+echo "$product ${have:-not installed} -> $want"
+curl -fSL --max-time 600 --progress-bar -o "$work/$archive" "$RELEASES/$want/$archive"
+curl -fsSL --max-time 30 -o "$work/$sums" "$RELEASES/$want/$sums"
+curl -fsSL --max-time 30 -o "$work/$sums.sig" "$RELEASES/$want/$sums.sig"
+curl -fsSL --max-time 30 -o "$work/key.asc" "$KEY_URL"
+
+# The signature, by that key and no other: a keyring of its own, so nothing already trusted
+# in ~/.gnupg can vouch for the list, and the signer's fingerprint compared to the one above.
+export GNUPGHOME="$work/gnupg"
+mkdir -m 0700 "$GNUPGHOME"
+gpg --batch --quiet --import "$work/key.asc" 2>/dev/null
+signer=$(gpg --batch --status-fd 1 --verify "$work/$sums.sig" "$work/$sums" 2>/dev/null |
+  awk '$2 == "VALIDSIG" { print $12 }' | head -1)
+[[ $signer == "$FINGERPRINT" ]] || {
+  echo "desktop-update-hashicorp: $sums is not signed by HashiCorp's key; nothing installed" >&2
+  exit 1
+}
+
+sum=$(awk -v name="$archive" '$2 == name { print $1 }' "$work/$sums")
+[[ -n $sum ]] || {
+  echo "desktop-update-hashicorp: $sums lists no checksum for $archive; nothing installed" >&2
+  exit 1
+}
+echo "$sum  $work/$archive" | sha256sum --check --quiet || {
+  echo "desktop-update-hashicorp: checksum mismatch; nothing installed" >&2
+  exit 1
+}
+
+unzip -q "$work/$archive" "$product" -d "$work"
+got=$(version_of "$work/$product")
+[[ $got == "$want" ]] || {
+  echo "desktop-update-hashicorp: the archive holds $product $got, not $want; nothing installed" >&2
+  exit 1
+}
+
+# Without sudo where that is enough: one put there by hand may be the user's own file.
+if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
+  install -m 0755 "$work/$product" "$TARGET.new" 2>/dev/null && mv -f "$TARGET.new" "$TARGET" ||
+    cp -f "$work/$product" "$TARGET"
+else
+  sudo install -m 0755 "$work/$product" "$TARGET"
+fi
+
+now=$(installed)
+echo "$product $now installed"
+
+# Said on the desktop as well, and only when something changed, as oc's update does.
+notify-send -a "Updates" -i software-update-available "$product updated" \
+  "${product^} ${have:-not installed} → $now ($MINOR)" 2>/dev/null || true
