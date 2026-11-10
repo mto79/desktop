@@ -12,8 +12,25 @@ while true; do
   kill -0 "$$" || exit
 done 2>/dev/null &
 
+# These two stop the update when they fail: everything after them runs from the repo they
+# bring up to date.
 desktop-update-git
 desktop-migrate
+
+# Every step from here on is on its own. One that fails is noted and the rest still run: a
+# kubectl download that broke halfway used to end the whole update there, and with it that
+# day's system packages and firmware, which have nothing to do with kubectl. Said again at
+# the end, before the reboot question, and the update still exits with an error.
+set +e
+failed=()
+on_failure() {
+  local status=$1
+  # Ctrl-C in a step that catches it and exits 130 is still meant for the whole update.
+  ((status == 130)) && exit 130
+  failed+=("$BASH_COMMAND")
+}
+trap 'on_failure $?' ERR
+
 desktop-update-cargo
 desktop-update-oc
 desktop-update-kubectl
@@ -27,6 +44,14 @@ desktop-update-system-pkgs
 desktop-update-secrets
 desktop-update-firmware
 desktop-update-pinned
+
+if ((${#failed[@]})); then
+  echo -e "\e[31m\nNot updated: ${failed[*]}\e[0m"
+  echo "Everything else was. Scroll up for why; running desktop-update again retries them."
+  notify-send -a "Updates" -u critical -i dialog-warning "Some updates failed" \
+    "${failed[*]}" 2>/dev/null || true
+fi
+
 desktop-update-restart
 
 # The answer desktop-update-available shares between bars is from before this run; it must
@@ -38,3 +63,5 @@ rm -f "${XDG_RUNTIME_DIR:-/tmp}/desktop-update-available.json"
 # check, not the whole shell. Failure is fine -- the shell may not be running, and the
 # poll will catch up either way.
 desktop-shell shell refreshUpdates >/dev/null 2>&1 || true
+
+((${#failed[@]} == 0))

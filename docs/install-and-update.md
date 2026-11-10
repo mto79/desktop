@@ -32,10 +32,18 @@ into it instead and leaves the rest alone.
 
 1. `desktop-update-git` pulls the repository
 2. `desktop-migrate` runs migrations that have not run here
-3. `desktop-update-cargo`, `-oc`, `-kubectl`, `-releases`, `-npm`, `-flatpak`,
-   `-system-pkgs`, `-secrets`, `-firmware`, `-pinned`
+3. `desktop-update-cargo`, `-oc`, `-kubectl`, `-hashicorp packer`, `-hashicorp vault`,
+   `-openbao`, `-releases`, `-npm`, `-flatpak`, `-system-pkgs`, `-secrets`, `-firmware`,
+   `-pinned`
 4. `desktop-update-restart` checks whether the machine would come back up, and offers a
    reboot when one is needed
+
+The first two stop the update when they fail, since everything after them runs from the
+repository they bring up to date. The steps in 3 are each on their own: one that fails is
+noted and the rest still run, so a kubectl download that broke halfway no longer costs the
+day's system packages and firmware. The ones that failed are named at the end, before the
+reboot question, and on the desktop, and `desktop-update` exits with an error; running it
+again retries them. Ctrl-C still stops the whole run.
 
 ### Tools that are not packages
 
