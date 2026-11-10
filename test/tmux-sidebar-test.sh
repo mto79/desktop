@@ -36,9 +36,9 @@ case "$args" in
   printf 'epsilon\t1\t\t\t\t/w/epsilon\t\t\tide\n'
   # alpha's agent column: two tabs waiting, one working in a task, one finished and unread,
   # and an opencode tab that reports nothing.
-  printf 'ai-alpha-2-claude\t1\twaiting\talpha-2\t\t/w/alpha\tclaude\tfix-runner\tclaude\n'
-  printf 'ai-alpha-2-claude\t2\tdone\talpha-2\t\t/w/alpha\tclaude\t\tclaude\n'
-  printf 'ai-alpha-2-claude\t3\twaiting\talpha-2\t\t/w/alpha\tclaude\t\tclaude\n'
+  printf 'ai-alpha-2-claude\t1\twaiting\talpha-2\t\t/w/alpha\tclaude\tfix-runner\tclaude\t@21\n'
+  printf 'ai-alpha-2-claude\t2\tdone\talpha-2\t\t/w/alpha\tclaude\t\tclaude\t@22\n'
+  printf 'ai-alpha-2-claude\t3\twaiting\talpha-2\t\t/w/alpha\tclaude\t\tclaude\t@23\n'
   printf 'ai-alpha-2-opencode\t1\t\talpha-2\t\t/w/alpha\topencode\t\topencode\n'
   # A terminal's tabs in alpha, and a column whose window has gone.
   printf 'term-alpha-3\t1\t\t\talpha-3\t/w/alpha\t\t\tfish\n'
@@ -181,6 +181,14 @@ elif what == "peek-alpha":
     sidebar.peek(row("alpha"), "alpha:2")
 elif what == "peek-none":
     sidebar.peek(row("gamma"), "alpha:2")
+elif what == "long-name":
+    found = {"kind": "agent", "text": "claude 1", "state": "waiting", "for": "5m",
+             "model": "claude", "name": "opentofu-monorepo-b1"}
+    print(sidebar.line_of(found, 34)[0].rstrip())
+elif what == "names":
+    for found in sidebar.rows("alpha:2"):
+        if found["kind"] == "agent" and found["session"] == "alpha":
+            print(sidebar.line_of(found, 40)[0].rstrip())
 elif what == "attach":
     sidebar.attach("alpha:2")
 elif what == "toggle":
@@ -191,8 +199,23 @@ DRIVER
 
 drive() {
   env -i PATH="$sandbox/path:/usr/bin:/bin" HOME=/home/u SANDBOX="$sandbox" TERM=dumb \
+    CLAUDE_CONFIG_DIR="$sandbox/claude" \
     python3 "$sandbox/drive.py" "$ROOT/bin/desktop-tmux-sidebar" "$1" 2>&1
 }
+
+# Claude Code's records of its running sessions, with the name each answers to: one in
+# alpha's third tab, alive -- this test's own shell stands in for it. One in the first whose
+# process has gone, and one in the second whose pid has since been given to another
+# process, started at another time.
+mkdir -p "$sandbox/claude/sessions"
+started=$(awk '{ sub(/.*\) /, ""); print $20 }' "/proc/$$/stat")
+record() {
+  printf '{"pid": %s, "procStart": "%s", "tmux": "%s", "name": "%s"}\n' "$1" "$2" "$3" "$4" \
+    >"$sandbox/claude/sessions/$5.json"
+}
+record $$ "$started" 'ai-alpha-2-claude:@23.%33' alpha-c3 live
+record 999999999 1 'ai-alpha-2-claude:@21.%31' gone-c1 gone
+record $$ "$((started + 1))" 'ai-alpha-2-claude:@22.%32' reused-c2 reused
 
 # --- what it draws -------------------------------------------------------------------------
 
@@ -200,6 +223,16 @@ drawn=$(drive rows)
 
 sessions_drawn=$(sed -n '/^ SPACES/,/^$/p' <<<"$drawn" | sed '1d;$d')
 check "the spaces come under a header that counts them" grep -q '^ SPACES  *5$' <<<"$drawn"
+
+named=$(drive names)
+check "a Claude agent keeps its model and tab, and after them the name it is messaged by" \
+  grep -qE '^ ● claude 3 alpha-c3( |$)' <<<"$named"
+check "not one whose process has gone" grep -qE '^ ● claude 1 +5m$' <<<"$named"
+check "nor one whose pid now belongs to another process" grep -qx ' . claude 2' <<<"$named"
+check "a name too long for the row is cut short, not the time on the right" \
+  test "$(drive long-name)" = " ● claude 1 opentofu-monor…-b1 5m"
+check "in the middle, since agents in one repository differ only at the end" \
+  grep -q '…-b1 ' <<<"$(drive long-name)"
 check "a row per session, and nothing else above the agents" \
   test "$(grep -v '^   ' <<<"$sessions_drawn" | sed 's/^.[●○·] \([^ ]*\).*/\1/' | paste -sd' ')" = "alpha beta delta epsilon gamma"
 check "no windows are listed" lacks 'fish\|ide\|claude' <<<"$sessions_drawn"

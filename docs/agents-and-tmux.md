@@ -52,7 +52,7 @@ somewhere else.
      · home                          no agents at all
 
      AGENTS               desktop    the agents of one session:
-     ● claude 1               5m     model and tab, and how long
+     ● claude 1 desktop-5f    5m     model and tab, its name for messages, how long
        blocked · fix-runner          its state in herdr's word, and its task
      ○ opencode 1
        idle                          idle, or an agent that reports nothing
@@ -76,7 +76,12 @@ their agents belong to the session whose window holds that column.
 cursor, or the one you are in. Move the cursor over the sessions and the agents follow;
 move on down into them and they stay. Every tab of an agent column is listed, in tab order,
 by its model and number as on the column's own tab bar, and by its task when it works in
-a worktree. An agent in a plain pane is named after its window. When a session has agents
+a worktree. A Claude Code session has its name after that -- `claude 1 vm-6a` -- the one
+another agent sends it a message by, so "ask vm-6a what it changed" can be read off the
+column. A name too long for the row loses its middle, not its end: four agents in one
+repository are `opentofu-monorepo-b1`, `-14`, `-d8` and `-a1`. The name comes from Claude
+Code's record of each running session, in `~/.claude/sessions/`, and counts only while that
+session's process is alive and is the one that started then. An agent in a plain pane is named after its window. When a session has agents
 in more than one window, each says which: `2:claude 1`. opencode and codex send no hooks,
 so their tabs are always shown idle.
 

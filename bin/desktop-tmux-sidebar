@@ -19,7 +19,7 @@ bar, and the keys along the bottom:
      · home                          no agents at all
 
      AGENTS               desktop
-     ● claude 1               5m     model and tab, and how long
+     ● claude 1 desktop-5f    5m     model and tab, the name it is messaged by, how long
        blocked · fix-runner          herdr's word for its state, and its task
      ○ opencode 1
        idle
@@ -278,6 +278,38 @@ def agents():
     return found
 
 
+def names():
+    """The name each Claude Code session answers to, per "session:@window" it runs in.
+
+    The name one agent uses to message another -- "ask vm-6a what it changed" -- and
+    otherwise nowhere on screen. Claude Code keeps a record per running session, with its
+    name and its tmux pane; a record outlives a session that crashed, so one counts only
+    while its process is alive and is still the one that started then, not another that
+    was given the same pid since.
+    """
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    found = {}
+    try:
+        files = os.listdir(os.path.join(home, "sessions"))
+    except OSError:
+        return found
+    for file in files:
+        if not file.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(home, "sessions", file)) as handle:
+                record = json.load(handle)
+            with open(f"/proc/{int(record['pid'])}/stat") as handle:
+                started = handle.read().rsplit(")", 1)[1].split()[19]
+        except (OSError, ValueError, KeyError, IndexError, TypeError):
+            continue
+        where, name = record.get("tmux") or "", record.get("name") or ""
+        if not (name and where) or str(record.get("procStart", started)) != started:
+            continue
+        found[where.rsplit(".", 1)[0]] = name
+    return found
+
+
 def owners():
     """Which session each agent column and each terminal's tabs belong to.
 
@@ -320,14 +352,15 @@ def collect():
     """
     records = agents()
     belong = owners()
+    called = names()
     listing = tmux("list-windows", "-a", "-F",
                    "#{session_name}\t#{window_index}\t#{@agent_state}\t#{@ai_group}"
                    "\t#{@term_group}\t#{session_path}\t#{@ai_model}\t#{b:@worktree}"
-                   "\t#{window_name}")
+                   "\t#{window_name}\t#{window_id}")
     sessions = {}
     for line in listing.splitlines():
-        parts = (line.split("\t") + [""] * 9)[:9]
-        name, index, mark, group, tabs, path, model, task, window = parts
+        parts = (line.split("\t") + [""] * 10)[:10]
+        name, index, mark, group, tabs, path, model, task, window, window_id = parts
         if group or tabs:
             owner, where = belong.get(group or tabs) or (None, "")
             if not owner:
@@ -347,6 +380,9 @@ def collect():
         # tab bar, and by its task when it works in one; an agent in a plain pane by the
         # window it is in.
         kind = (model if group else "") or record.get("agent") or "agent"
+        # A Claude Code session also has the name other agents message it by -- "ask vm-6a
+        # what it changed" -- shown nowhere else, so it goes after the label on its row.
+        called_here = called.get(f"{name}:{window_id}", "")
         if group:
             label = f"{kind} {index}"
         else:
@@ -357,6 +393,7 @@ def collect():
             "cwd": record.get("cwd", ""), "label": label, "task": task,
             "asked": record.get("asked", ""),
             "where": number(where), "tab": number(index), "model": kind,
+            "name": called_here,
         })
     # In the order they sit on screen: by the window holding them, then by tab. A session
     # with agents in more than one window says which, as tmux numbers them: "2:claude 1".
@@ -441,7 +478,7 @@ def layout(sessions, here, detailed=False, module=None, selected=None):
         out.append({
             "kind": "agent", "session": selected, "text": agent["label"],
             "state": agent["state"], "for": agent["for"], "pane": agent["pane"],
-            "model": agent["model"], "current": False,
+            "model": agent["model"], "name": agent.get("name", ""), "current": False,
         })
         state = agent["state"]
         parts = [(WORDS.get(state, "idle"), COLOURS.get(state, "dim"))]
@@ -508,6 +545,18 @@ def pieces(row, width):
     model = row.get("model")
     out = [(DOT, dot[0], dot[1]),
            (NAME, name, model if kind == "agent" and model in AGENT_PAIRS else "text")]
+    # After the model and tab, the name for messages, in what room the row has left. Cut
+    # in the middle rather than pushing out how long it has been: Claude Code names a
+    # session after its directory and two characters of its own, so four agents in one
+    # repository differ only at the end -- opentofu-monorepo-b1, -14, -d8 -- and that end
+    # is what has to stay.
+    called = row.get("name") if kind == "agent" else ""
+    left = room - len(name) - 1
+    if called and left > 1:
+        if len(called) > left:
+            keep = min(3, max(0, left - 2))
+            called = called[:left - 1 - keep] + "…" + (called[-keep:] if keep else "")
+        out.append((NAME + len(name) + 1, called, "blue"))
     if right:
         out.append((width - 1 - len(right), right, COLOURS.get(state, "dim")))
     return out

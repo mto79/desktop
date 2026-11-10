@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- The tmux sidebar shows each Claude agent's name for messages after its model and tab --
+  `claude 1 vm-6a` -- so "ask vm-6a what it changed" can be read straight off the column.
 - `~/.config/tofu` for OpenTofu's `.env` files, made owner-only when tofu is installed.
   Every `desktop-update` now also checks it, `~/.kube`, `~/.aws`, `~/.config/gh` and
   `~/.config/helm`, and puts back to owner-only whatever other accounts could read.
