@@ -412,7 +412,7 @@ def number(text):
         return 0
 
 
-def layout(sessions, here, detailed=False, module=None, selected=None):
+def layout(sessions, here, detailed=False, module=None, selected=None, room=None):
     """The rows to draw: the sessions, then the agents of the selected one.
 
     As herdr's sidebar is laid out. Under SPACES a session takes two lines: its dot, the
@@ -421,6 +421,12 @@ def layout(sessions, here, detailed=False, module=None, selected=None):
     the cursor, or the one you are in -- each a dot and a name, and under that the state in
     a word and the task. Detailed (v), a session's review and its other checkouts follow,
     and an agent's last prompt.
+
+    Given the room the column has, the sessions keep to half of it where they can: past
+    that every session but the one you are in loses its second line. Twenty sessions on two
+    lines each filled a laptop's column, and the agents -- the part you act on -- were
+    left one row at the bottom with the rest out of sight. Detailed, they keep them all. Decided by the sessions alone,
+    not by which one is under the cursor, so the rows stay put as the cursor moves.
     """
     here_session = here.split(":")[0]
     if selected not in sessions:
@@ -465,6 +471,11 @@ def layout(sessions, here, detailed=False, module=None, selected=None):
                 out.append({"kind": "detail", "session": name, "parts": parts,
                             "current": False, "pane": out[-1]["pane"]})
 
+    # Detailed (v) is asking for more, so it keeps every line and scrolls instead.
+    if room and not detailed and len(out) > room // 2:
+        out = [row for row in out
+               if row["kind"] not in ("sub", "detail") or row["session"] == here_session]
+
     if selected is None:
         return out
     listed = sessions[selected]["agents"]
@@ -492,8 +503,8 @@ def layout(sessions, here, detailed=False, module=None, selected=None):
     return out
 
 
-def rows(here, detailed=False, module=None, selected=None):
-    return layout(collect(), here, detailed, module, selected)
+def rows(here, detailed=False, module=None, selected=None, room=None):
+    return layout(collect(), here, detailed, module, selected, room)
 
 
 # Where a row's text starts: the dot, then the name a space after it.
@@ -683,7 +694,10 @@ def sidebar(screen):
     here = tmux(*where)
     data = collect()
     selected = here.split(":")[0]
-    listed = layout(data, here, detailed, module, selected)
+    def free():
+        return max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
+
+    listed = layout(data, here, detailed, module, selected, free())
     cursor = next((i for i, row in enumerate(listed) if row["current"]), step(listed, 0, 1))
     offset = 0
     focused = False
@@ -695,8 +709,8 @@ def sidebar(screen):
         # and their rows do not move when the agents below change, so the cursor stays put.
         if listed and listed[cursor]["kind"] == "session" and listed[cursor]["session"] != selected:
             selected = listed[cursor]["session"]
-            listed, dirty = layout(data, here, detailed, module, selected), True
-        height = max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
+            listed, dirty = layout(data, here, detailed, module, selected, free()), True
+        height = free()
         if cursor < offset:
             offset = cursor
         elif cursor >= offset + height:
@@ -730,7 +744,9 @@ def sidebar(screen):
         elif key == ord("r"):
             last = 0
         elif key == curses.KEY_RESIZE:
-            dirty = True
+            # Taller or shorter, the sessions may now have their second lines or not.
+            listed, dirty = layout(data, here, detailed, module, selected, free()), True
+            cursor = min(cursor, max(0, len(listed) - 1))
             # tmux resizes panes in proportion, so a wider or narrower terminal would
             # leave the column wider or narrower than it needs to be. It is a fixed thing
             # and asks for its width back. Nothing to loop on: a resize that changes
@@ -764,7 +780,7 @@ def sidebar(screen):
             here = tmux(*where)
             detailed = tmux("show-options", "-gqv", VIEW) == "detail"
             data = collect()
-            fresh = layout(data, here, detailed, module, selected)
+            fresh = layout(data, here, detailed, module, selected, free())
             # A theme switched meanwhile brings its own agent colours.
             if agent_colours() != colours:
                 colours = agent_colours()

@@ -181,6 +181,13 @@ elif what == "peek-alpha":
     sidebar.peek(row("alpha"), "alpha:2")
 elif what == "peek-none":
     sidebar.peek(row("gamma"), "alpha:2")
+elif what in ("tall", "short", "short-in-gamma", "short-detailed"):
+    # The sessions with a branch under them, given a tall column and then a short one.
+    room = 100 if what == "tall" else 8
+    here = "gamma:1" if what == "short-in-gamma" else "alpha:2"
+    listed = sidebar.rows(here, what == "short-detailed", Branches, None, room)
+    spaces = listed[:next(i for i, r in enumerate(listed) if r["kind"] == "gap")]
+    print(" ".join(r["session"] for r in spaces if r["kind"] == "sub"))
 elif what == "long-name":
     found = {"kind": "agent", "text": "claude 1", "state": "waiting", "for": "5m",
              "model": "claude", "name": "opentofu-monorepo-b1"}
@@ -223,6 +230,12 @@ drawn=$(drive rows)
 
 sessions_drawn=$(sed -n '/^ SPACES/,/^$/p' <<<"$drawn" | sed '1d;$d')
 check "the spaces come under a header that counts them" grep -q '^ SPACES  *5$' <<<"$drawn"
+
+check "in a tall column a session has its branch under it" test "$(drive tall)" = gamma
+check "in one the sessions would fill they lose it, so the agents fit underneath" \
+  test -z "$(drive short)"
+check "all but the one you are in" test "$(drive short-in-gamma)" = gamma
+check "and v, which asks for more, gives them back" grep -qx gamma <<<"$(drive short-detailed)"
 
 named=$(drive names)
 check "a Claude agent keeps its model and tab, and after them the name it is messaged by" \

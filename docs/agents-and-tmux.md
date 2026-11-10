@@ -68,7 +68,10 @@ at one that has its column costs nothing. The restore leaves the column out of w
 saves; the sidebar puts it back.
 
 It is in two parts, as herdr's sidebar is. **On top, a row per session.** Windows are not
-listed; a session's windows are on its own tab bar. The sessions an agent column or a
+listed; a session's windows are on its own tab bar. When the sessions on two lines each
+would take more than half the column, every session but the one you are in keeps to one,
+so the agents underneath still fit: with twenty-odd sessions the list had filled a laptop's
+column and left one agent in sight. The branch of any of them is a `v` away. The sessions an agent column or a
 terminal pane's tabs are made of (`ai-desktop-12-claude`, `term-…`) are not listed either:
 their agents belong to the session whose window holds that column.
 
