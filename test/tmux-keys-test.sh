@@ -48,4 +48,17 @@ check "they are shown in the popup" grep -q 'In the sidebar' <<<"$("$KEYS" </dev
 check "prefix + ? shows it" grep -q '^bind-key ? display-popup .*desktop-tmux-keys' "$CONF"
 check "piped, it prints and does not wait for a key" test -n "$("$KEYS" </dev/null)"
 
+# The keys that destroy. -r lets a key repeat without the prefix for a moment after it, so
+# a second w closed a second window; Q took every session and agent without a word.
+for key in Q q w x; do
+  check "prefix + $key does not repeat" \
+    test -z "$(grep -E "^bind(-key)? -r $key " "$CONF")"
+done
+check "killing the server asks first" grep -qE '^bind-key Q confirm-before .* kill-server$' "$CONF"
+check "and so does killing a session" grep -qE '^bind-key q confirm-before .* kill-session$' "$CONF"
+
+# A #() job runs once per client per status-interval, and every agent column is a client.
+check "the status line's agent count is asked once for all of them" \
+  grep -qF '#(desktop-tmux-cached 5 desktop-agent-sessions --tmux-status)' "$CONF"
+
 finish

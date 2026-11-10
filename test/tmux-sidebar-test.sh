@@ -311,6 +311,8 @@ check "nor one whose tabs have not marked it yet, as the new-session hook finds 
   lacks 'split-window -t ai-beta-7' "$sandbox/did"
 check "it spans the window and leaves the cursor where it was" \
   grep -q 'split-window -t alpha:1 -fhbd -l 30' "$sandbox/did"
+check "and the shell it starts in becomes the sidebar, rather than idling behind it" \
+  grep -q "split-window -t alpha:1 -fhbd -l 30 -P -F #{pane_id} exec '\\?/" "$sandbox/did"
 check "and each window it opens one in is marked" grep -q 'set-option -wq -t alpha:1 @sidebar_held 1' "$sandbox/did"
 check "new windows get one too" grep -q 'set-hook -g after-new-window\[50\] ' "$sandbox/did"
 check "in a slot of its own, so the tabs' hooks on the same event survive" \

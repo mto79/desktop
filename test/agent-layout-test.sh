@@ -170,7 +170,7 @@ check "closing a tab takes the one on top" \
 check "and leaves the column and its other tabs" \
   test "$(tm list-panes -t work:ide | wc -l) $(tm list-windows -t "=$session" | wc -l)" = "3 2"
 check "the key for it only does so in the column" \
-  grep -q "^bind-key -r x if-shell -F \"#{@ai_column}\" { run-shell \"desktop-agent-tabs close " "$ROOT/config/tmux/tmux.conf"
+  grep -q "^bind-key x if-shell -F \"#{@ai_column}\" { run-shell \"desktop-agent-tabs close " "$ROOT/config/tmux/tmux.conf"
 tm select-window -t "=$session:$first"
 
 # prefix + [, with the focus in the column. The pane there is a client on its alternate

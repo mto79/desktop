@@ -53,6 +53,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- In tmux, prefix + Q and prefix + q ask before killing the server or a session, and none
+  of the closing keys repeats any more: a second w no longer closes a second window. The
+  sidebars take half the memory, and the agent count on the status line is worked out
+  once for every client rather than by each.
 - The tmux sidebar looks like herdr's: SPACES and AGENTS, each entry on two lines -- a
   coloured dot and the name, then a session's branch and diff or an agent's state in a word
   and its task -- the session you are in on a bar, and the keys along the bottom.

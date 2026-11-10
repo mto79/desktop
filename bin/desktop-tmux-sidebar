@@ -63,6 +63,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import sys
 import time
@@ -777,8 +778,10 @@ def attach_locked(window):
         return
     # -f so the column is the height of the window rather than of whichever pane is
     # active, and -d so opening one does not move the cursor out of the work.
+    # exec, so the shell tmux starts the command in becomes the sidebar rather than
+    # waiting behind it: an idle fish per window, forty of them, was half a gigabyte.
     pane = tmux("split-window", "-t", window, "-fhbd", "-l", str(WIDTH),
-                "-P", "-F", "#{pane_id}", sys.argv[0])
+                "-P", "-F", "#{pane_id}", "exec " + shlex.quote(sys.argv[0]))
     if pane:
         tmux("set-option", "-p", "-t", pane, "@sidebar", "1")
         tmux("set-option", "-p", "-t", pane, "remain-on-exit", "off")
