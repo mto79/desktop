@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+
+# desktop-captive-portal: open the sign-in page of a network that wants one -- a hotel, a
+# train, a conference -- in the browser.
+#
+#   desktop-captive-portal           # open it
+#   desktop-captive-portal --url     # print what would be opened
+#
+# A portal shows its page instead of whatever plain-HTTP address is asked for, so the
+# address opened is the one NetworkManager checks connectivity against -- the request a
+# portal is known to catch, which is how NetworkManager knew there was one. HTTPS would not
+# do: the portal cannot answer for a site's certificate, and the browser would show an
+# error instead of the page. neverssl.com when NetworkManager has no check address, as it
+# never says why it would not.
+#
+# NetworkManager only checks when it is given an address, which on Fedora is the
+# NetworkManager-config-connectivity-fedora package (install/desktop-base.packages): every
+# five minutes, a plain request to fedoraproject.org for a fixed text.
+
+set -uo pipefail
+
+url=$(busctl get-property org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+  org.freedesktop.NetworkManager ConnectivityCheckUri 2>/dev/null | sed -n 's/^s "\(http:[^"]*\)"$/\1/p')
+url=${url:-http://neverssl.com/}
+
+if [[ ${1:-} == --url ]]; then
+  echo "$url"
+  exit 0
+fi
+
+exec desktop-launch-browser "$url"

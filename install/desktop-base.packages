@@ -75,6 +75,7 @@ nautilus
 neomutt
 neovim
 NetworkManager
+NetworkManager-config-connectivity-fedora
 NetworkManager-openvpn
 NetworkManager-openvpn-gnome
 net-tools

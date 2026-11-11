@@ -184,8 +184,17 @@ BarItem {
     onTriggered: netdev.reload()
   }
 
+  // Connected, and still held at a login page (a hotel's, a train's), or with nothing
+  // past the network answering. Only known when NetworkManager checks, which on Fedora is
+  // NetworkManager-config-connectivity-fedora; without it this stays "Full".
+  readonly property bool portal: kind !== "disconnected" && Networking.connectivity === NetworkConnectivity.Portal
+  readonly property bool limited: kind !== "disconnected" && Networking.connectivity === NetworkConnectivity.Limited
+
   readonly property var wifiIcons: ["󰤯", "󰤟", "󰤢", "󰤥", "󰤨"]
   readonly property string icon: {
+    // A sign-in first: the one state where the network is up and nothing works.
+    if (portal)
+      return "\u{f0026}";
     // A cable, which nobody takes for the Wi-Fi fan at a glance.
     if (kind === "ethernet")
       return tethered ? "\u{f011c}" : "\u{f0200}";
@@ -211,6 +220,10 @@ BarItem {
   }
 
   tooltip: {
+    if (portal)
+      return (kind === "wifi" ? ssid : "This network") + " wants you to sign in\nClick, then Sign in to this network";
+    if (limited)
+      return (kind === "wifi" ? ssid : "This network") + " is connected, but the internet is not reachable";
     if (kind === "ethernet")
       return (tethered ? "Phone tethering\n" : "Wired\n") + (wiredDevice.name || "");
     if (kind === "disconnected")
@@ -234,13 +247,13 @@ BarItem {
   // read the other way round, so a full signal is good and a fading one goes through
   // caution to urgent. Blended rather than stepped, so 55% and 75% are told apart though
   // they share a glyph. Busy still wins -- blue means working, wherever it is on the bar.
-  readonly property color baseColor: root.kind === "disconnected" ? Color.barMuted : (root.busy ? Color.barAccent : Color.barText)
+  readonly property color baseColor: root.kind === "disconnected" ? Color.barMuted : (root.portal || root.limited) ? Color.barAttention : (root.busy ? Color.barAccent : Color.barText)
 
   IconLabel {
     icon: root.icon
     text: root.label
     color: root.baseColor
-    iconColor: root.kind === "wifi" && !root.busy ? Color.gauge(1 - root.activeWifi.signalStrength) : root.baseColor
+    iconColor: root.kind === "wifi" && !root.busy && !root.portal && !root.limited ? Color.gauge(1 - root.activeWifi.signalStrength) : root.baseColor
     lively: root.busy
   }
 }

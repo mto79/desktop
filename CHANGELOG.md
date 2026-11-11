@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A network that wants you to sign in first, as a hotel's or a train's does, turns the bar's
+  network icon into a warning, and the network panel opens its login page. NetworkManager
+  now checks connectivity, which it did not before.
 - Screen time on the dashboard's Start tab: today's total, the last seven days and today's
   apps. A minute counts only while the screen is unlocked and something was touched in the
   five minutes before it, and what is counted stays on this machine.

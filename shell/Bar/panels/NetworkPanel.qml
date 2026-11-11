@@ -551,6 +551,34 @@ Popup {
       }
     }
 
+    // --- A network that wants a sign-in -------------------------------------------------
+    // A hotel's or a train's: connected, with an address and a gateway, and still nothing
+    // gets through until its page has been clicked through. NetworkManager says so (see
+    // desktop-captive-portal); this is where that page is one click away.
+    PanelRow {
+      width: parent.width
+      visible: Networking.connectivity === NetworkConnectivity.Portal
+      icon: "\u{f0026}"
+      label: "Sign in to this network"
+      sublabel: "It shows a login page before letting anything through. Opens it in the browser."
+      active: true
+      accentColor: Color.caution
+      onClicked: {
+        Quickshell.execDetached(["desktop-captive-portal"]);
+        root.close();
+      }
+    }
+    PanelRow {
+      width: parent.width
+      visible: Networking.connectivity === NetworkConnectivity.Limited
+      icon: "\u{f0026}"
+      label: "Connected, but not to the internet"
+      sublabel: "The network answers; nothing past it does"
+      active: true
+      accentColor: Color.caution
+      enabled: false
+    }
+
     // --- What it is made of, one click to copy ------------------------------------------
     Column {
       width: parent.width

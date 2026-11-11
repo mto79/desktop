@@ -85,6 +85,15 @@ For keeping private information out of the repository itself, see
 | `desktop-setup-dns` | Choose DNS: Cloudflare, what DHCP hands out, or your own |
 | `desktop-netscan scan [--sweep]` | The devices on this network and the Wi-Fi around, as JSON; `last` gives the last answer |
 
+A network that holds you at a login page, as a hotel's or a train's does, turns the bar's
+network icon into a warning. Its panel then has **Sign in to this network**, which opens
+the page in the browser through `desktop-captive-portal`. NetworkManager only notices such
+a network when it has an address to check against. On Fedora that comes from
+`NetworkManager-config-connectivity-fedora`, which makes a plain request to
+fedoraproject.org every five minutes. The page opened is that same address, because it is
+the request a portal is known to catch. A connection that reaches the network but nothing
+past it is shown the same way, without the button.
+
 `desktop-netscan` looks only when asked: from the network panel, the dashboard's Network
 heading, or "scan the network" by voice. On a network marked `home` in
 `~/.config/desktop/networks.conf` a scan pings every address of the subnet (a /24 at most;
