@@ -82,6 +82,7 @@ Item {
       // Untracked notifications are dropped the moment this handler returns.
       notification.tracked = true;
       Inbox.noteArrival(notification.id);
+      root.collapse(notification);
       root.trim();
     }
   }
@@ -261,6 +262,39 @@ Item {
     retired = next;
   }
 
+  // --- one toast a conversation -------------------------------------------------------------
+  //
+  // A group chat sends every message as a notification of its own, and an active one stacked
+  // five toasts of the same chat down the screen, each pushing the one before it further
+  // from where you were reading. A message in a conversation already on screen takes its
+  // place instead, and the toast says how many there are. The ones it replaces are put away
+  // as a timeout would: still in the notification centre if they are kept, gone if not.
+  // A critical one is left where it is; it is up until it is seen.
+  function threadOf(notification) {
+    return Kept.thread(notification.appName, notification.summary, notification.body, Kept.browser(notification.desktopEntry));
+  }
+
+  function collapse(notification) {
+    var key = threadOf(notification);
+    var all = server.trackedNotifications ? server.trackedNotifications.values : [];
+    for (var i = 0; i < all.length; i++) {
+      var other = all[i];
+      if (other !== notification && !retired[other.id] && other.urgency !== NotificationUrgency.Critical && threadOf(other) === key)
+        retire(other);
+    }
+  }
+
+  // How many messages of a conversation are still held, for the toast to say.
+  function inThread(notification) {
+    var key = threadOf(notification);
+    var all = server.trackedNotifications ? server.trackedNotifications.values : [];
+    var n = 0;
+    for (var i = 0; i < all.length; i++)
+      if (threadOf(all[i]) === key)
+        n++;
+    return n;
+  }
+
   // Kept is not kept for ever. Past this many the oldest that has left the screen goes,
   // so a chatty application over a long day cannot grow the list without end.
   readonly property int keep: (config && config.keep) ? config.keep : 50
@@ -389,6 +423,8 @@ Item {
       return app === "notify-send" ? "" : app;
     }
     readonly property string bodyText: originSplit ? originSplit.rest : notification.body
+    // More than this one in its conversation: the ones before it were folded into it.
+    readonly property int messages: root.inThread(notification)
 
     // The actions worth a button. "default" is the whole-toast click, not a button of its
     // own. And Chromium hangs a "settings" action on every web notification, whatever the
@@ -564,8 +600,8 @@ Item {
 
       Text {
         width: parent.width
-        visible: toast.senderLabel !== ""
-        text: toast.senderLabel
+        visible: toast.senderLabel !== "" || toast.messages > 1
+        text: toast.senderLabel + (toast.messages > 1 ? (toast.senderLabel !== "" ? "  ·  " : "") + toast.messages + " messages" : "")
         color: toast.accentColor
         font.family: Style.fontFamily
         font.pixelSize: root.fontSize - 2

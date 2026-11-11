@@ -167,6 +167,19 @@ is still added to it.
 What the centre keeps is saved to `~/.local/state/desktop/notifications.json` and read
 back on restart, filtered by the same rule.
 
+Notifications are grouped by conversation: who sent them (the application, or for a web
+app the site) and their title. A group chat sends every message under the chat's name,
+so its messages are one conversation, and so are a forge's about one merge request:
+
+- A new message in a conversation already on screen replaces that toast instead of
+  stacking under it, and the toast's header says how many messages the conversation holds.
+  The one replaced goes where a timeout would send it. A critical toast is never replaced.
+- The centre lists senders, and under each one row a conversation: its newest message, how
+  many there are, and when. A click opens the newest, which opens the chat, and puts the
+  rest away with it. A right click puts the whole conversation away unopened.
+- The dashboard's Notifications tile lists the latest conversations the same way, from
+  `desktop-brief`.
+
 ## Keeping the screen on
 
 hypridle starts the screensaver after 15 minutes, locks after 17.5 and turns the screen

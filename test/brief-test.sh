@@ -46,6 +46,20 @@ check "CPU and memory are given as percentages" \
   jq -e '.system | (.cpu | type == "number" and . >= 0 and . <= 100) and (.ram | type == "number" and . > 0 and . <= 100)' <<<"$all"
 check "kept notifications are counted, newest first" \
   test "$(jq -r '"\(.notifications.kept) \(.notifications.latest[0].summary)"' <<<"$all")" = "2 two"
+
+# A group chat sends every message under the chat's name: the start page lists the
+# conversation once, with how many, under the site it came from rather than "Brave".
+cp "$sandbox/state/desktop/notifications.json" "$sandbox/notifications.keep"
+cat >"$sandbox/state/desktop/notifications.json" <<'JSON'
+[{"app":"Brave","summary":"ivo, merijn","body":"chat.example.com\n\nfirst","at":1},
+ {"app":"GitLab","summary":"!12 waits for you","body":"review","at":2},
+ {"app":"Brave","summary":"ivo,  merijn","body":"chat.example.com\n\nsecond","at":3},
+ {"app":"Brave","summary":"Team Infra","body":"chat.example.com\n\nthird","at":4}]
+JSON
+threads=$(run --json | jq -c '[.notifications.latest[] | [.app, .summary, .count]]')
+check "notifications are listed by conversation, newest first, with how many" \
+  test "$threads" = '[["chat.example.com","Team Infra",1],["chat.example.com","ivo, merijn",2],["GitLab","!12 waits for you",1]]'
+mv "$sandbox/notifications.keep" "$sandbox/state/desktop/notifications.json"
 # A waiting agent, a bad finding, a pending restart and a waiting task: four things.
 check "one number says how much wants doing" test "$(jq .attention <<<"$all")" = 4
 

@@ -45,5 +45,45 @@ function kept(app, body, fromBrowser, remember) {
   return remember.indexOf(sender) !== -1;
 }
 
+// Who a notification is from: the application, or for a browser the site, as the toast's
+// header already shows it. notify-send without --app-name is nobody in particular.
+function sender(app, body, fromBrowser) {
+  if (fromBrowser) {
+    var split = originSplit(body);
+    if (split)
+      return split.origin.toLowerCase();
+  }
+  app = String(app || "");
+  return app === "" || app === "notify-send" ? "Other" : app;
+}
+
+// Which conversation a notification belongs to: its sender and its title. A group chat
+// sends each message with the chat's name as the title -- 34 from "ivo, merijn" in one
+// afternoon -- so the title is what tells one conversation from the next. Case and runs
+// of spaces do not make a second one.
+function thread(app, summary, body, fromBrowser) {
+  return sender(app, body, fromBrowser) + "\u0001" + String(summary || "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+// Rows -- anything with a `key` from thread() -- gathered into conversations, in the order
+// the rows came: given newest first, the first row of each is its newest message and the
+// conversations come out newest first too.
+function threads(rows) {
+  var byKey = {};
+  var order = [];
+  for (var i = 0; i < rows.length; i++) {
+    var key = rows[i].key;
+    if (byKey[key] === undefined) {
+      byKey[key] = [];
+      order.push(key);
+    }
+    byKey[key].push(rows[i]);
+  }
+  var out = [];
+  for (var t = 0; t < order.length; t++)
+    out.push({ key: order[t], newest: byKey[order[t]][0], rows: byKey[order[t]] });
+  return out;
+}
+
 if (typeof module !== "undefined")
-  module.exports = { originSplit: originSplit, browser: browser, chatHost: chatHost, kept: kept };
+  module.exports = { originSplit: originSplit, browser: browser, chatHost: chatHost, kept: kept, sender: sender, thread: thread, threads: threads };

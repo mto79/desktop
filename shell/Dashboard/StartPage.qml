@@ -865,8 +865,9 @@ Item {
 
         width: parent.width
         icon: "\u{f0f6a}"
+        // One row a conversation: its title, who it is from and how many are waiting.
         label: modelData.summary
-        sublabel: modelData.app
+        sublabel: modelData.app + (modelData.count > 1 ? "  ·  " + modelData.count + " messages" : "")
         onClicked: page.run(["desktop-shell", "shell", "togglePanel", "notifications"])
       }
     }

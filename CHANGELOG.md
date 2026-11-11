@@ -73,6 +73,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- Notifications are grouped by conversation. A busy group chat shows one toast that
+  updates in place and says how many messages there are, instead of a stack of toasts.
+  The notification centre lists one row a conversation under the site it came from rather
+  than "Brave", and opening it puts the rest of that conversation away too.
 - The dashboard's Start tab is one screen of tiles instead of three columns of lists: rings
   for CPU, memory, temperature and disk and for Claude's session and weekly limits, the
   month with its holidays marked, screen time, what is playing, the headlines from the News

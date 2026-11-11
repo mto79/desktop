@@ -3,11 +3,14 @@ import Quickshell
 import Quickshell.Services.Notifications
 import qs.Commons
 import qs.Ui
+import "../../Notifications/kept.js" as Kept
 
 // Notification centre: what arrived while you were looking elsewhere.
 //
 // A toast is six seconds long. This is where it goes afterwards -- kept until it is dealt
-// with, under the application that sent it. The entries are the notifications themselves
+// with, under who sent it: the application, or for a web app the site. Under that, one row
+// a conversation: a chat's forty messages are one line with its newest and how many there
+// are, not forty lines. The entries are the notifications themselves
 // and not copies of their text: clicking one is the same click the toast offered, so a
 // message still opens its chat and a finished build still opens its log, and dismissing
 // one tells the sender so.
@@ -27,10 +30,6 @@ Popup {
   // Ticks while the panel is open, so "5m" becomes "6m".
   property double now: Date.now()
 
-  function appOf(notification) {
-    var name = String(notification.appName || "");
-    return name === "" || name === "notify-send" ? "Other" : name;
-  }
 
   // One list of both kinds: the notifications still alive, and the text of those kept from
   // before the shell last stopped. A row is told which it has by `live`.
@@ -41,7 +40,8 @@ Popup {
       rowsNewestFirst.push({
         live: true,
         notification: all[i],
-        app: appOf(all[i]),
+        app: Kept.sender(all[i].appName, all[i].body, Kept.browser(all[i].desktopEntry)),
+        key: Kept.thread(all[i].appName, all[i].summary, all[i].body, Kept.browser(all[i].desktopEntry)),
         summary: all[i].summary,
         body: all[i].body,
         critical: all[i].urgency === NotificationUrgency.Critical,
@@ -52,9 +52,9 @@ Popup {
       rowsNewestFirst.push({
         live: false,
         entry: past[p],
-        app: appOf({
-          appName: past[p].app
-        }),
+        // The browser is known only by name here: what was written down is the app's name.
+        app: Kept.sender(past[p].app, past[p].body, Kept.browser(past[p].app)),
+        key: Kept.thread(past[p].app, past[p].summary, past[p].body, Kept.browser(past[p].app)),
         summary: past[p].summary,
         body: past[p].body,
         critical: past[p].critical === true,
@@ -76,7 +76,8 @@ Popup {
     for (var g = 0; g < order.length; g++)
       out.push({
         app: order[g],
-        entries: byApp[order[g]]
+        count: byApp[order[g]].length,
+        threads: Kept.threads(byApp[order[g]])
       });
     groups = out;
     total = rowsNewestFirst.length;
@@ -158,6 +159,19 @@ Popup {
       else
         Inbox.forget(row.entry);
     });
+  }
+
+  // A whole conversation at once: what a right click on its row does.
+  function putAwayAll(rows) {
+    for (var i = 0; i < rows.length; i++)
+      putAway(rows[i]);
+  }
+
+  // The body without a browser's site on its first line: the toast lifted it into the
+  // header, and here it is the section's title already.
+  function message(row) {
+    var split = Kept.originSplit(row.body);
+    return oneLine(split ? split.rest : row.body);
   }
 
   function clearAll() {
@@ -249,33 +263,39 @@ Popup {
 
             PanelSection {
               title: group.modelData.app
-              value: group.modelData.entries.length > 1 ? String(group.modelData.entries.length) : ""
+              value: group.modelData.count > 1 ? String(group.modelData.count) : ""
               rule: true
             }
 
             Repeater {
-              model: group.modelData.entries
+              model: group.modelData.threads
 
               delegate: PanelRow {
                 id: row
 
                 required property var modelData
 
-                readonly property bool critical: modelData.critical
+                readonly property var newest: modelData.newest
+                readonly property int many: modelData.rows.length
+                readonly property bool critical: newest.critical
 
-                icon: critical ? "\u{f0026}" : "\u{f0f6a}"
+                icon: critical ? "\u{f0026}" : (many > 1 ? "\u{f0369}" : "\u{f0f6a}")
                 accentColor: critical ? Color.popupUrgent : Color.popupAccent
                 active: critical
-                label: root.oneLine(modelData.summary) !== "" ? root.oneLine(modelData.summary) : root.oneLine(modelData.body)
-                sublabel: root.oneLine(modelData.summary) !== "" ? root.oneLine(modelData.body) : ""
+                label: (root.oneLine(newest.summary) !== "" ? root.oneLine(newest.summary) : root.message(newest)) + (many > 1 ? "  ·  " + many : "")
+                sublabel: root.oneLine(newest.summary) !== "" ? root.message(newest) : ""
 
-                // Left is the notification's own action, as on the toast; right puts it
-                // away. The same two buttons the toast answers to.
-                onClicked: root.follow(modelData)
-                onRightClicked: root.putAway(modelData)
+                // Left is the newest message's own action, as on the toast -- it opens the
+                // chat, where the rest are too, so they are put away with it. Right puts
+                // the whole conversation away without opening it.
+                onClicked: {
+                  root.follow(newest);
+                  root.putAwayAll(modelData.rows.slice(1));
+                }
+                onRightClicked: root.putAwayAll(modelData.rows)
 
                 Text {
-                  text: root.ago(row.modelData.at)
+                  text: root.ago(row.newest.at)
                   color: Color.popupMuted
                   font.family: Style.fontFamily
                   font.pixelSize: Style.fontSize - 2
@@ -293,7 +313,7 @@ Popup {
       topPadding: Style.sectionSpacing
       // Wrapped rather than cut: the panel is narrower than the sentence.
       wrapMode: Text.WordWrap
-      text: "Click opens  ·  right click dismisses\nThose from before a restart can only be read"
+      text: "Click opens  ·  right click dismisses the conversation\nThose from before a restart can only be read"
       color: Color.popupMuted
       font.family: Style.fontFamily
       font.pixelSize: Style.fontSize - 2

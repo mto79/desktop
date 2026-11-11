@@ -118,7 +118,19 @@ collect() {
         done: ([$agents.sessions[]? | select(.state == "done")] | length)
       },
       limits: [$limits.limits[]? | {name: (.name // .label // ""), percent: (.percent // 0), resets: (.resets // .reset // "")}],
-      notifications: {kept: ($kept | length), latest: [$kept[-4:][]? | {app, summary}] | reverse},
+      # By conversation, as the notification centre shows them (shell/Notifications/kept.js):
+      # who sent it -- for a web app the site on the first line of the body -- and its title.
+      notifications: {
+        kept: ($kept | length),
+        latest: ([$kept[]? | . + {
+            sender: (if (.body // "" | test("^[^\\s]+\\.[^\\s]+\n\n")) then (.body | split("\n\n")[0] | ascii_downcase)
+                     elif (.app // "") == "" or .app == "notify-send" then "Other" else .app end),
+            title: (.summary // "" | gsub("\\s+"; " ") | ltrimstr(" ") | rtrimstr(" "))
+          }]
+          | group_by([.sender, (.title | ascii_downcase)])
+          | map({app: .[0].sender, summary: .[-1].title, count: length, at: (map(.at // 0) | max)})
+          | sort_by(.at) | reverse | .[:4])
+      },
       screentime: {today: ($screen.today // 0), average: ($screen.average // 0), week: ($screen.week // []), apps: ($screen.apps // []), since: ($screen.since // "")},
       weather: $weather,
       system: {uptime: $uptime, kernel: $kernel, disk_used: ($disk | tonumber? // 0), restart_marks: $marks,

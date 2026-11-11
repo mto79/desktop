@@ -117,11 +117,46 @@ if command -v node >/dev/null; then
   check "the site matches whatever case it comes in" \
     test "$(kept '"Brave"' '"Chat.Example.com\n\nhi"' true)" = true
 
+  # --- one conversation, one toast
+  # A group chat sends each message under the chat's name; 34 in an afternoon stacked as
+  # many toasts and rows. A conversation is the sender -- the site, for a browser -- and
+  # the title.
+  same() {
+    node -e "
+      const k = require('$KEPT');
+      console.log(k.thread($1) === k.thread($2));"
+  }
+  check "two messages in one chat are one conversation" \
+    test "$(same '"Brave", "ivo, merijn", "chat.example.com\n\nhi", true' '"Brave", "ivo, merijn", "chat.example.com\n\nho", true')" = true
+  check "whatever the spacing or case of its title" \
+    test "$(same '"Brave", "ivo, merijn", "chat.example.com\n\nhi", true' '"Brave", "Ivo,  Merijn ", "chat.example.com\n\nho", true')" = true
+  check "another chat on the same site is not" \
+    test "$(same '"Brave", "ivo, merijn", "chat.example.com\n\nhi", true' '"Brave", "Team Infra", "chat.example.com\n\nhi", true')" = false
+  check "nor the same title from another site" \
+    test "$(same '"Brave", "General", "chat.example.com\n\nhi", true' '"Brave", "General", "teams.microsoft.com\n\nhi", true')" = false
+  check "the sender of a web app is its site" \
+    test "$(node -e "console.log(require('$KEPT').sender('Brave', 'Chat.Example.com\n\nhi', true))")" = chat.example.com
+  check "and notify-send unnamed is nobody in particular" \
+    test "$(node -e "console.log(require('$KEPT').sender('notify-send', 'x', false))")" = Other
+  check "conversations come out in the order given, newest message first in each" \
+    test "$(node -e "
+      const k = require('$KEPT');
+      const t = k.threads([{key: 'a', n: 3}, {key: 'b', n: 2}, {key: 'a', n: 1}]);
+      console.log(t.map(c => c.key + c.newest.n + ':' + c.rows.length).join(' '));")" = "a3:2 b2:1"
+
   host() { node -e "console.log(require('$KEPT').chatHost(process.argv[1]))" "$1"; }
   check "the chat's site is read from chat.conf" test "$(host 'CHAT_URL="https://chat.example.com/team"')" = chat.example.com
   check "with a port" test "$(host "CHAT_URL='https://chat.example.com:8065'")" = chat.example.com
   check "and none is none" test -z "$(host '# CHAT_URL="https://chat.example.com"')"
 fi
+
+check "a new message puts its conversation's earlier toast away" grep -q 'root.collapse(notification);' "$QML"
+check "unless that one is critical, which stays until it is seen" \
+  grep -q 'other.urgency !== NotificationUrgency.Critical && threadOf(other) === key' "$QML"
+check "the toast says how many messages its conversation holds" grep -q 'toast.messages + " messages"' "$QML"
+check "the centre lists a row a conversation" grep -q 'model: group.modelData.threads' "$ROOT/shell/Bar/panels/NotificationsPanel.qml"
+check "and a right click puts the whole conversation away" \
+  grep -q 'onRightClicked: root.putAwayAll(modelData.rows)' "$ROOT/shell/Bar/panels/NotificationsPanel.qml"
 
 check "it leaves with its toast, like what a sender marks transient" \
   grep -q 'if (root.passing(due\[d\]))' "$QML"
