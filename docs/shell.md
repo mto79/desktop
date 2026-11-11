@@ -231,8 +231,9 @@ The weather needs a place, written once:
     mkdir -p ~/.config/desktop/dashboard
     echo 'place = Utrecht' > ~/.config/desktop/dashboard/weather.conf
 
-A name is looked up once with Open-Meteo's geocoding and remembered. `latitude =` and
-`longitude =` lines skip that lookup. Open-Meteo needs no account and is told only the
+A name is looked up once with Open-Meteo's geocoding and remembered. A name can belong to
+more than one town ("Den Haag" alone finds one in South Africa), so a `country = NL` line
+narrows the lookup to that country. `latitude =` and `longitude =` lines skip the lookup. Open-Meteo needs no account and is told only the
 coordinates. Until a place is set, the tile is labelled "sample", says what to write, and
 shows invented weather.
 

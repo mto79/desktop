@@ -100,6 +100,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The weather on the Start tab could find another town of the same name: "Den Haag" on
+  its own is in South Africa. A `country =` line in `weather.conf` keeps the lookup to one
+  country.
 - `desktop-update` no longer stops at the first step that fails: a broken kubectl or oc
   download used to skip the system packages and firmware after it. The rest now run, and
   the steps that failed are named at the end and on the desktop.

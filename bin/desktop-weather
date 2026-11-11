@@ -8,6 +8,7 @@
 # Where is said once, in ~/.config/desktop/dashboard/weather.conf:
 #
 #   place = Utrecht             # a name, looked up once and remembered
+#   country = NL                # where to look it up: "Den Haag" alone is in South Africa
 #   latitude = 52.09            # or exactly, which asks nobody where a name is
 #   longitude = 5.12
 #
@@ -57,19 +58,21 @@ sample() {
 # Where, as "latitude longitude name": exact when written down, else the name looked up --
 # once, and remembered beside the cache so the lookup is not asked again.
 where() {
-  local lat lon place hit
+  local lat lon place country hit
   lat=$(setting latitude)
   lon=$(setting longitude)
   place=$(setting place)
+  country=$(setting country)
   if [[ -n $lat && -n $lon ]]; then
     echo "$lat $lon ${place:-$lat, $lon}"
     return
   fi
   [[ -n $place ]] || return 1
-  hit="$CACHE/weather-place-$(printf '%s' "$place" | md5sum | cut -c1-12)"
+  hit="$CACHE/weather-place-$(printf '%s|%s' "$place" "$country" | md5sum | cut -c1-12)"
   if [[ ! -s $hit ]]; then
     mkdir -p "$CACHE"
-    curl -fsS --max-time 10 -G "$GEOCODE" --data-urlencode "name=$place" -d count=1 |
+    curl -fsS --max-time 10 -G "$GEOCODE" --data-urlencode "name=$place" -d count=1 \
+      ${country:+-d "countryCode=${country^^}"} |
       jq -er '.results[0] | "\(.latitude) \(.longitude) \(.name)"' >"$hit.part" 2>/dev/null &&
       mv -f "$hit.part" "$hit" || { rm -f "$hit.part"; return 1; }
   fi

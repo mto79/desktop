@@ -76,6 +76,12 @@ out=$(weather)
 check "out of reach, the last answer is given again" test "$(jq -r '[.connected, .now.temp] | join(" ")' <<<"$out")" = "true 5"
 rm "$sandbox/offline"
 
+# A name alone can be another town of that name: "Den Haag" alone is in South Africa.
+printf 'place = Den Haag\ncountry = nl\n' >"$conf"
+: >"$sandbox/asked"
+weather >/dev/null
+check "a country narrows where a name is looked up" grep -q 'name=Den Haag.*countryCode=NL\|name=Den%20Haag.*countryCode=NL' "$sandbox/asked"
+
 printf 'latitude = 51.92\nlongitude = 4.48\nplace = Rotterdam\n' >"$conf"
 : >"$sandbox/asked"
 out=$(weather)
