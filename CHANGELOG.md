@@ -76,6 +76,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- Videos in mpv are decoded on a GPU instead of the CPU (`hwdec=auto-safe`, as Omarchy
+  does): about a quarter of the CPU time for 1080p. On a laptop with an NVIDIA card that is
+  the card mpv picks.
 - Notifications are grouped by conversation. A busy group chat shows one toast that
   updates in place and says how many messages there are, instead of a stack of toasts.
   The notification centre lists one row a conversation under the site it came from rather
