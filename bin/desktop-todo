@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+# desktop-todo: a short to-do list and a scratch note, for the dashboard's start page.
+#
+#   desktop-todo --json            # {"items":[{"id":1,"text":"…","done":false}],"notes":"…"}
+#   desktop-todo add <text>        # a new item, at the bottom
+#   desktop-todo done <id>         # ticked off; again to untick
+#   desktop-todo remove <id>
+#   desktop-todo clear             # every ticked-off item gone
+#   desktop-todo notes <text>      # the note, replaced; "-" reads it from stdin
+#
+# Two files under ~/.local/state/desktop/: todo.json and notes.md. The dashboard watches
+# both and redraws when either changes, so an item added here shows there at once. Both
+# stay on this machine.
+
+set -uo pipefail
+
+DIR="${XDG_STATE_HOME:-$HOME/.local/state}/desktop"
+LIST="$DIR/todo.json"
+NOTES="$DIR/notes.md"
+
+die() {
+  echo "desktop-todo: $*" >&2
+  exit 1
+}
+
+items() { [[ -s $LIST ]] && jq -c '.' "$LIST" 2>/dev/null || echo '[]'; }
+
+# Written whole and then moved into place, so the dashboard never reads half a list.
+save() { # json
+  mkdir -p "$DIR"
+  printf '%s\n' "$1" >"$LIST.part" && mv -f "$LIST.part" "$LIST"
+}
+
+case "${1:-}" in
+--json)
+  jq -cn --argjson items "$(items)" --rawfile notes <(cat "$NOTES" 2>/dev/null) \
+    '{items: $items, notes: $notes}'
+  ;;
+add)
+  shift
+  text="$*"
+  text="${text#"${text%%[![:space:]]*}"}"
+  [[ -n $text ]] || die "nothing to add"
+  save "$(jq -c --arg text "$text" '. + [{id: ((map(.id) | max // 0) + 1), text: $text, done: false}]' <<<"$(items)")"
+  ;;
+done)
+  [[ ${2:-} =~ ^[0-9]+$ ]] || die "usage: desktop-todo done <id>"
+  save "$(jq -c --argjson id "$2" 'map(if .id == $id then .done = (.done | not) else . end)' <<<"$(items)")"
+  ;;
+remove)
+  [[ ${2:-} =~ ^[0-9]+$ ]] || die "usage: desktop-todo remove <id>"
+  save "$(jq -c --argjson id "$2" 'map(select(.id != $id))' <<<"$(items)")"
+  ;;
+clear)
+  save "$(jq -c 'map(select(.done | not))' <<<"$(items)")"
+  ;;
+notes)
+  shift
+  mkdir -p "$DIR"
+  if [[ ${1:-} == - ]]; then cat >"$NOTES.part"; else printf '%s' "$*" >"$NOTES.part"; fi
+  mv -f "$NOTES.part" "$NOTES"
+  ;;
+*)
+  echo "usage: desktop-todo --json|add <text>|done <id>|remove <id>|clear|notes <text>|-" >&2
+  exit 2
+  ;;
+esac

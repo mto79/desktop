@@ -119,6 +119,10 @@ Rectangle {
     }
   }
 
+  // The height left for what is in the card, under its heading: for a tile on the start
+  // page that fills its card -- a note, a ring -- rather than listing down it.
+  readonly property real inner: view.height
+
   // Whether there is more in the card than it shows.
   readonly property bool scrollable: body.implicitHeight > view.height + 1
   readonly property real furthest: Math.max(0, body.implicitHeight - view.height)

@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+
+# desktop-weather: the weather where you are, now and for three days, as JSON.
+#
+#   desktop-weather --json      # what the dashboard's start page draws
+#   desktop-weather --sample    # the same shape, invented, for a page with no place set
+#
+# Where is said once, in ~/.config/desktop/dashboard/weather.conf:
+#
+#   place = Utrecht             # a name, looked up once and remembered
+#   latitude = 52.09            # or exactly, which asks nobody where a name is
+#   longitude = 5.12
+#
+# From Open-Meteo, which needs no account and no key: it is told the coordinates and
+# nothing else. Asked at most every half hour; in between, and when it cannot be reached,
+# the last answer is given again with the time it was asked.
+
+set -uo pipefail
+
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/desktop/dashboard/weather.conf"
+CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/desktop/dashboard"
+FORECAST="${DESKTOP_WEATHER_FORECAST:-https://api.open-meteo.com/v1/forecast}"
+GEOCODE="${DESKTOP_WEATHER_GEOCODE:-https://geocoding-api.open-meteo.com/v1/search}"
+MAX_AGE=1800
+
+setting() { # name
+  [[ -r $CONF ]] || return 0
+  sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" | sed 's/[[:space:]]*\(#.*\)\{0,1\}$//' | tail -1
+}
+
+# The WMO weather codes Open-Meteo answers with, as a few words.
+DESCRIBE='def describe:
+  if . == 0 then "Clear"
+  elif . <= 2 then "Partly cloudy"
+  elif . == 3 then "Overcast"
+  elif . <= 48 then "Fog"
+  elif . <= 57 then "Drizzle"
+  elif . <= 67 then "Rain"
+  elif . <= 77 then "Snow"
+  elif . <= 82 then "Showers"
+  elif . <= 86 then "Snow showers"
+  else "Thunderstorm" end;'
+
+sample() {
+  jq -cn "$DESCRIBE"' {
+    connected: false,
+    how: "put  place = <your town>  in ~/.config/desktop/dashboard/weather.conf",
+    place: "Sample town",
+    checked: now | floor,
+    now: {temp: 7, feels: 5, humidity: 85, wind: 7, code: 61, text: (61 | describe), day: true},
+    days: [{day: "Today", min: 4, max: 7, code: 61}, {day: "Thu", min: 3, max: 9, code: 3}, {day: "Fri", min: 3, max: 10, code: 1}]
+      | map(.text = (.code | describe)),
+    sun: {rise: "07:50", set: "16:53"}
+  }'
+}
+
+# Where, as "latitude longitude name": exact when written down, else the name looked up --
+# once, and remembered beside the cache so the lookup is not asked again.
+where() {
+  local lat lon place hit
+  lat=$(setting latitude)
+  lon=$(setting longitude)
+  place=$(setting place)
+  if [[ -n $lat && -n $lon ]]; then
+    echo "$lat $lon ${place:-$lat, $lon}"
+    return
+  fi
+  [[ -n $place ]] || return 1
+  hit="$CACHE/weather-place-$(printf '%s' "$place" | md5sum | cut -c1-12)"
+  if [[ ! -s $hit ]]; then
+    mkdir -p "$CACHE"
+    curl -fsS --max-time 10 -G "$GEOCODE" --data-urlencode "name=$place" -d count=1 |
+      jq -er '.results[0] | "\(.latitude) \(.longitude) \(.name)"' >"$hit.part" 2>/dev/null &&
+      mv -f "$hit.part" "$hit" || { rm -f "$hit.part"; return 1; }
+  fi
+  cat "$hit"
+}
+
+ask() { # lat lon name
+  curl -fsS --max-time 10 -G "$FORECAST" -d "latitude=$1" -d "longitude=$2" \
+    -d current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,is_day \
+    -d daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset \
+    -d timezone=auto -d forecast_days=3 |
+    jq -ec --arg place "$3" "$DESCRIBE"' {
+      connected: true,
+      place: $place,
+      checked: now | floor,
+      now: {
+        temp: (.current.temperature_2m | round),
+        feels: (.current.apparent_temperature | round),
+        humidity: .current.relative_humidity_2m,
+        wind: (.current.wind_speed_10m | round),
+        code: .current.weather_code,
+        text: (.current.weather_code | describe),
+        day: (.current.is_day == 1)
+      },
+      days: [range(0; .daily.time | length) as $i | {
+        day: (if $i == 0 then "Today" else (.daily.time[$i] + "T12:00:00Z" | fromdateiso8601 | strftime("%a")) end),
+        min: (.daily.temperature_2m_min[$i] | round),
+        max: (.daily.temperature_2m_max[$i] | round),
+        code: .daily.weather_code[$i],
+        text: (.daily.weather_code[$i] | describe)
+      }],
+      sun: {rise: (.daily.sunrise[0] | split("T")[1]), set: (.daily.sunset[0] | split("T")[1])}
+    }'
+}
+
+report() {
+  local here lat lon name answer file="$CACHE/weather.json"
+  here=$(where) || {
+    sample
+    return
+  }
+  read -r lat lon name <<<"$here"
+  # Young enough, and for the same place: given again without asking.
+  if [[ -s $file ]] && (($(date +%s) - $(stat -c %Y "$file") < MAX_AGE)) &&
+    [[ $(jq -r .place "$file" 2>/dev/null) == "$name" ]]; then
+    cat "$file"
+    return
+  fi
+  if answer=$(ask "$lat" "$lon" "$name" 2>/dev/null); then
+    mkdir -p "$CACHE"
+    printf '%s\n' "$answer" >"$file.part" && mv -f "$file.part" "$file"
+    printf '%s\n' "$answer"
+  elif [[ -s $file ]]; then
+    # Out of reach: the last answer, which says when it was asked.
+    cat "$file"
+  else
+    sample | jq -c '.how = "Open-Meteo could not be reached; this is not your weather"'
+  fi
+}
+
+case "${1:-}" in
+--json) report ;;
+--sample) sample ;;
+*)
+  echo "usage: desktop-weather --json|--sample" >&2
+  exit 2
+  ;;
+esac

@@ -187,6 +187,63 @@ always did.
 A recording only counts when it is not from a speaker's monitor. `cava`, which draws the
 music equalizer, records what the speakers play, and that is not a call.
 
+## The Start tab
+
+The dashboard's first tab is one screen of tiles, five columns by three rows with a dock
+under them, fitted to what is left of the window under the tabs. On a screen too short for
+that, the tiles keep a height they can be read at and the page scrolls.
+
+| Tile | From |
+|---|---|
+| System: CPU, memory, temperature, disk | `desktop-brief` (`/proc`, `desktop-status-cpu`, `df`) |
+| Claude: the session and the week | `desktop-brief` (`desktop-status-claude`) |
+| Weather | `desktop-weather`, through the brief |
+| The month | `holidays.js`; today filled in, holidays ringed |
+| To-do and Notes | `desktop-todo`, whose files the page watches |
+| Screen time | `desktop-screentime`, through the brief (below) |
+| Music | the MPRIS players, as the bar's media widget sees them |
+| Headlines | the News tab's own answer, newest first across every feed |
+| This machine, Notifications | `desktop-brief` |
+| The dock | `~/.config/desktop/dashboard/dock` |
+
+A ring is coloured by how full it is (`Color.gauge`), so one at 90% says so before its
+number is read.
+
+Typing in the to-do field or the note takes the keyboard from the tab keys, so a `1` is
+written there and does not change tab. Escape gives the keys back. In the to-do list, a
+click ticks an item off and a right-click removes it.
+
+The weather needs a place, written once:
+
+    mkdir -p ~/.config/desktop/dashboard
+    echo 'place = Utrecht' > ~/.config/desktop/dashboard/weather.conf
+
+A name is looked up once with Open-Meteo's geocoding and remembered. `latitude =` and
+`longitude =` lines skip that lookup. Open-Meteo needs no account and is told only the
+coordinates. Until a place is set, the tile is labelled "sample", says what to write, and
+shows invented weather.
+
+The dock lists desktop entries by id, one a line, such as `brave-browser` or
+`org.keepassxc.KeePassXC` (the file name without `.desktop`). Without the file it shows
+a browser, Ghostty, Files, Obsidian, KeePassXC, Claude and Calculator.
+
+## Screen time
+
+The dashboard's Start tab has a Screen time tile: today's total, the last seven days as
+bars, and today's apps. `desktop-screentime.timer` runs `desktop-screentime record` every
+minute, and the minute counts when the screen is unlocked and something was touched in the
+five minutes before it. A fourth hypridle listener marks those five minutes by putting
+`$XDG_RUNTIME_DIR/desktop-idle` down, and takes it away again on input. A call holds the
+screen awake (see above), so hypridle leaves no mark and a call counts as screen time.
+
+What is written down is the class of the window in front, made readable. Everything in a
+terminal is "Terminal", because Ghostty cannot set a class of its own, and a web app is its
+site. There is a file per day, a line per minute, in
+`~/.local/state/desktop/screentime/`. The files are kept for 60 days and never leave the
+machine.
+
+    desktop-screentime --json      # today, the week and today's apps; what the card draws
+
 ## The Security tab
 
 The dashboard's Security tab has four headings:

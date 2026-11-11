@@ -12,6 +12,15 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Screen time on the dashboard's Start tab: today's total, the last seven days and today's
+  apps. A minute counts only while the screen is unlocked and something was touched in the
+  five minutes before it, and what is counted stays on this machine.
+- Weather on the dashboard's Start tab, now and for three days, from Open-Meteo for the place
+  set in `~/.config/desktop/dashboard/weather.conf`. It needs no account, is asked at most
+  every half hour, and shows the last answer when the network is away.
+- A to-do list and a note on the Start tab, kept in `~/.local/state/desktop/` and also
+  reachable from a terminal as `desktop-todo`. A dock of launchers along the foot of the
+  tab, its apps listed in `~/.config/desktop/dashboard/dock`.
 - The tmux sidebar shows each Claude agent's name for messages after its model and tab --
   `claude 1 vm-6a` -- so "ask vm-6a what it changed" can be read straight off the column.
 - Packer is installed, and kept on the newest 1.16 release by `desktop-update`; so are the
@@ -64,6 +73,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- The dashboard's Start tab is one screen of tiles instead of three columns of lists: rings
+  for CPU, memory, temperature and disk and for Claude's session and weekly limits, the
+  month with its holidays marked, screen time, what is playing, the headlines from the News
+  tab, this machine's state and the notifications.
 - In tmux, prefix + Q and prefix + q ask before killing the server or a session, and none
   of the closing keys repeats any more: a second w no longer closes a second window. The
   sidebars take half the memory, and the agent count on the status line is worked out

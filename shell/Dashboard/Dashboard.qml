@@ -221,6 +221,7 @@ Item {
 
   // What a tab shows besides its own answer: a heading with a command of its own.
   readonly property var beside: ({
+      "start": "news",
       "infra": "network",
       "ai": "agents",
       "security": "advisories"
@@ -240,6 +241,7 @@ Item {
   }
   Component.onCompleted: {
     refresh("start");
+    refresh("news");
     // Asked at the start of the day too: a high/high naming something here is why the tab
     // has a dot, and nobody opens the tab to find out whether it should have.
     refresh("advisories");
@@ -688,11 +690,16 @@ Item {
             anchors.fill: parent
 
             StartPage {
+              // Fits itself to what is left of the window, as the news does, and takes
+              // its headlines from the News tab's answer.
+              room: scroll.height - holder.y
               width: parent.width
               visible: root.key === "start"
               active: root.key === "start" && root.lookedAt
               info: root.answers["start"] || null
+              news: root.answers["news"] || null
               now: root.now
+              onTypingDone: scroll.forceActiveFocus()
             }
             AiPage {
               id: ai

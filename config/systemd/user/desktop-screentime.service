@@ -1,0 +1,8 @@
+[Unit]
+Description=Desktop screen time: count this minute if the screen is in use
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/desktop/bin/desktop-screentime record
+LogLevelMax=warning

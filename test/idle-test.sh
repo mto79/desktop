@@ -22,8 +22,9 @@ timeout_before() {
 screensaver=$(timeout_before "desktop-launch-screensaver")
 lock=$(timeout_before "lock-session")
 dpms=$(timeout_before 'dpms\\(\\{ action = "off"')
+idle=$(timeout_before 'desktop-idle')
 
-check "every listener declares a timeout" test "${#timeouts[@]}" = 3
+check "every listener declares a timeout" test "${#timeouts[@]}" = 4
 
 if [[ -n $screensaver && -n $lock && -n $dpms ]]; then
   pass "the three listeners are all present"
@@ -34,6 +35,9 @@ fi
 check "the screensaver comes before the lock, or it never runs at all" \
   test "$screensaver" -lt "$lock"
 check "the screen goes off no earlier than the lock" test "$dpms" -ge "$lock"
+# Screen time stops counting at the idle mark. Past the lock it would mark nothing, the lock
+# having stopped the count already; before it, it is the minutes between that it leaves out.
+check "the screen is marked idle before it locks" test "${idle:-99999}" -lt "$lock"
 
 # A lock that never arrives is a different kind of mistake, and one nobody notices until
 # the laptop is left somewhere.

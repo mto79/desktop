@@ -365,7 +365,9 @@ printf '#!/usr/bin/env bash\nexit 1\n' >"$stubs/desktop-agent-tokens"
 answer=$(PATH="$stubs:$PATH" python3 "$ROOT/bin/desktop-dash-agents")
 check "a command that fails leaves its part empty and the rest an answer" test "$(ag '"\(.agents | length)|\(.sessions | length)"')" = "0|2"
 check "the agents are not a tab of their own" lacks -x agents <<<"$(run tabs)"
-check "the agents' cards have left the start page" lacks -E 'title: "(Agents|Tasks|Claude)"' "$PAGES/StartPage.qml"
+# The limits came back to the start page as two rings, a glance; the agents and their
+# tasks, which are read and acted on, stay on the AI tab.
+check "the agents' cards have left the start page" lacks -E 'title: "(Agents|Tasks)"' "$PAGES/StartPage.qml"
 check "the agents are only asked while the AI tab is on show" grep -q 'running: root.lookedAt && root.shown && root.key === "ai"' "$PAGES/Dashboard.qml"
 
 finish

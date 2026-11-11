@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+
+# desktop-screentime: how long the screen was actually used, and on what.
+#
+#   desktop-screentime record   # once a minute, from desktop-screentime.timer
+#   desktop-screentime --json   # today, the last seven days and today's apps; the dashboard
+#
+# A minute counts when the screen is unlocked and something was touched in the five minutes
+# before it -- hypridle marks the five minutes without input (config/hypr/hypridle.conf), so
+# a film paused under an open lid or a desk left with the screen on is not counted. A
+# suspended machine runs no timer, so it counts nothing either.
+#
+# Each counted minute is one line, "HH:MM app", in a file per day. The app is the window in
+# front: its class, made readable -- a Brave web app is its site, a reverse-DNS class its
+# last word. Ghostty cannot set a class of its own, so everything in a terminal is
+# "Terminal". Kept for 60 days; nothing leaves this machine.
+
+set -uo pipefail
+
+DIR="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/screentime"
+IDLE="${XDG_RUNTIME_DIR:-/tmp}/desktop-idle"
+KEEP_DAYS=60
+
+# A window class, as something to read. Empty is the desktop itself.
+app_name() { # class
+  local class=$1
+  case $class in
+  "" | org.quickshell) echo "Desktop" ;;
+  com.mitchellh.ghostty) echo "Terminal" ;;
+  brave-browser) echo "Brave" ;;
+  # brave-teams.microsoft.com__-Default: a web app, opened by desktop-launch-webapp.
+  brave-*__*)
+    class=${class#brave-}
+    class=${class%%__*}
+    echo "${class#www.}"
+    ;;
+  *.*.*) echo "${class##*.}" ;;
+  *) echo "$class" ;;
+  esac
+}
+
+record() {
+  # Locked, idle, or no compositor to ask: not a minute of use.
+  pidof -q hyprlock && return 0
+  [[ -e $IDLE ]] && return 0
+  local window class now day
+  window=$(hyprctl activewindow -j 2>/dev/null) || return 0
+  class=$(jq -r '.class // ""' <<<"$window" 2>/dev/null) || class=""
+  now=$(date +%H:%M)
+  day=$(date +%F)
+  mkdir -p "$DIR" || return 0
+  # The timer can fire twice in one minute after a late start; count the minute once.
+  [[ -s $DIR/$day ]] && [[ $(tail -n1 "$DIR/$day") == "$now "* ]] && return 0
+  printf '%s %s\n' "$now" "$(app_name "$class")" >>"$DIR/$day"
+  find "$DIR" -type f -mtime +"$KEEP_DAYS" -delete 2>/dev/null
+}
+
+report() {
+  local today days=() i week apps since
+  today=$(date +%F)
+  for i in 6 5 4 3 2 1 0; do days+=("$(date -d "-$i day" +%F)"); done
+
+  # day, its weekday's short name, and how many minutes were counted.
+  week=$(for d in "${days[@]}"; do
+    printf '%s\t%s\t%s\n' "$d" "$(date -d "$d" +%a)" "$(cat "$DIR/$d" 2>/dev/null | wc -l)"
+  done | jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {date: .[0], day: .[1], minutes: (.[2] | tonumber)})')
+
+  apps=$(cut -d' ' -f2- "$DIR/$today" 2>/dev/null | sort | uniq -c | sort -rn |
+    awk '{ n = $1; $1 = ""; sub(/^ /, ""); printf "%s\t%s\n", $0, n }' |
+    jq -Rsc 'split("\n") | map(select(. != "") | split("\t") | {name: .[0], minutes: (.[1] | tonumber)})')
+
+  since=$(find "$DIR" -type f -printf '%f\n' 2>/dev/null | sort | head -1)
+
+  jq -cn --argjson week "${week:-[]}" --argjson apps "${apps:-[]}" --arg since "$since" '{
+    today: ($week[-1].minutes // 0),
+    week: $week,
+    average: (([$week[] | select(.minutes > 0) | .minutes]) as $m | if ($m | length) > 0 then (($m | add) / ($m | length) | floor) else 0 end),
+    apps: $apps,
+    since: $since
+  }'
+}
+
+case "${1:-}" in
+record) record ;;
+--json) report ;;
+*)
+  echo "usage: desktop-screentime record|--json" >&2
+  exit 2
+  ;;
+esac

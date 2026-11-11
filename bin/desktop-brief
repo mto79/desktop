@@ -35,6 +35,22 @@ file_json() { # fallback path
 
 # What to call you: the first word of the name the account was given. Nothing, rather
 # than a login name, when there is none -- "Good morning, mto" greets nobody.
+# CPU busy over a quarter of a second, in percent: the share of /proc/stat's ticks that were
+# not idle or iowait between two readings.
+cpu_busy() {
+  local a b
+  a=$(awk '/^cpu / { print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6 }' /proc/stat)
+  sleep 0.25
+  b=$(awk '/^cpu / { print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6 }' /proc/stat)
+  awk -v a="$a" -v b="$b" 'BEGIN { split(a, x, " "); split(b, y, " ")
+    t = y[1] - x[1]; i = y[2] - x[2]; print (t > 0 ? int((t - i) * 100 / t + 0.5) : 0) }'
+}
+
+# Memory in use, in percent: what is not available, as free(1) counts it.
+ram_used() {
+  awk '/^MemTotal:/ { t = $2 } /^MemAvailable:/ { a = $2 } END { print (t > 0 ? int((t - a) * 100 / t + 0.5) : 0) }' /proc/meminfo
+}
+
 first_name() {
   getent passwd "${USER:-$(id -un)}" 2>/dev/null | cut -d: -f5 | cut -d, -f1 | awk '{ print $1 }'
 }
@@ -50,7 +66,8 @@ greeting() {
 }
 
 collect() {
-  local updates security backup tasks agents limits kept marks disk uptime_text kernel
+  local updates security backup tasks agents limits kept marks disk uptime_text kernel screen
+  local cpu ram temp weather
 
   updates=$(file_json '{"sources":[]}' "$RUNTIME/desktop-update-available.json")
   security=$(file_json '{"findings":[]}' "$STATE/security/last.json")
@@ -58,18 +75,24 @@ collect() {
   tasks=$(json_of '{"tasks":[]}' desktop-worktree tasks --json)
   agents=$(json_of '{"sessions":[]}' desktop-agent-sessions --json)
   limits=$(json_of '{"limits":[]}' desktop-status-claude --report)
+  screen=$(json_of '{"today":0,"week":[],"apps":[]}' desktop-screentime --json)
   kept=$(file_json '[]' "$STATE/notifications.json")
   # The marks the bar reads to ask for a restart or a relogin.
   marks=$(find "$STATE" -maxdepth 1 -type f -name '*-required' -printf '%f\n' 2>/dev/null | jq -Rcs 'split("\n") | map(select(. != ""))')
   disk=$(df -P / 2>/dev/null | awk 'NR == 2 { gsub("%", "", $5); print $5 }')
   uptime_text=$(uptime -p 2>/dev/null | sed 's/^up //')
   kernel=$(uname -r)
+  cpu=$(cpu_busy 2>/dev/null)
+  ram=$(ram_used 2>/dev/null)
+  temp=$(json_of '{}' desktop-status-cpu | jq -r '.tempC // empty | round')
+  weather=$(json_of '{"connected":false}' desktop-weather --json)
 
  user=$(first_name)
   jq -cn \
     --arg user "$user" \
     --argjson updates "$updates" --argjson security "$security" --argjson backup "$backup" \
-    --argjson tasks "$tasks" --argjson agents "$agents" --argjson limits "$limits" \
+    --argjson tasks "$tasks" --argjson agents "$agents" --argjson limits "$limits" --argjson screen "$screen" --argjson weather "$weather" \
+    --arg cpu "${cpu:-0}" --arg ram "${ram:-0}" --arg temp "${temp:-}" \
     --argjson kept "$kept" --argjson marks "${marks:-[]}" \
     --arg disk "${disk:-0}" --arg uptime "$uptime_text" --arg kernel "$kernel" \
     --argjson now "$(date +%s)" '
@@ -96,7 +119,10 @@ collect() {
       },
       limits: [$limits.limits[]? | {name: (.name // .label // ""), percent: (.percent // 0), resets: (.resets // .reset // "")}],
       notifications: {kept: ($kept | length), latest: [$kept[-4:][]? | {app, summary}] | reverse},
-      system: {uptime: $uptime, kernel: $kernel, disk_used: ($disk | tonumber? // 0), restart_marks: $marks}
+      screentime: {today: ($screen.today // 0), average: ($screen.average // 0), week: ($screen.week // []), apps: ($screen.apps // []), since: ($screen.since // "")},
+      weather: $weather,
+      system: {uptime: $uptime, kernel: $kernel, disk_used: ($disk | tonumber? // 0), restart_marks: $marks,
+               cpu: ($cpu | tonumber? // 0), ram: ($ram | tonumber? // 0), temp: ($temp | tonumber? // null)}
     }
     | .security.bad = ([.security.findings[] | select(.level == "bad")] | length)
     # One number for "how much of this wants doing", which is what a glance is for.

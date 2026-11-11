@@ -41,6 +41,9 @@ check "agents are counted by what they are doing" \
   test "$(jq -r '.agents | "\(.waiting) \(.working) \(.done)"' <<<"$all")" = "1 1 1"
 check "Claude's limits are there" test "$(jq -r '.limits[1] | "\(.name) \(.percent)"' <<<"$all")" = "Weekly 91"
 check "a pending restart is noticed" test "$(jq -r '.system.restart_marks[0]' <<<"$all")" = reboot-required
+# The start page's rings. Read from /proc, so only whether they are shares of a whole.
+check "CPU and memory are given as percentages" \
+  jq -e '.system | (.cpu | type == "number" and . >= 0 and . <= 100) and (.ram | type == "number" and . > 0 and . <= 100)' <<<"$all"
 check "kept notifications are counted, newest first" \
   test "$(jq -r '"\(.notifications.kept) \(.notifications.latest[0].summary)"' <<<"$all")" = "2 two"
 # A waiting agent, a bad finding, a pending restart and a waiting task: four things.
