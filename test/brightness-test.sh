@@ -73,4 +73,25 @@ check "with nothing to go on, brightnessctl's own choice is used" \
 check "an unknown argument is refused" \
   lacks . <<<"$(bash "$BRIGHTNESS" wibble 2>/dev/null || true)"
 
+# The keyboard's backlight, found by the name every vendor's driver gives it, among the
+# LEDs that are not it: the caps-lock light, a mic-mute light.
+keyboard() { (eval "$(sed -n '/^keyboard_device() {/,/^}$/p' "$BRIGHTNESS" |
+  sed "s#/sys/class/leds#$sandbox/sys/class/leds#")"; keyboard_device); }
+rm -rf "$sandbox/sys"
+mkdir -p "$sandbox/sys/class/leds/"{input3::capslock,dell::kbd_backlight,platform::micmute}
+check "the keyboard's backlight is the kbd_backlight LED" test "$(keyboard)" = "dell::kbd_backlight"
+rm -rf "$sandbox/sys/class/leds/dell::kbd_backlight"
+check "and a machine without one has none, rather than the caps-lock light" test -z "$(keyboard)"
+
+# It has three levels, off, low and high: a step of a few percent would never move it.
+check "the keyboard steps a whole level" grep -q 'DESKTOP_KEYBOARD_STEP:-1}' "$BRIGHTNESS"
+
+# The OSD reads the value back through the script, which knows which device moved.
+# brightnessctl -m on its own reports its first backlight -- nvidia_0, for nothing -- and
+# the overlay said 30% whatever the screen did.
+OSD="$ROOT/shell/Osd/Osd.qml"
+check "the OSD reads the backlight the keys moved, not brightnessctl's first" \
+  lacks '"brightnessctl", "-m"' <"$OSD"
+check "and the keyboard's, for CTRL with the brightness keys" grep -q '"keyboard", "reading"' "$OSD"
+
 finish

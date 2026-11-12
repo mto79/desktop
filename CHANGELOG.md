@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `CTRL` with the brightness keys turns the keyboard's backlight up and down, a level at a
+  time, and the overlay shows where it is.
 - `SUPER + ~` drops an agent console over whatever is on screen, and the same key puts it
   away again with the conversation still running. It is Claude in a tmux session of its
   own, `console`, started in your home directory.
@@ -108,6 +110,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The brightness overlay shows the screen's brightness. It had been reading the discrete
+  GPU's unused backlight, and said 30% whatever the keys did.
 - JetBrains dialogs open at half the screen, and picture-in-picture in the top right
   corner, as their window rules always meant: Hyprland had been ignoring sizes and
   positions written in percent.

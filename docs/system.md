@@ -180,3 +180,4 @@ low; `desktop-battery-details` supplies the facts UPower does not carry.
 | `desktop-captures screen\|meetings` | The latest recordings, as JSON |
 | `desktop-cmd-camera status` | What is using the camera |
 | `desktop-brightness up\|down` | The backlight of the screen being looked at |
+| `desktop-brightness keyboard up\|down` | The keyboard's backlight, a level at a time; `CTRL` with the brightness keys |

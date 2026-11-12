@@ -98,11 +98,16 @@ Item {
   onSourceMutedChanged: showMic()
 
   // brightnessctl -m prints `name,class,current,percent,max`, and reading it back is
-  // what keeps the overlay honest about the device the key actually changed.
+  // what keeps the overlay honest about the device the key actually changed. Through
+  // desktop-brightness, which knows which one that is: brightnessctl alone reads its
+  // first, and on this laptop that is the discrete GPU's backlight for an empty output,
+  // which said 30% whatever the screen did.
+  property string probing: "brightness"
+
   Process {
     id: brightnessProbe
 
-    command: ["brightnessctl", "-m"]
+    command: root.probing === "keyboard" ? ["desktop-brightness", "keyboard", "reading"] : ["desktop-brightness", "reading"]
 
     stdout: StdioCollector {
       onStreamFinished: {
@@ -112,7 +117,10 @@ Item {
         var current = parseInt(fields[2], 10) || 0;
         var max = parseInt(fields[4], 10) || 1;
         var fraction = Math.max(0, Math.min(1, current / max));
-        root.present(fraction > 0.5 ? "\u{f00de}" : "\u{f00db}", fraction, Math.round(fraction * 100) + "%");
+        if (root.probing === "keyboard")
+          root.present("\u{f030c}", fraction, current === 0 ? "off" : Math.round(fraction * 100) + "%");
+        else
+          root.present(fraction > 0.5 ? "\u{f00de}" : "\u{f00db}", fraction, Math.round(fraction * 100) + "%");
       }
     }
   }
@@ -135,9 +143,11 @@ Item {
       showMic();
       return true;
     }
-    if (kind === "brightness") {
-      if (!brightnessProbe.running)
+    if (kind === "brightness" || kind === "keyboard") {
+      if (!brightnessProbe.running) {
+        root.probing = kind;
         brightnessProbe.running = true;
+      }
       return true;
     }
     return false;

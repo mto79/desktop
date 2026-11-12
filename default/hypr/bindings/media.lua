@@ -14,6 +14,9 @@ hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ to
 hl.bind("XF86AudioMicMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle"), { locked = true, description = "Mute microphone" })
 hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("desktop-brightness up"), { locked = true, description = "Brightness up" })
 hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("desktop-brightness down"), { locked = true, description = "Brightness down" })
+-- With CTRL, the keyboard's backlight instead: the laptop has no keys of its own for it.
+hl.bind("CTRL + XF86MonBrightnessUp", hl.dsp.exec_cmd("desktop-brightness keyboard up"), { locked = true, description = "Keyboard light up" })
+hl.bind("CTRL + XF86MonBrightnessDown", hl.dsp.exec_cmd("desktop-brightness keyboard down"), { locked = true, description = "Keyboard light down" })
 
 -- Requires playerctl
 hl.bind("XF86AudioPlay", hl.dsp.exec_cmd("playerctl play-pause"), { locked = true, description = "Play" })
