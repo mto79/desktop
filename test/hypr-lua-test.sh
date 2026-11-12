@@ -36,6 +36,24 @@ else
   fail "nothing talks to Hyprland in the hyprlang dialect a Lua session refuses" "$(head -3 <<<"$legacy")"
 fi
 
+# A size or a position in percent. Hyprland 0.56 reads both without complaint and then
+# ignores them: the window opens at its own size, centred. The JetBrains dialogs and the
+# picture-in-picture corner did that for months. Expressions do work: monitor_w*0.5.
+percent=$(grep -rnE '(size|move)( = \{[^}]*|[^,]*)[0-9]%' "$ROOT/default/hypr" | grep -vE '^[^:]*:[0-9]+:\s*(#|--)')
+if [[ -z $percent ]]; then
+  pass "no window rule sizes or places a window in percent, which Hyprland ignores"
+else
+  fail "no window rule sizes or places a window in percent, which Hyprland ignores" "$(head -3 <<<"$percent")"
+fi
+
+# The console's rule knows the window by the title its script gives it.
+title=$(sed -n 's/^TITLE="\(.*\)"$/\1/p' "$ROOT/bin/desktop-agent-console")
+if [[ -n $title ]] && grep -q "initial_title = \"^($title)\$\"" "$ROOT/default/hypr/apps/terminals.lua"; then
+  pass "the agent console's window rule matches the title desktop-agent-console gives it"
+else
+  fail "the agent console's window rule matches the title desktop-agent-console gives it" "title '$title'"
+fi
+
 require Hyprland || finish
 
 ENTRY=hyprland.lua

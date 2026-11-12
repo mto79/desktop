@@ -55,6 +55,7 @@ A few worth knowing:
 | `SUPER + K` | Every binding, searchable |
 | `SUPER + D`, then a letter | A panel: `A` audio, `I` AI, `B` Bluetooth, `C` CPU, `F` storage, ... |
 | `SUPER + A` | Ask an agent |
+| `SUPER + ~` | The agent console: drops over the screen, the same key hides it |
 | `SUPER + C` | Voice command |
 | `SUPER + V` | Clipboard history |
 | `SUPER + ALT + M` | The chat named in `~/.config/desktop/chat.conf` |
@@ -83,6 +84,11 @@ Ghostty's class as well so an unrelated window with the same title is not caught
 A title match is weaker than a class match. A program that renames its own window escapes
 it: yazi and tmux do, bluetui does not. A new TUI has to be checked, with
 `hyprctl clients`, not assumed.
+
+Sizes and positions are expressions -- `size = { "monitor_w*0.5", "monitor_h*0.5" }` --
+never percentages. Hyprland 0.56 accepts `"50%"` without a word and then ignores it, so the
+window opens at its own size, centred; `test/hypr-lua-test.sh` refuses one. In `move`,
+`window_w` is the width before any `size` rule, so place a window of known size by number.
 
 ## Monitors
 

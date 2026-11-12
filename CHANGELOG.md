@@ -12,6 +12,11 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `SUPER + ~` drops an agent console over whatever is on screen, and the same key puts it
+  away again with the conversation still running. It is Claude in a tmux session of its
+  own, `console`, started in your home directory.
+- The screenshot toast has buttons: Open, Edit to annotate it again, and Folder to show it
+  in Files. Clicking the toast opens it.
 - A network that wants you to sign in first, as a hotel's or a train's does, turns the bar's
   network icon into a warning, and the network panel opens its login page. NetworkManager
   now checks connectivity, which it did not before.
@@ -103,6 +108,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- JetBrains dialogs open at half the screen, and picture-in-picture in the top right
+  corner, as their window rules always meant: Hyprland had been ignoring sizes and
+  positions written in percent.
 - The weather on the Start tab could find another town of the same name: "Den Haag" on
   its own is in South Africa. A `country =` line in `weather.conf` keeps the lookup to one
   country.

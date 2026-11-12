@@ -300,6 +300,7 @@ The git stash is shared between a repository and all its worktrees. Do not use a
 | Command | Does |
 |---|---|
 | `desktop-agent-prompt` (`SUPER + A`) | Ask for an agent and a prompt, then run it |
+| `desktop-agent-console` (`SUPER + ~`) | An agent in a window that drops over any workspace; the same key hides it, and it keeps running. tmux session `console`, in your home directory |
 | `desktop-menu-agents` | List the running sessions and jump to one |
 | `desktop-git-commit` | Commit what is staged with a message Claude writes from the diff; lazygit's `C` |
 

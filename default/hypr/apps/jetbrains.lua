@@ -1,5 +1,5 @@
 -- Fixing popup size issue
-hl.window_rule({ match = { class = "(.*jetbrains.*)$", title = "^$", float = true }, size = { "50%", "50%" } })
+hl.window_rule({ match = { class = "(.*jetbrains.*)$", title = "^$", float = true }, size = { "monitor_w*0.5", "monitor_h*0.5" } })
 
 -- Fix tab dragging (always have a single space character as their title)
 --

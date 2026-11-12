@@ -73,6 +73,21 @@ satty --filename "$SHOT" \
 
 # satty exits without writing when the shot is discarded, so the file is the only
 # honest signal that there is a screenshot to talk about.
+#
+# With buttons for what comes next: open it, annotate it again, or find it in its folder.
+# Clicking the toast itself opens it. notify-send --wait holds on until a button or the
+# toast's end, so this script lingers for those eight seconds -- after the lock is given
+# up, so it holds up no next screenshot.
+rm -f "$SHOT"
 if [[ -f "$FILE" ]]; then
-  notify-send "Screenshot saved" "$(basename "$FILE") - copied to clipboard" -t 3000
+  chosen=$(timeout 1m notify-send --app-name=Screenshot -t 8000 --wait \
+    --action=default=Open --action=open=Open --action=edit=Edit --action=folder=Folder \
+    "Screenshot saved" "$(basename "$FILE") - copied to clipboard")
+  say "toast answered: ${chosen:-nothing}"
+  case $chosen in
+  default | open) exec setsid xdg-open "$FILE" ;;
+  edit) exec setsid satty --filename "$FILE" --output-filename "$FILE" --early-exit \
+    --actions-on-enter save-to-clipboard --save-after-copy --copy-command wl-copy ;;
+  folder) exec setsid nautilus --select "$FILE" ;;
+  esac
 fi

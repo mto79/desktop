@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+# desktop-agent-console: an agent that drops over whatever you are doing, and goes away
+# again on the same key. SUPER + ~.
+#
+#   desktop-agent-console              # claude
+#   desktop-agent-console opencode
+#
+# For the question that is not worth a project: what a flag does, a one-off command, a
+# log to read. The repo sessions stay where they are; this is one more, called "console",
+# started in your home directory.
+#
+# The window lives on a special workspace, so it is shown over any workspace on the
+# screen you are on, and hiding it keeps it running: the conversation is still there the
+# next time. Its tmux session outlives the window too -- close the window, and the next
+# press attaches to the same agent. When the agent ends, a shell is left in its place
+# rather than the window vanishing with whatever it last said.
+#
+# Ghostty cannot set an app id, so the window is known by its title, "Console", which
+# --title fixes against anything run inside it. The rule that floats it and puts it on
+# special:console is in default/hypr/apps/terminals.lua.
+
+set -uo pipefail
+
+AGENT="${1:-claude}"
+TITLE="Console"
+SESSION="console"
+
+open=$(hyprctl clients -j 2>/dev/null |
+  jq -r --arg t "$TITLE" 'any(.[]; .class == "com.mitchellh.ghostty" and .initialTitle == $t)')
+
+if [[ $open == true ]]; then
+  exec hyprctl dispatch 'hl.dsp.workspace.toggle_special("console")' >/dev/null
+fi
+
+# Not silent: the rule puts the new window on special:console and shows it, so the first
+# press opens it in one go. "-A" attaches when the session is still alive.
+exec setsid uwsm app -- ghostty --title="$TITLE" -e \
+  tmux new-session -A -s "$SESSION" -c "$HOME" "desktop-agent $AGENT; exec fish"

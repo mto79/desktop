@@ -11,6 +11,8 @@ hl.bind("XF86PowerOff", hl.dsp.exec_cmd("desktop-menu system"), { locked = true,
 hl.bind("SUPER + K", hl.dsp.exec_cmd("desktop-menu-keybindings"), { description = "Show key bindings" })
 hl.bind("SUPER + M", hl.dsp.exec_cmd("desktop-shell shell togglePanel monitors >/dev/null 2>&1 || desktop-menu monitors"), { description = "Monitor layout" })
 hl.bind("SUPER + A", hl.dsp.exec_cmd("desktop-agent-prompt"), { description = "Ask an agent" })
+-- An agent over whatever is on screen; the same key puts it away. See desktop-agent-console.
+hl.bind("SUPER + grave", hl.dsp.exec_cmd("desktop-agent-console"), { description = "Agent console" })
 hl.bind("XF86Calculator", hl.dsp.exec_cmd("gnome-calculator"), { description = "Calculator" })
 
 -- Aesthetics
