@@ -13,7 +13,7 @@ SOCKET="desktop-fresh-test-$$"
 FRESH="$ROOT/bin/desktop-tmux-fresh"
 
 sandbox=$(mktemp -d)
-trap '"$TMUX_BIN" -L "$SOCKET" kill-server 2>/dev/null; rm -rf "$sandbox"' EXIT
+trap '"$TMUX_BIN" -L "$SOCKET" kill-server 2>/dev/null; rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$SOCKET"; rm -rf "$sandbox"' EXIT
 
 mkdir -p "$sandbox/bin" "$sandbox/state/desktop/tmux"
 cat >"$sandbox/bin/tmux" <<STUB

@@ -27,7 +27,9 @@ printf -v now '%(%s)T' -1
 stamp=0
 body=
 if [[ -r $file ]]; then
-  { read -r stamp && body=$(cat); } <"$file" 2>/dev/null || stamp=0
+  # read -d '' takes the rest of the file, and fails only for reaching its end. $(cat)
+  # did the same with a subshell and a process, on the path that was to have none.
+  { read -r stamp && { IFS= read -r -d '' body || :; }; } <"$file" 2>/dev/null || stamp=0
   [[ $stamp =~ ^[0-9]+$ ]] || stamp=0
 fi
 

@@ -133,6 +133,11 @@ ensure_session() { # session group dir model [width height]
   # Nothing on the left: the model is on the top bar, and the tabs are only numbers.
   tmux set-option -t "$(in_session "$session")" status-left ""
   tmux set-option -t "$(in_session "$session")" status-right ""
+  # What is left to run on a timer is the top bar's two #() jobs, whose answers change once
+  # in thirty seconds (desktop-tmux-cached 30). At the server's five they were two process
+  # starts per column every five seconds, for nothing new. The tab bar is redrawn when a
+  # tab changes, not on this timer.
+  tmux set-option -t "$(in_session "$session")" status-interval 30
   # Without this the client would fall back to another session when the last tab closes --
   # possibly the one the column is in, which cannot display itself. Detaching instead
   # hands the pane back to the loop in `attach`, which starts the column again.

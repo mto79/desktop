@@ -55,6 +55,11 @@ case "$args" in
 *list-windows*)
   printf 'alpha:1\nalpha:2\nbeta:1\nai-alpha-2-claude:1\nterm-alpha-3:1\nai-beta-7-claude:1\n'
   ;;
+*list-clients*-F*session_name*)
+  # What is on screen: two clients on alpha:1, one on beta:1, and the nested clients an
+  # agent column and a terminal's tabs are drawn by. alpha:2 is looked at by nobody.
+  printf 'alpha:1\nbeta:1\nalpha:1\nai-alpha-2-claude:1\nterm-alpha-3:1\nai-beta-7-claude:1\n'
+  ;;
 *list-panes*@ai_column*)
   # The panes holding alpha's agent column and its terminal's tabs, both in window 2.
   printf 'alpha\talpha-2\t\t2\n'
@@ -349,8 +354,10 @@ check "and opens none" lacks 'display-popup' "$sandbox/did"
 
 : >"$sandbox/did"
 drive toggle >/dev/null
-check "a column is opened in every window" \
-  test "$(grep -c 'split-window' "$sandbox/did")" = 3
+check "a column is opened in every window on screen, once" \
+  test "$(grep -c 'split-window' "$sandbox/did")" = 2
+check "and not yet in one nobody is looking at: it gets its own when it is looked at" \
+  lacks 'split-window -t alpha:2' "$sandbox/did"
 check "the tabs inside an agent column or terminal pane get none of their own" \
   lacks 'split-window -t ai-\|split-window -t term-' "$sandbox/did"
 check "nor one whose tabs have not marked it yet, as the new-session hook finds it" \
@@ -400,5 +407,27 @@ check "turning it off closes every column" \
 check "and removes only its own hook" grep -q 'set-hook -gu after-new-window\[50\]' "$sandbox/did"
 check "the looking-at ones as well" grep -q 'set-hook -gu session-window-changed\[50\]' "$sandbox/did"
 check "and forgets which windows had one" grep -q 'set-option -wqu -t .* @sidebar_held' "$sandbox/did"
+
+# A column off screen stays quiet until tmux says what is on screen changed: tmux.conf
+# touches the mark the sidebar watches, by the same name.
+mark=$(sed -n 's/.*"\(desktop-tmux-view\)").*/\1/p' "$ROOT/bin/desktop-tmux-sidebar" | head -1)
+check "tmux.conf touches the mark the sidebar watches" \
+  test "$mark" = desktop-tmux-view -a "$(grep -c "touch .*/$mark" "$ROOT/config/tmux/tmux.conf")" = 5
+
+# tmux.conf, read by a real tmux. A line tmux refuses -- "${X:-y}" in a hook is one, as
+# its parser expands ${} itself and knows no default -- fails only that line, quietly, on
+# a server already running: the hooks it was to set are simply not there.
+# The real tmux, on a server of its own, with no desktop-* commands on PATH: the
+# run-shell lines in the file then do nothing.
+real=$(PATH=/usr/bin:/bin command -v tmux)
+if [[ -n $real ]]; then
+  socket="desktop-test-$$"
+  errors=$(env -u TMUX PATH=/usr/bin:/bin "$real" -L "$socket" -f /dev/null new-session -d \; \
+    source-file "$ROOT/config/tmux/tmux.conf" 2>&1 >/dev/null)
+  "$real" -L "$socket" kill-server 2>/dev/null
+  rm -f "/tmp/tmux-$(id -u)/$socket"
+  check "tmux reads tmux.conf without an error" test -z "$errors"
+  [[ -n $errors ]] && echo "      $(head -3 <<<"$errors")"
+fi
 
 finish

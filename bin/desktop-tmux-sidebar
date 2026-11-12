@@ -70,6 +70,9 @@ import time
 
 WIDTH = 30
 REFRESH_SECONDS = 2
+# How long a column off screen goes without asking tmux, while the mark says nothing moved.
+UNSEEN_RECHECK_SECONDS = 30
+VIEW_MARK = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "desktop-tmux-view")
 
 # A window opened while the sidebar is on gets one too. The index keeps these out of the
 # way of the hooks tmux.conf sets on the same events.
@@ -675,6 +678,14 @@ def go(row, here):
     tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
 
 
+def view_mark():
+    """When tmux last said what is on screen changed, or None when it never has."""
+    try:
+        return os.stat(VIEW_MARK).st_mtime_ns
+    except OSError:
+        return None
+
+
 def sidebar(screen):
     curses.curs_set(0)
     curses.use_default_colors()
@@ -703,6 +714,7 @@ def sidebar(screen):
     focused = False
     last = time.time()
     dirty = True
+    seen, seen_mark, seen_at = "", None, 0.0
 
     while True:
         # The agents underneath follow the session under the cursor. Sessions come first
@@ -772,7 +784,15 @@ def sidebar(screen):
         # tmux has no hook for that. Skipped entirely while this window is not on screen.
         if time.time() - last >= REFRESH_SECONDS:
             last = time.time()
-            seen = tmux(*visible)
+            # Off screen, and nothing on screen has changed since: nothing to ask. tmux
+            # touches the mark when a window, a session or a client changes (tmux.conf);
+            # without one, every refresh asks as it always did. Asked anyway now and then,
+            # in case a change came some way no hook sees.
+            mark = view_mark()
+            if (mark is not None and mark == seen_mark and not seen.startswith("1")
+                    and last - seen_at < UNSEEN_RECHECK_SECONDS):
+                continue
+            seen, seen_mark, seen_at = tmux(*visible), mark, last
             if focused != (seen == "11"):
                 focused, dirty = seen == "11", True
             if not seen.startswith("1"):
@@ -867,7 +887,7 @@ def toggle():
 
 
 def on():
-    """A column in every window and every new one; again changes nothing.
+    """A column in every window looked at, and every new one; again changes nothing.
 
     tmux.conf runs this as the server starts, and again on every reload, which is why it
     is not the toggle: a reload must leave the columns open rather than close them.
@@ -886,7 +906,11 @@ def on():
                  f"\"run-shell -b '{sys.argv[0]} --attach #{{window_id}}'\"")
     for event in VIEW_HOOKS:
         tmux("set-hook", "-g", event, looked_at)
-    for window in tmux("list-windows", "-a", "-F", "#{session_name}:#{window_index}").splitlines():
+    # Only the windows on screen now; every other one gets its column the first time it is
+    # looked at, through the hooks above. A column is a python process of ten megabytes,
+    # and one in each of forty-six windows was 435 MB for columns mostly never seen.
+    shown = tmux("list-clients", "-F", "#{session_name}:#{window_index}").splitlines()
+    for window in dict.fromkeys(shown):
         attach(window)
 
 

@@ -8,7 +8,10 @@ look: which of them needs me?
 
 A repository gets one tmux session, named after its directory, made by
 `desktop-repo-session`: an `ide` window laid out for an agent and a `git` window running
-lazygit. The sessionizer and `desktop-worktree` both go through it, so they agree on the
+lazygit. With twenty-odd of those open, lazygit's timers are slowed in
+`config/lazygit/config.yml`: it refreshes when its window comes into view anyway, so the
+timer only covers one already in view, and it fetches every ten minutes rather than every
+minute. The sessionizer and `desktop-worktree` both go through it, so they agree on the
 name and the shape.
 
 `desktop-agent-layout <target> <agent>...` lays a window out:
@@ -37,7 +40,10 @@ holds tabs too, through `desktop-terminal-tabs`.
 ## The sidebar
 
 The sidebar is on from the moment the tmux server starts: `tmux.conf` runs
-`desktop-tmux-sidebar --on`, which a reload of the file leaves alone. `prefix + e` takes
+`desktop-tmux-sidebar --on`, which a reload of the file leaves alone. It opens a column in
+the windows on screen; every other window gets its own the first time it is looked at. A
+column is a Python process of about ten megabytes, and one in each of forty-six windows was
+435 MB for columns mostly never seen. `prefix + e` takes
 the column away from every window, and puts it back. It is on or off for the whole tmux server, not for one window:
 a pane lives in one window, so a single column would vanish the moment you used it to go
 somewhere else.
@@ -162,7 +168,9 @@ answer leaves what it said before; only an answer can say a review is gone. Forg
 without a review, since tea cannot ask for the review of a branch.
 
 Only the columns on screen read tmux and the agents again, every two seconds; the others
-ask nothing.
+ask nothing. To know they are off screen without asking, they watch the time on
+`$XDG_RUNTIME_DIR/desktop-tmux-view`, which tmux touches whenever a window, a session or a
+client changes, and ask tmux only when it moves (or every thirty seconds regardless).
 
 ## Getting to the agent that needs you
 
@@ -263,7 +271,9 @@ Both are on the top bar of each AI column, behind `desktop-tmux-cached 30`. tmux
 `#()` once per client per `status-interval`, so with a dozen tabs attached the two Python
 scripts started ten times a second and took two cores to print the same line. The wrapper
 runs each at most once in thirty seconds and answers every other call from
-`$XDG_RUNTIME_DIR/desktop-tmux-cached/`, with nothing but bash builtins.
+`$XDG_RUNTIME_DIR/desktop-tmux-cached/`, with nothing but bash builtins. The columns'
+sessions run their `#()` jobs every thirty seconds rather than the server's five, since
+that is how often the answer changes.
 
 ## Tasks in worktrees
 

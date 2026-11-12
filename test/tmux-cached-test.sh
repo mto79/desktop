@@ -48,9 +48,19 @@ rm "$sandbox/fail"
 check "a failed run is not kept, so the next call tries again" \
   test "$(cached 30 "$sandbox/count" --offline)" = "run 6 · --offline"
 
+# The fresh path is nearly every call, two dozen a second with the columns open: it starts
+# no process. A PATH with nothing on it would make any it tried fail, and say so.
+printf 'line one\n\nline three' >"$sandbox/many"
+cached 30 cat "$sandbox/many" >/dev/null
+fresh=$(env -i PATH=/nonexistent XDG_RUNTIME_DIR="$sandbox/run" /usr/bin/bash \
+  "$ROOT/bin/desktop-tmux-cached" 30 cat "$sandbox/many" 2>&1)
+check "a fresh answer is given without starting a process" test "$fresh" = $'line one\n\nline three'
+
 check "the AI column's bar goes through it" \
   test "$(grep -c '#(desktop-tmux-cached 30 desktop-' "$ROOT/config/tmux/tmux.conf")" = 1
 check "for both of its jobs" \
   test "$(grep -o '#(desktop-tmux-cached 30 desktop-' "$ROOT/config/tmux/tmux.conf" | wc -l)" = 2
+check "and the columns' sessions ask for them no more often than they change" \
+  grep -q 'status-interval 30$' "$ROOT/bin/desktop-agent-tabs"
 
 finish

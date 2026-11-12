@@ -83,6 +83,12 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- An idle desktop with twenty-odd repository sessions open does a third of the work it did:
+  half as many processes started a second, the tmux server at half its CPU, lazygit at a
+  quarter. lazygit fetches every ten minutes and refreshes when looked at; a sidebar off
+  screen asks tmux nothing; editors wake a third less often from their next start.
+- The tmux sidebar opens in the windows on screen, and in each other window the first time
+  it is looked at, rather than in every window at once: 435 MB of columns mostly never seen.
 - Videos in mpv are decoded on a GPU instead of the CPU (`hwdec=auto-safe`, as Omarchy
   does): about a quarter of the CPU time for 1080p. On a laptop with an NVIDIA card that is
   the card mpv picks.
@@ -110,6 +116,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The agent columns' bar figures no longer start a process each time tmux asks for them
+  while the answer is fresh, as they were meant to.
 - The brightness overlay shows the screen's brightness. It had been reading the discrete
   GPU's unused backlight, and said 30% whatever the keys did.
 - JetBrains dialogs open at half the screen, and picture-in-picture in the top right

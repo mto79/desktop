@@ -49,6 +49,34 @@ def alive(pid):
         return False
 
 
+# Every pane of a server, asked once a run: "%12" -> ("desktop:1.2", "done"). One tmux
+# command per agent was what this cost before -- twenty-five each time a sidebar on screen
+# refreshed, every two seconds, and most of what the tmux server spent its time on.
+PANES = {}
+
+
+def server_panes(socket):
+    if socket in PANES:
+        return PANES[socket]
+    server = ["-S", socket] if socket else []
+    found = {}
+    try:
+        result = subprocess.run(
+            ["tmux", *server, "list-panes", "-a", "-F",
+             "#{pane_id}\t#{session_name}:#{window_index}.#{pane_index}\t#{@agent_state}"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                fields = line.split("\t")
+                if len(fields) == 3 and fields[0].startswith("%") and fields[1].strip():
+                    found[fields[0]] = (fields[1].strip(), fields[2].strip())
+    except (OSError, subprocess.SubprocessError):
+        pass
+    PANES[socket] = found
+    return found
+
+
 def pane_target(pane, socket):
     """session:window.pane for a pane id and the mark on its tab, or None once it has closed.
 
@@ -61,6 +89,10 @@ def pane_target(pane, socket):
     """
     if not pane:
         return None, ""
+    listed = server_panes(socket).get(pane)
+    if listed:
+        return listed
+    # Not in the list: closed, or a server the list could not be had from. Asked on its own.
     server = ["-S", socket] if socket else []
     try:
         result = subprocess.run(

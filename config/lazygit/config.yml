@@ -1,6 +1,18 @@
 gui:
   nerdFontsVersion: "3"
 
+# Every repository's session keeps a lazygit open in its git window: twenty-odd of them,
+# most never looked at. Each ran git status every ten seconds and fetched from the forge
+# every minute -- two hundred git processes in eight seconds, and a credential lookup per
+# fetch, and since 0.66 looks for changes made outside it every two seconds as well.
+# lazygit refreshes when its window comes into view (tmux passes focus events on),
+# so the timer only has to cover a window you are already looking at; and a branch a few
+# minutes behind the forge is one `f` away.
+refresher:
+  refreshInterval: 30
+  fetchInterval: 600
+  externalChangeCheckInterval: 30
+
 customCommands:
   - key: 'C'
     context: 'files'
