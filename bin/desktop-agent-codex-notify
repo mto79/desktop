@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+# desktop-agent-codex-notify: tell the desktop a codex turn has finished.
+#
+#   desktop-agent-codex-notify '<json>'   # what codex runs, as its notify program
+#   desktop-agent-codex-notify --wire     # add it to ~/.codex/config.toml, once
+#
+# codex has no hooks the way Claude Code has, only a `notify` program it runs with a JSON
+# argument when a turn completes. That is passed to desktop-agent-state as the Stop it is,
+# with codex's name and process, so a codex tab is marked done when it finishes rather than
+# always shown idle. Nothing tells when a codex turn starts or waits for an answer, so
+# those it still cannot show.
+
+set -uo pipefail
+
+CONFIG="${CODEX_HOME:-$HOME/.codex}/config.toml"
+
+if [[ ${1:-} == --wire ]]; then
+  command -v codex >/dev/null 2>&1 || exit 0
+  mkdir -p "$(dirname "$CONFIG")"
+  touch "$CONFIG"
+  # A notify program already set is someone's own, and is left.
+  grep -qE '^[[:space:]]*notify[[:space:]]*=' "$CONFIG" && exit 0
+  # A top-level key, so above the first [table]: under one it would belong to that table.
+  # The path is written out, since codex runs the program without a shell.
+  line="notify = [\"$(readlink -f "$0")\"]"
+  tmp="$CONFIG.$$"
+  awk -v line="$line" '!done && /^[[:space:]]*\[/ { print line; print ""; done = 1 } { print } END { if (!done) print line }' \
+    "$CONFIG" >"$tmp" && mv -f "$tmp" "$CONFIG"
+  echo "codex reports finished turns to desktop-agent-state"
+  exit 0
+fi
+
+payload=${1:-}
+[[ -n $payload ]] || exit 0
+event=$(jq -c --arg pwd "$PWD" 'select(.type == "agent-turn-complete")
+  | {hook_event_name: "Stop", session_id: ((."thread-id" // ."turn-id" // "") | tostring), cwd: (.cwd // $pwd)}
+  | select(.session_id != "")' <<<"$payload" 2>/dev/null) || exit 0
+[[ -n $event ]] || exit 0
+# Its parent is the codex that ran it, which is the process the record is kept alive by.
+DESKTOP_AGENT_NAME=codex DESKTOP_AGENT_PID=$PPID desktop-agent-state <<<"$event"
+exit 0

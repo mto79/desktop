@@ -443,6 +443,44 @@ CLAUDE_CONFIG_DIR="$config" bash "$HOOKS" >/dev/null 2>&1
 check "a settings file that does not parse is left alone, not replaced" \
   test "$(cat "$config/settings.json")" = "{ broken"
 
+# --- opencode and codex, through the same records ------------------------------------------
+
+# opencode's plugin and codex's notify program pass the same events with their own name and
+# process. The record says which agent it is, and lives as long as that agent does.
+cp "$(command -v sleep)" "$sandbox/bin/opencode"
+"$sandbox/bin/opencode" 300 &
+opencode_pid=$!
+printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"ses_oc1","cwd":"/home/u/oc"}' |
+  DESKTOP_AGENT_NAME=opencode DESKTOP_AGENT_PID="$opencode_pid" bash "$STATE"
+check "an opencode turn is recorded as opencode's" test "$(jq -r '.agent + " " + .state' "$records/ses_oc1.json")" = "opencode working"
+check "and counts as alive while its opencode runs" \
+  grep -q '"ses_oc1"' <<<"$(python3 "$SESSIONS" --json | jq -c '.sessions[] | .session')"
+kill "$opencode_pid" 2>/dev/null; wait "$opencode_pid" 2>/dev/null
+python3 "$SESSIONS" --json >/dev/null
+check "and is gone with it" test ! -e "$records/ses_oc1.json"
+printf '%s' '{"hook_event_name":"Stop","session_id":"ses_bad","cwd":"/home/u"}' |
+  DESKTOP_AGENT_NAME='x; rm -rf' DESKTOP_AGENT_PID=1 bash "$STATE"
+check "an agent name that is not a plain word is taken for claude" test "$(jq -r .agent "$records/ses_bad.json" 2>/dev/null)" = claude
+
+# codex's notify program: its finished turn becomes a Stop for the codex that ran it.
+cat >"$sandbox/bin/codex" <<STUB
+#!/usr/bin/env bash
+PATH="$ROOT/bin:\$PATH" "$ROOT/bin/desktop-agent-codex-notify" "\$1"
+STUB
+chmod +x "$sandbox/bin/codex"
+"$sandbox/bin/codex" '{"type":"agent-turn-complete","thread-id":"0199a213-81c0-7800-8aa1-bbab2a035a53","cwd":"/home/u/cx"}'
+check "a finished codex turn is recorded as codex's, done" \
+  test "$(jq -r '.agent + " " + .state + " " + .cwd' "$records/0199a213-81c0-7800-8aa1-bbab2a035a53.json" 2>/dev/null)" = "codex done /home/u/cx"
+"$sandbox/bin/codex" '{"type":"approval-requested","thread-id":"other"}'
+check "and nothing else codex says is taken for a finished turn" test ! -e "$records/other.json"
+
+printf '[projects."/home/u"]\ntrust_level = "trusted"\n' >"$sandbox/codex.toml"
+mkdir -p "$sandbox/codexhome" && mv "$sandbox/codex.toml" "$sandbox/codexhome/config.toml"
+PATH="$sandbox/bin:$PATH" CODEX_HOME="$sandbox/codexhome" bash "$ROOT/bin/desktop-agent-codex-notify" --wire >/dev/null
+PATH="$sandbox/bin:$PATH" CODEX_HOME="$sandbox/codexhome" bash "$ROOT/bin/desktop-agent-codex-notify" --wire >/dev/null
+check "codex is wired once, at the top level, above its tables" \
+  test "$(grep -c '^notify = ' "$sandbox/codexhome/config.toml")-$(head -1 "$sandbox/codexhome/config.toml" | cut -c1-6)" = "1-notify"
+
 # tmux tells the bar too, from the hooks that clear a finished turn once it is looked at.
 # tmux prints a failed hook into the pane, and the shell is not always reachable -- it
 # was running from a worktree, so every Claude pane said "returned 255" when focused.

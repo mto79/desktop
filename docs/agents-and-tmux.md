@@ -91,8 +91,9 @@ column. A name too long for the row loses its middle, not its end: four agents i
 repository are `opentofu-monorepo-b1`, `-14`, `-d8` and `-a1`. The name comes from Claude
 Code's record of each running session, in `~/.claude/sessions/`, and counts only while that
 session's process is alive and is the one that started then. An agent in a plain pane is named after its window. When a session has agents
-in more than one window, each says which: `2:claude 1`. opencode and codex send no hooks,
-so their tabs are always shown idle.
+in more than one window, each says which: `2:claude 1`. opencode reports its state through a
+plugin and codex only its finished turns (see below), so a codex tab is never shown working
+or waiting.
 
 Each agent's name is drawn in its own colour, the one its tabs and pane border have:
 `@agent-claude-colour`, `@agent-codex-colour` and `@agent-opencode-colour`, set by the theme
@@ -201,8 +202,8 @@ The text goes in as one bracketed paste, so a message of several lines is one me
 then Enter. Sent from an agent's own pane, it is headed with who sent it and the command to
 answer with, since the agent at the other end has no other way to know. The address is the
 session and either the label (`opencode 1`, typed with or without its space) or a Claude
-agent's name. It cannot tell whether opencode or codex is in the middle of a turn -- they
-report nothing -- so a message to a busy one is handled however that agent handles typing.
+agent's name. It does not wait for opencode or codex to finish a turn, so a message to a busy
+one is handled however that agent handles typing.
 
 ## Saving and restoring
 
@@ -251,6 +252,13 @@ calls `desktop-agent-state`, which keeps one JSON file per session under
 | `Notification` | waiting (a permission prompt or a question), or done (the idle reminder) |
 | `Stop` | done |
 | `SessionEnd` | the record is removed |
+
+opencode and codex report into the same records. opencode loads a plugin from
+`~/.config/opencode/plugins/desktop-state.js` that turns its events into these: busy is
+working, a permission asked is waiting, idle is done. codex has no hooks, only a `notify`
+program it runs when a turn ends, which `desktop-agent-codex-notify --wire` sets in
+`~/.codex/config.toml`; so a codex tab can say done, but never working or waiting. Each
+passes its own name and process, so its record lives as long as it does.
 
 The record holds the tmux pane and its server's socket, so a panel can jump straight to
 the session, and the agent's pid, so a crashed session can be told from a quiet one: a

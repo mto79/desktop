@@ -44,6 +44,18 @@
 set -uo pipefail
 
 STATE_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/agents"
+# Which agent is reporting. Claude Code's hooks say nothing, and are claude. opencode's
+# plugin (config/opencode/plugins/desktop-state.js) and codex's notify hook pass the same
+# events, translated, with their own name and process -- so the tab marks, the sidebar, the
+# bar and the notifications follow them as they follow claude.
+AGENT="${DESKTOP_AGENT_NAME:-claude}"
+[[ $AGENT =~ ^[a-z]+$ ]] || AGENT=claude
+case "$AGENT" in
+claude) APP="Claude Code" ;;
+opencode) APP="OpenCode" ;;
+codex) APP="Codex" ;;
+*) APP="$AGENT" ;;
+esac
 # A finished turn is only worth a notification if it ran long enough for you to have gone
 # and done something else meanwhile.
 NOTIFY_AFTER="${DESKTOP_AGENT_NOTIFY_AFTER:-60}"
@@ -53,7 +65,7 @@ JUMP="${DESKTOP_AGENT_JUMP:-$(dirname "$(readlink -f "$0")")/desktop-menu-agents
 # --notify <urgency> <title> <body> <pane> <socket>: show a notification and wait for it to
 # be clicked. Only ever run detached, from below.
 if [[ ${1:-} == --notify ]]; then
-  choice=$(timeout 3600 notify-send --app-name="Claude Code" --urgency="$2" \
+  choice=$(timeout 3600 notify-send --app-name="$APP" --urgency="$2" \
     --icon=dialog-information --action=default=Open --wait "$3" "$4" 2>/dev/null)
   if [[ $choice == default && -n ${5:-} ]]; then
     # Resolved at click time, not when the notification was sent: windows may have been
@@ -167,7 +179,7 @@ agent_pid() {
   local pid=$PPID i
   for ((i = 0; i < 4; i++)); do
     [[ -n $pid && $pid != 1 ]] || return
-    if [[ $(cat "/proc/$pid/comm" 2>/dev/null) == claude ]]; then
+    if [[ $(cat "/proc/$pid/comm" 2>/dev/null) == "$AGENT" ]]; then
       echo "$pid"
       return
     fi
@@ -177,7 +189,7 @@ agent_pid() {
 
 tmp="$file.$$"
 jq -cn \
-  --arg agent claude \
+  --arg agent "$AGENT" \
   --arg session "$session" \
   --arg state "$state" \
   --argjson since "$now" \
@@ -256,7 +268,7 @@ fi
 # "desktop - claude - agent 2". The number is the tab it has in its AI column -- the one on
 # the bar there -- and an agent in a plain pane, which has no tabs, goes without. @ai_group
 # is the session's, which a pane's format falls through to.
-who="${project:-Claude Code} - claude"
+who="${project:-$APP} - $AGENT"
 tab=$(tmx display-message -p -t "$pane" '#{?@ai_group,#{window_index},}')
 [[ -n $tab ]] && who+=" - agent $tab"
 
@@ -277,7 +289,7 @@ subject_of() {
   subject=$(tmx display-message -p -t "$pane" '#{pane_title}' 2>/dev/null |
     sed -E 's/^[^[:alnum:]]+[[:space:]]*//') || subject=""
   case "$subject" in
-  "" | "Claude Code" | "$(hostname 2>/dev/null)") subject="" ;;
+  "" | "Claude Code" | "OpenCode" | opencode | codex | "$(hostname 2>/dev/null)") subject="" ;;
   esac
   printf '%s' "$subject"
 }

@@ -17,4 +17,6 @@ set -euo pipefail
 echo "Installing Codex CLI"
 npm config set prefix "$HOME/.local"
 npm i -g @openai/codex
+# Finished turns reported to the desktop, as Claude Code's hooks report theirs.
+"$HOME/.local/share/desktop/bin/desktop-agent-codex-notify" --wire
 echo "Codex $(codex --version 2>/dev/null || echo installed). Authenticate with: codex login"

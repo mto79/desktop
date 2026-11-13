@@ -374,9 +374,9 @@ def collect():
         session = sessions.setdefault(owner, {"path": "", "agents": []})
         record = records.get(f"{name}:{index}", {})
         state = state_of(record, mark)
-        # Every tab of an agent column is an agent, whether or not it reports: opencode and
-        # codex send no hooks, and are listed idle. Elsewhere only a pane that has said it
-        # runs one.
+        # Every tab of an agent column is an agent, whether or not it has reported yet: a
+        # codex that has not finished a turn has said nothing. Elsewhere only a pane that has
+        # said it runs one.
         if not (record or state or group):
             continue
         # What to call it: a column's tab by its model and number, as on the column's own

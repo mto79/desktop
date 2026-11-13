@@ -23,6 +23,9 @@ Add a line under the current month in the same commit as the change it describes
 - Every Claude Code session starts with Remote Control on, so an agent running in tmux can
   be followed and answered from the Claude app on a phone or in a browser. Turning it off in
   `/config` sticks.
+- opencode tabs show whether they are working, waiting for a permission or done, as claude
+  tabs do, in the sidebar, the tab marks, the bar and notifications. codex tabs are marked
+  done when a turn finishes; codex says nothing about turns starting.
 - `CTRL` with the brightness keys turns the keyboard's backlight up and down, a level at a
   time, and the overlay shows where it is.
 - `SUPER + ~` drops an agent console over whatever is on screen, and the same key puts it

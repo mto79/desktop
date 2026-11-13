@@ -42,9 +42,11 @@ def state_dir():
     return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desktop" / "agents"
 
 
-def alive(pid):
+def alive(pid, agent="claude"):
+    """Whether the agent that wrote a record is still running: its pid, still that agent.
+    opencode and codex report through the same records as claude (desktop-agent-state)."""
     try:
-        return Path(f"/proc/{int(pid)}/comm").read_text().strip() == "claude"
+        return Path(f"/proc/{int(pid)}/comm").read_text().strip() == (agent or "claude")
     except (OSError, ValueError, TypeError):
         return False
 
@@ -146,7 +148,7 @@ def sessions(now=None, targets=True):
 
         pid = record.get("pid")
         since = record.get("since") if isinstance(record.get("since"), (int, float)) else now
-        gone = not alive(pid) if pid is not None else now - since > UNVERIFIABLE_SECONDS
+        gone = not alive(pid, record.get("agent")) if pid is not None else now - since > UNVERIFIABLE_SECONDS
         if gone:
             try:
                 path.unlink()
