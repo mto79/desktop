@@ -94,6 +94,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- After a reboot every claude tab comes back to its own conversation, not only the first tab
+  of each repository: four agents in one repository used to come back as one and three
+  that remembered nothing.
 - The right of the bar is five pills -- connection, sound, agents, alerts, system -- instead of
   nineteen loose icons, each a soft background round its widgets.
 - Themes name the bar's surfaces -- a pill, a raised hover, an outline -- rather than mixing

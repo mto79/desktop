@@ -17,7 +17,7 @@ SOCKET="desktop-restore-test-$$"
 RESTORE="$ROOT/bin/desktop-tmux-restore"
 
 sandbox=$(mktemp -d)
-trap '"$TMUX_BIN" -L "$SOCKET" kill-server 2>/dev/null; rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$SOCKET"; rm -rf "$sandbox"' EXIT
+trap 'kill "${claude_pid:-}" 2>/dev/null; "$TMUX_BIN" -L "$SOCKET" kill-server 2>/dev/null; rm -f "${TMUX_TMPDIR:-/tmp}/tmux-$(id -u)/$SOCKET"; rm -rf "$sandbox"' EXIT
 
 stubs="$sandbox/bin"
 mkdir -p "$stubs" "$sandbox/work" "$sandbox/notes" "$sandbox/work.worktrees/fix-runner"
@@ -33,7 +33,7 @@ chmod +x "$stubs"/*
 # XDG_CONFIG_HOME as well as HOME: tmux looks there first, and would otherwise load the
 # tmux.conf deployed on this machine, hooks and all.
 export HOME="$sandbox" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state"
-export PATH="$stubs:$ROOT/bin:$PATH" EDITOR=true SHELL=/bin/bash
+export PATH="$stubs:$ROOT/bin:$PATH" EDITOR=true SHELL=/bin/bash XDG_RUNTIME_DIR="$sandbox/run"
 tm() { "$TMUX_BIN" -L "$SOCKET" "$@"; }
 settle() {
   local i
@@ -69,7 +69,32 @@ tm new-window -d -t notes: -n side -c "$sandbox/notes"
 tm split-window -d -fhb -l 30 -t notes:side "sleep 300"
 tm set-option -p -t "$(tm list-panes -t notes:side -F '#{pane_id}' | head -1)" @sidebar 1
 
+# Claude Code's record of each claude tab's conversation, as it writes one per session: a
+# live process called claude, its session id and its pane. And a transcript for each, which
+# is what makes a conversation one that can be resumed.
+ln -s "$(command -v sleep)" "$sandbox/claude"
+"$sandbox/claude" 300 >/dev/null 2>&1 &
+claude_pid=$!
+mkdir -p "$HOME/.claude/sessions"
+ids=(11111111-1111-4111-8111-111111111111 22222222-2222-4222-8222-222222222222 33333333-3333-4333-8333-333333333333)
+n=0
+while read -r where pane dir; do
+  printf '{"pid":%d,"sessionId":"%s","tmux":"%s.%s"}\n' "$claude_pid" "${ids[n]}" "$where" "$pane" \
+    >"$HOME/.claude/sessions/$((1000 + n)).json"
+  mkdir -p "$HOME/.claude/projects/${dir//[^A-Za-z0-9]/-}"
+  touch "$HOME/.claude/projects/${dir//[^A-Za-z0-9]/-}/${ids[n]}.jsonl"
+  n=$((n + 1))
+done < <(tm list-windows -a -f "#{&&:#{==:#{@ai_group},$group},#{==:#{@ai_model},claude}}" \
+  -F '#{window_index} #{session_name}:#{window_id} #{pane_id} #{pane_start_path}' | sort -n | cut -d' ' -f2-)
+check "the three claude tabs were given a conversation each" test "$n" = 3
+
 "$RESTORE" save
+saved=$(python3 -c 'import json, sys
+for s in json.load(open(sys.argv[1]))["sessions"]:
+    for w in s["windows"]:
+        for t in (w.get("tabs") or {}).get("claude", []):
+            print(t.get("session", "-"))' "$sandbox/state/desktop/tmux/last.json" | tr '\n' ' ')
+check "each claude tab's conversation is written down with it, in tab order" test "$saved" = "${ids[*]} "
 before=$(shape)
 side=$(python3 -c 'import json, sys
 for s in json.load(open(sys.argv[1]))["sessions"]:
@@ -102,6 +127,10 @@ check "restore builds it" grep -q 'window(s) put back' <<<"$("$RESTORE" restore)
 settle "tm list-sessions -F '#{session_name}' | grep -q '^ai-work-.*-codex$'"
 after=$(shape)
 check "the same sessions and windows come back, shaped as they were" test "$after" = "$before"
+resumed=$(tm list-windows -a -f "#{==:#{@ai_model},claude}" -F '#{window_index} #{pane_start_command}' | sort -n |
+  grep -o -- '--resume [0-9a-f-]*' | cut -d' ' -f2 | tr '\n' ' ')
+check "each claude tab resumes its own conversation, not the directory's latest" test "$resumed" = "${ids[*]} "
+check "and nothing is left queued for a tab opened later" test -z "$(ls -A "$sandbox/run/desktop/agent-resume" 2>/dev/null | grep -v '\.lock$')"
 check "the task's tab is in its worktree again" \
   test "$(tm list-windows -a -F '#{@worktree}' | grep -c "work.worktrees/fix-runner$")" = 1
 check "the column is left on the model it was on" \

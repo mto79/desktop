@@ -85,6 +85,36 @@ claude_has_history() {
     grep -lqs '"entrypoint":"cli"' -- "$dir"/*.jsonl
 }
 
+# After a reboot, desktop-tmux-restore says which conversation each claude tab of a
+# directory was having, as a queue of session ids in tab order: the first claude started
+# there takes the first, the next tab the next. Without it, only the first tab came back
+# to its conversation -- by --continue, the directory's latest -- and four agents in one
+# repository came back as one, and three that remembered nothing. "-" in the queue is a tab
+# whose conversation was not known, which starts as it would have. A queue more than a few
+# minutes old is from a restore that is over, and is not taken from.
+RESUME_DIR="${XDG_RUNTIME_DIR:-/tmp}/desktop/agent-resume"
+next_resume() { # dir -> the session id to resume there, if the restore left one
+  local key file id slug
+  key=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')
+  file="$RESUME_DIR/$key"
+  [[ -s $file ]] || return 1
+  if [[ -n $(find "$file" -mmin +10 2>/dev/null) ]]; then
+    rm -f "$file"
+    return 1
+  fi
+  {
+    flock 8
+    id=$(head -n 1 "$file")
+    tail -n +2 "$file" >"$file.$$" && mv -f "$file.$$" "$file"
+  } 8>"$file.lock"
+  [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  # Only a conversation that is still on disk: --resume of one that is not is an error,
+  # not a fresh start.
+  slug=$(printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g')
+  [[ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$slug/$id.jsonl" ]] || return 1
+  echo "$id"
+}
+
 option_of() { tmux display-message -p -t "$1" '#{@agent}' 2>/dev/null || true; }
 
 # By the option rather than by what is running, for the reason in the header.
@@ -153,8 +183,12 @@ fi
 # otherwise -c "" would put the agent in whatever directory this script runs from.
 dir=$(tmux display-message -p -t "$pane" '#{?pane_current_path,#{pane_current_path},#{pane_start_path}}')
 cmd=$(command_for "$agent")
-if [[ $agent == claude ]] && ! $fresh && claude_has_history "$dir"; then
-  cmd+=" --continue"
+if [[ $agent == claude ]]; then
+  if resume=$(next_resume "$dir"); then
+    cmd+=" --resume $resume"
+  elif ! $fresh && claude_has_history "$dir"; then
+    cmd+=" --continue"
+  fi
 fi
 
 # remain-on-exit so the pane, and everything the agent said before it stopped, outlives

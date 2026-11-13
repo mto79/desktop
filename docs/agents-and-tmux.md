@@ -209,6 +209,15 @@ report nothing -- so a message to a busy one is handled however that agent handl
 `desktop-tmux-restore` writes down what is open and rebuilds it at login, because a tmux
 server does not survive a reboot.
 
+Each claude tab comes back to its own conversation. The save writes down each tab's session
+id, from Claude Code's record of its running sessions (`~/.claude/sessions/`, which names
+the pane each runs in). The restore hands them back as a queue per directory, in tab order,
+under `$XDG_RUNTIME_DIR/desktop/agent-resume/`; `desktop-agent-swap` takes the next one each
+time it starts a claude there and passes `--resume <id>`. Before, the first tab got the
+directory's latest conversation through `--continue` and the rest started empty: four
+agents in one repository came back as one. A tab whose conversation is unknown, or no
+longer on disk, starts as a new tab would. opencode and codex are not resumed this way.
+
 `desktop-tmux-fresh` is the way out of that: it closes every session and deletes the
 snapshot, so the next tmux starts empty and the next login restores nothing. It asks
 first, unless given `-y`, and it works from inside tmux. Worktrees, tasks and the agents'

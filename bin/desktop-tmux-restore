@@ -18,9 +18,9 @@ Restoring runs the same commands that made them the first time -- desktop-agent-
 desktop-agent-tabs, desktop-worktree -- so a restored window is an ordinary one, and a
 change to how any of those work needs no change here.
 
-What comes back is the place, not the conversation in full. The first claude tab of a
-directory picks up where that directory's last conversation left off, because that is
-what --continue does; further tabs start fresh, as a new tab always does. Nothing that was
+What comes back is the place, and each claude tab's own conversation: its session id is
+written down with the tab, and handed back through desktop-agent-swap, which resumes it.
+A tab whose conversation was not known starts as a new tab would. Nothing that was
 running in a terminal is run again: a shell is a shell, and what was typed into it is not
 this script's to repeat. lazygit is the one exception, since a window that held it is of
 no use without it.
@@ -32,8 +32,10 @@ time any of them gets to look, the server is gone and there is nothing to ask --
 last picture written is the one from before it started going down.
 """
 
+import functools
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -75,13 +77,43 @@ def rows(output):
 # --- what is open now ---------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=1)
+def claude_sessions():
+    """The conversation each running Claude Code is having, by the tmux pane it runs in.
+
+    From Claude Code's own record of each session, ~/.claude/sessions/<pid>.json, which
+    names its session id and its pane ("ai-desktop-12-claude:@13.%25"). A record outlives
+    a session that crashed, so one counts only while its process is still a claude.
+    """
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or str(Path.home() / ".claude")
+    found = {}
+    try:
+        files = list((Path(home) / "sessions").glob("*.json"))
+    except OSError:
+        return found
+    for file in files:
+        try:
+            record = json.loads(file.read_text())
+            where = record.get("tmux") or ""
+            session = record.get("sessionId") or ""
+            alive = Path(f"/proc/{int(record.get('pid'))}/comm").read_text().strip() == "claude"
+        except (OSError, ValueError, TypeError, AttributeError):
+            continue
+        if alive and session and "." in where:
+            found[where.rsplit(".", 1)[1]] = session
+    return found
+
+
 def column_tabs(group):
     """The models of an AI column and the tabs of each, from the sessions behind it."""
     models = {}
     listing = tmux("list-windows", "-a", "-f", f"#{{==:#{{@ai_group}},{group}}}",
-                   "-F", "#{@ai_model}\t#{window_index}\t#{pane_start_path}\t#{@worktree}")
-    for model, index, path, worktree in rows(listing):
-        models.setdefault(model, []).append((int(index), {"dir": path, "worktree": worktree}))
+                   "-F", "#{@ai_model}\t#{window_index}\t#{pane_start_path}\t#{@worktree}\t#{pane_id}")
+    for model, index, path, worktree, pane in rows(listing):
+        tab = {"dir": path, "worktree": worktree}
+        if model == "claude" and claude_sessions().get(pane):
+            tab["session"] = claude_sessions()[pane]
+        models.setdefault(model, []).append((int(index), tab))
     return {model: [tab for _, tab in sorted(tabs, key=lambda t: t[0])] for model, tabs in models.items()}
 
 
@@ -207,6 +239,37 @@ def run(*command, **environment):
         pass
 
 
+def resume_dir():
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desktop" / "agent-resume"
+
+
+def queue_resumes(record):
+    """Tell desktop-agent-swap which conversation each claude tab of this window resumes.
+
+    One queue per directory, in tab order, since that is what the swap knows when it starts
+    a claude: where. "-" holds the place of a tab whose conversation is not known, or whose
+    worktree has gone, so it comes back in the window's own directory instead -- that one
+    starts as a new tab would, and the ones after it still get theirs.
+    """
+    queues = {}
+    home = record.get("dir") or ""
+    for tab in (record.get("tabs") or {}).get("claude") or []:
+        where = tab.get("dir") or home
+        if tab.get("worktree") and not os.path.isdir(tab["worktree"]):
+            where = home
+        session = tab.get("session") if where == (tab.get("dir") or home) else ""
+        queues.setdefault(where, []).append(session or "-")
+    files = []
+    for where, sessions in queues.items():
+        if all(s == "-" for s in sessions):
+            continue
+        resume_dir().mkdir(parents=True, exist_ok=True)
+        file = resume_dir() / re.sub(r"[^A-Za-z0-9]", "-", where)
+        file.write_text("".join(f"{s}\n" for s in sessions))
+        files.append(file)
+    return files
+
+
 def build_agent(session, record):
     directory = record.get("dir") or ""
     if not os.path.isdir(directory):
@@ -309,9 +372,15 @@ def restore():
                 if record["name"] in have and not (placeholder and record["name"] == "restoring"):
                     continue
                 kind = record.get("kind")
-                ok = (build_agent(name, record) if kind == "agent" else
-                      build_task(record) if kind == "task" else
-                      build_plain(name, record))
+                if kind == "agent":
+                    queued = queue_resumes(record)
+                    ok = build_agent(name, record)
+                    # What a tab did not take is no one's: a tab opened by hand later
+                    # must not resume a conversation from before the reboot.
+                    for file in queued:
+                        file.unlink(missing_ok=True)
+                else:
+                    ok = build_task(record) if kind == "task" else build_plain(name, record)
                 made += 1 if ok else 0
             built += made
             if placeholder:
