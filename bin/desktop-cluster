@@ -5,6 +5,7 @@
 #   ocl                     pick a cluster, then a shell on it
 #   ocl NAME                a shell on NAME, signing in first when it is needed
 #   ocl --here NAME         the same, in this terminal rather than NAME's tmux session
+#   ocl --detached [-k] NAME  make NAME's session and window, and stay where you are
 #   ocl -k NAME             k9s on NAME
 #   ocl -a NAME             Argo CD on NAME (argo9s)
 #   ocl -c NAME             NAME's web console, in the browser
@@ -405,6 +406,7 @@ to_session() {
   fi
   tmux set-option -w -t "$window" @cluster_action "$action" >/dev/null
   tmux select-window -t "$window"
+  ((detached)) && exit 0
   # A popup has a client but is no pane of it: the client is named, as the sidebar names it.
   if [[ -n ${DESKTOP_CLUSTER_CLIENT:-} ]]; then
     tmux switch-client -c "$DESKTOP_CLUSTER_CLIENT" -t "=$session"
@@ -418,8 +420,10 @@ to_session() {
 
 # ------------------------------------------------------------------------------ main
 
-action=shell here=0
+action=shell here=0 detached=0
 [[ ${1:-} == --here ]] && { here=1; shift; }
+# Make the cluster's session and window, and go nowhere: desktop-tmux-restore builds them so.
+[[ ${1:-} == --detached ]] && { detached=1; shift; }
 case "${1:-}" in
 -h | --help | help) usage; exit 0 ;;
 pick) shift; cmd_pick "$@"; exit ;;
@@ -439,8 +443,8 @@ logout)
 -a) action=argo; shift ;;
 -c) action=console; shift ;;
 -t) action=talos; shift ;;
--x) action=exec; shift ;;
--e) action=env; shift ;;
+-x) action="exec"; shift ;;
+-e) action="env"; shift ;;
 -*) die "unknown option $1 (see $ME --help)" ;;
 esac
 

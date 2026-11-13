@@ -45,6 +45,10 @@ sessions of their own, which tmux would start from the global environment instea
 `desktop-agent-tabs` and `desktop-terminal-tabs` copy the cluster over (`cluster_env`).
 The session carries `@cluster NAME`, which is how the sidebar knows it.
 
+After a reboot `desktop-tmux-restore` builds a cluster's session again through
+`desktop-cluster --detached`, so it comes back with its cluster, not as a session that only
+has the name. It remembers which sessions are clusters' by their `@cluster` mark.
+
 `ocl --here NAME` is the old way: a shell in the terminal you are in. Without tmux
 installed, that is what every `ocl` does.
 
