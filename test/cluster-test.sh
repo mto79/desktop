@@ -95,6 +95,21 @@ echo "ssh \$*" >>"$log"
 printf 'context=default\ncluster=default\nserver=https://127.0.0.1:6443\ntoken=good\n'
 STUB
 
+# tmux: a server of its own, never the one this test runs under. A session exists once it
+# has been made; its windows are written down with the mark ocl gives each.
+cat >"$stubs/tmux" <<STUB
+#!/usr/bin/env bash
+echo "tmux \$*" >>"$log"
+case "\$1" in
+has-session) [[ -e "$sandbox/tmux-session" ]]; exit ;;
+new-session) touch "$sandbox/tmux-session"; echo @1 ;;
+new-window) echo @2 ;;
+list-windows) cat "$sandbox/tmux-windows" 2>/dev/null ;;
+set-option) [[ \$2 == -w ]] && echo "\$4 \$6" >>"$sandbox/tmux-windows" ;;
+esac
+exit 0
+STUB
+
 for cmd in k9s argo9s fish xdg-open notify-send; do
   cat >"$stubs/$cmd" <<STUB
 #!/usr/bin/env bash
@@ -123,6 +138,9 @@ called() { grep -qF -- "$1" "$log"; }
 store="$sandbox/state/desktop/clusters"
 
 # --- the list
+check "--help lists every command, the last included" \
+  bash -c "bash '$CLUSTER' --help | tail -1 | grep -q 'ocl edit'"
+check "and --here, which keeps to the terminal you are in" bash -c "bash '$CLUSTER' --help | grep -q -- '--here'"
 check "the names are the file's, comments and all left out" \
   test "$(run names | paste -sd' ')" = "ocp202 ocp203 lab edge kind broken"
 check "list says each one's kind and where it is" \
@@ -134,7 +152,7 @@ check "and one missing how to reach it says what it needs" \
 
 # --- OpenShift
 : >"$log"
-run ocp202 >/dev/null 2>&1
+run --here ocp202 >/dev/null 2>&1
 check "a shell on an OpenShift cluster signs in first, into a kubeconfig of its own" \
   bash -c "grep '^oc login' '$log' | grep -q '@$store/.ocp202.'"
 check "at the server in the file" called "--server https://api.ocp202.example:6443"
@@ -142,7 +160,7 @@ check "the kubeconfig is named after the cluster" grep -qx 'context=ocp202' "$st
 check "and only its owner can read it" test "$(stat -c %a "$store/ocp202.kubeconfig")" = 600
 check "the shell is handed that file and no other" called "fish  KUBECONFIG=$store/ocp202.kubeconfig TALOSCONFIG= CLUSTER=ocp202"
 : >"$log"
-run ocp202 >/dev/null 2>&1
+run --here ocp202 >/dev/null 2>&1
 check "signed in already, it does not sign in again" lacks "oc login" "$log"
 
 # A sign-in that fails leaves the kubeconfig that was there.
@@ -155,7 +173,7 @@ rm "$sandbox/refuse"
 
 # --- RKE2, fetched over ssh
 : >"$log"
-run -k lab >/dev/null 2>&1
+run --here -k lab >/dev/null 2>&1
 check "an RKE2 cluster's kubeconfig is fetched from its server node" called "ssh admin@lab-cp1.example sudo cat /etc/rancher/rke2/rke2.yaml"
 check "with the node's own name in place of 127.0.0.1" grep -qx 'server=https://lab-cp1.example:6443' "$store/lab.kubeconfig"
 check "and the namespace it is to start in" grep -qx 'namespace=apps' "$store/lab.kubeconfig"
@@ -168,7 +186,7 @@ check "a Talos cluster's kubeconfig comes from talosctl, with its talosconfig an
   called "talosctl --talosconfig $sandbox/talosconfig --nodes 192.0.2.11 kubeconfig --force --merge=false $store/.edge."
 check "a command runs against it" called "kubectl get nodes @$store/edge.kubeconfig"
 : >"$log"
-run -t edge >/dev/null 2>&1
+run --here -t edge >/dev/null 2>&1
 check "the Talos dashboard gets the same talosconfig and nodes" \
   called "talosctl --talosconfig $sandbox/talosconfig --nodes 192.0.2.11 dashboard TALOSCONFIG=$sandbox/talosconfig"
 check "the Talos dashboard is refused for a cluster that is not Talos" \
@@ -176,7 +194,7 @@ check "the Talos dashboard is refused for a cluster that is not Talos" \
 
 # --- a kubeconfig of your own
 : >"$log"
-run -a kind >/dev/null 2>&1
+run --here -a kind >/dev/null 2>&1
 check "a plain kubeconfig is copied, not used in place" test -s "$store/kind.kubeconfig"
 check "insecure=true is set in the copy" grep -qx 'insecure=true' "$store/kind.kubeconfig"
 check "the original is left as it was" lacks 'insecure' "$sandbox/lab.yaml"
@@ -202,6 +220,26 @@ check "Kubernetes says the API server's version" \
 check "one that does not answer is unreachable, not signed out" test "$(state kind)" = unreachable
 check "one written down wrong is said to be, and the rest are still asked" \
   test "$(state broken) $(state edge)" = "misconfigured healthy"
+
+# --- a cluster's own tmux session
+: >"$log"
+TMUX="" run lab >/dev/null 2>&1
+check "outside tmux, ocl NAME makes the cluster's session and attaches to it" \
+  bash -c "grep -q 'k8s-lab -n shell' '$log' && grep -q 'tmux attach-session -t =k8s-lab' '$log'"
+check "with the cluster in the session's environment, for every window opened in it" \
+  called "-e KUBECONFIG=$store/lab.kubeconfig -e DESKTOP_CLUSTER=lab -e DESKTOP_CLUSTER_KIND=rke2"
+check "the window signs in and opens the shell where it is, with --here" called "desktop-cluster --here lab"
+check "the session says which cluster it is for, for the sidebar" called "tmux set-option -t =k8s-lab: @cluster lab"
+: >"$log"
+TMUX=/tmp/tmux-1/default,1,0 run -k lab >/dev/null 2>&1
+check "inside tmux, k9s is a window of the session, and this client switches to it" \
+  bash -c "grep -q 'tmux new-window .*-n k9s' '$log' && grep -q 'tmux switch-client -t =k8s-lab' '$log'"
+: >"$log"
+TMUX=/tmp/tmux-1/default,1,0 run -k lab >/dev/null 2>&1
+check "asked again, the k9s window there is gone back to, not opened twice" \
+  bash -c "! grep -q 'new-window' '$log' && grep -q 'tmux select-window -t @2' '$log'"
+check "the Talos dashboard is refused for a cluster that is not Talos, before any session" \
+  bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run -t lab 2>&1 | grep -q 'not talos'"
 
 # --- signing out
 run logout ocp202 >/dev/null 2>&1
@@ -249,5 +287,31 @@ check "talosctl is installed for the Talos clusters" grep -q talosctl-installed 
 echo "# mine" >>"$mconf"
 migrate
 check "run again, a clusters.conf that is there is left alone" grep -qx '# mine' "$mconf"
+
+# --- agent columns and terminal tabs opened in a cluster's session
+# Their tabs are tmux sessions of their own, which tmux starts from the global environment;
+# cluster_env is what carries the cluster over. A tmux that knows two sessions.
+estubs="$sandbox/estubs"
+mkdir -p "$estubs"
+cat >"$estubs/tmux" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == show-environment && $3 == =k8s-lab ]] || exit 1
+case "$4" in
+DESKTOP_CLUSTER) echo DESKTOP_CLUSTER=lab ;;
+KUBECONFIG) echo KUBECONFIG=/s/lab.kubeconfig ;;
+TALOSCONFIG) echo -TALOSCONFIG ;;
+*) exit 1 ;;
+esac
+STUB
+chmod +x "$estubs/tmux"
+for script in desktop-agent-tabs desktop-terminal-tabs; do
+  got=$(PATH="$estubs:$PATH" bash -c "$(sed -n '/^cluster_env() {/,/^}/p' "$ROOT/bin/$script"); cluster_env k8s-lab | paste -sd' '")
+  check "$script carries a cluster session's cluster into the tabs it makes" \
+    test "$got" = "-e KUBECONFIG=/s/lab.kubeconfig -e DESKTOP_CLUSTER=lab"
+  got=$(PATH="$estubs:$PATH" bash -c "$(sed -n '/^cluster_env() {/,/^}/p' "$ROOT/bin/$script"); cluster_env alpha")
+  check "and nothing from a session that is on no cluster" test -z "$got"
+done
+check "an agent column's session is made with it" \
+  grep -q 'new-session -d -s "$session" -c "$dir" -n "$model" -x "$width" -y "$height" "${env\[@\]}"' "$ROOT/bin/desktop-agent-tabs"
 
 finish

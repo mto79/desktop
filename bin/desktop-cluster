@@ -4,6 +4,7 @@
 #
 #   ocl                     pick a cluster, then a shell on it
 #   ocl NAME                a shell on NAME, signing in first when it is needed
+#   ocl --here NAME         the same, in this terminal rather than NAME's tmux session
 #   ocl -k NAME             k9s on NAME
 #   ocl -a NAME             Argo CD on NAME (argo9s)
 #   ocl -c NAME             NAME's web console, in the browser
@@ -41,7 +42,14 @@
 #   talos       talosctl kubeconfig, with talosconfig= and nodes= (or the talosconfig's own).
 #   kubernetes  a kubeconfig file you already have, copied from kubeconfig=.
 #
-# And for any kind: namespace= to start in, console= for -c, argocd= for the namespace
+# Each cluster is a place, as a repository is: a tmux session of its own, k8s-NAME, with a
+# window for the shell and one each for k9s, Argo CD and the Talos dashboard, opened once
+# and gone back to after. ocl NAME goes there -- switching this tmux client, or attaching
+# when there is none -- and the session's environment carries the cluster, so every
+# window opened in it, and every agent started there, is on that cluster and on no other.
+# The tmux sidebar lists it with the repositories. --here keeps to the terminal you are in.
+#
+# And for any kind: prod=true to have it drawn in red wherever it is named, namespace= to start in, console= for -c, argocd= for the namespace
 # Argo CD runs in (openshift-gitops on OpenShift, argocd elsewhere), insecure=true to skip
 # TLS verification, ca= for a CA file to verify it with.
 #
@@ -61,7 +69,8 @@ die() {
   exit 1
 }
 
-usage() { sed -n '3,19s/^# \{0,1\}//p' "$0"; }
+# The title and the commands, as the header has them: up to its second empty comment line.
+usage() { awk 'NR >= 3 { if ($0 == "#" && ++blank == 2) exit; sub(/^# ?/, ""); print }' "$0"; }
 
 # ------------------------------------------------------------------------------ the file
 
@@ -82,13 +91,13 @@ load() {
   NAME=$1
   KIND=$(cut -f2 <<<"$line")
   opt_server="" opt_login="" opt_kubeconfig="" opt_talosconfig="" opt_nodes="" opt_ssh=""
-  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca=""
+  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca="" opt_prod=""
   for kv in $(cut -f3 <<<"$line"); do
     key=${kv%%=*} value=${kv#*=}
     [[ $kv == *=* ]] || die "$NAME: '$kv' is not key=value"
     value=${value/#\~/$HOME}
     case "$key" in
-    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca)
+    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca | prod)
       printf -v "opt_$key" '%s' "$value" ;;
     *) die "$NAME: unknown setting '$key'" ;;
     esac
@@ -312,9 +321,47 @@ cmd_edit() {
   exec "${EDITOR:-nvim}" "$CONF"
 }
 
+# ------------------------------------------------------------------------------ its session
+
+# tmux does not allow "." or ":" in a session name.
+session_name() { printf '%s%s' "k8s-" "$(tr '.:' '__' <<<"$NAME")"; }
+
+# to_session ACTION [ARGS...]: open ACTION in the cluster's session, then go there. A window
+# per action, found again by the mark it carries rather than by its name, which the shell
+# in it is free to change.
+to_session() {
+  local action=$1 session window flag cmd self envs=()
+  shift
+  session=$(session_name)
+  case "$action" in shell) flag=() ;; k9s) flag=(-k) ;; argo) flag=(-a) ;; talos) flag=(-t) ;; esac
+  self=$(readlink -f "$0")
+  cmd=$(printf '%q ' "$self" --here "${flag[@]}" "$NAME" "$@")
+  if ! tmux has-session -t "=$session" 2>/dev/null; then
+    # In the session's environment, so a window opened in it later -- prefix + c, an agent
+    # column -- is on the cluster too.
+    envs=(-e "KUBECONFIG=$FILE" -e "DESKTOP_CLUSTER=$NAME" -e "DESKTOP_CLUSTER_KIND=$KIND")
+    [[ $KIND == talos && -n $opt_talosconfig ]] && envs+=(-e "TALOSCONFIG=$opt_talosconfig")
+    window=$(tmux new-session -d -P -F '#{window_id}' -s "$session" -n "$action" -c "$HOME" "${envs[@]}" "$cmd") ||
+      die "could not make the tmux session $session"
+    tmux set-option -t "=$session:" @cluster "$NAME" >/dev/null
+  else
+    window=$(tmux list-windows -t "=$session:" -F '#{window_id} #{@cluster_action}' | awk -v a="$action" '$2 == a { print $1; exit }')
+    [[ -n $window ]] || window=$(tmux new-window -d -P -F '#{window_id}' -t "=$session:" -n "$action" -c "$HOME" "$cmd")
+  fi
+  tmux set-option -w -t "$window" @cluster_action "$action" >/dev/null
+  tmux select-window -t "$window"
+  if [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "=$session"
+  else
+    exec tmux attach-session -t "=$session"
+  fi
+  exit
+}
+
 # ------------------------------------------------------------------------------ main
 
-action=shell
+action=shell here=0
+[[ ${1:-} == --here ]] && { here=1; shift; }
 case "${1:-}" in
 -h | --help | help) usage; exit 0 ;;
 list) cmd_list; exit ;;
@@ -345,12 +392,19 @@ name=${1:-}
 shift 2>/dev/null || true
 load "$name"
 
+# Somewhere to be rather than something to run: those go to the cluster's tmux session.
+if ((!here)) && [[ $action =~ ^(shell|k9s|argo|talos)$ ]] && command -v tmux >/dev/null 2>&1; then
+  [[ $action == talos && $KIND != talos ]] && die "$NAME is $KIND, not talos"
+  to_session "$action" "$@"
+fi
+
 case "$action" in
 shell)
   ensure
   environment
   title "$NAME · $KIND"
   echo "$NAME ($KIND): KUBECONFIG is its own; leave with exit"
+  [[ $opt_prod == true ]] && printf '\e[1;31m%s is production.\e[0m\n' "$NAME"
   exec "${SHELL:-bash}"
   ;;
 k9s)

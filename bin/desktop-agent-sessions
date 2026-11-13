@@ -180,6 +180,9 @@ def sessions(now=None, targets=True):
             "quiet": duration(quiet),
             # The prompt the turn began with, cut short by desktop-agent-state.
             "asked": record.get("asked") or "",
+            # The agent's process, alive (checked above): its environment says which
+            # cluster it can reach, which the tmux sidebar shows.
+            "pid": pid,
         })
 
     found.sort(key=lambda s: (ORDER[s["state"]], -s["since"]))

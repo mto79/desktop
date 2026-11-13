@@ -12,6 +12,11 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Each cluster has a tmux session of its own: `ocl NAME` goes to `k8s-NAME`, with windows for
+  its shell, k9s, Argo CD and the Talos dashboard, and everything opened there -- agents
+  included -- is on that cluster. The tmux sidebar lists those sessions with the
+  repositories, and each agent says which cluster it can reach, in red for one marked
+  `prod=true`. `ocl --here NAME` keeps to the terminal you are in.
 - `ocl` reaches RKE2, Talos and any Kubernetes cluster as well as OpenShift, from a list in
   `~/.config/desktop/clusters.conf` rather than one written into the script. Each cluster has
   a kubeconfig of its own, so a terminal stays on the cluster it was opened on whatever

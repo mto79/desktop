@@ -38,6 +38,12 @@ more than one window says which: "2:claude 1".
 
 On a session's row an idle agent, or a finished turn you have read, is a quiet ○.
 
+An agent that can reach a cluster says which, after its state: "blocked ⎈ ocp204". It is
+read from the agent's own environment -- KUBECONFIG and DESKTOP_CLUSTER, set by ocl -- so it
+is the cluster a kubectl the agent runs would land on, not a guess. A cluster marked
+prod=true in clusters.conf is drawn in red. A cluster's own session (k8s-NAME, made by ocl)
+has the cluster as its second line where a repository has its branch.
+
     click, Enter, l   go to the session, or straight to the agent
     j k, ↑ ↓, wheel   move; the agents shown follow the session under the cursor
     p                 peek: the agent's screen in a popup, where it can be answered
@@ -195,6 +201,19 @@ def ink(name, bar=None):
     return curses.color_pair(PAIRS[(fg, bg)]) | attr
 
 
+# What an agent can reach is in its environment: ocl sets DESKTOP_CLUSTER, and KUBECONFIG
+# to a file in the clusters' store, named after the cluster. /proc is a variable so a test
+# can hand it a directory of its own.
+PROC = "/proc"
+CLUSTER_STORE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                             "desktop", "clusters")
+CLUSTERS_CONF = os.environ.get("DESKTOP_CLUSTERS") or os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "desktop", "clusters.conf")
+# A cluster's own tmux session, as desktop-cluster names it.
+CLUSTER_SESSION = "k8s-"
+CLUSTER_MARK = "⎈"  # the helm; one cell wide, where a ⛵ takes two and shifts the row
+
+
 def tmux(*args):
     try:
         done = subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=5)
@@ -331,6 +350,97 @@ def owners():
     return found
 
 
+ENVIRON = {}
+
+
+def started_at(pid):
+    try:
+        with open(f"{PROC}/{pid}/stat") as handle:
+            return handle.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return None
+
+
+def cluster_in(pid):
+    """The cluster a process can reach, from its environment; "" for none.
+
+    A process's environment does not change once it has started, so it is read once per
+    process -- kept by its start time as well, since a pid is given out again.
+    """
+    pid = str(pid or "")
+    if not pid.isdigit():
+        return ""
+    start = started_at(pid)
+    kept = ENVIRON.get(pid)
+    if kept and kept[0] == start:
+        return kept[1]
+    found = ""
+    try:
+        with open(f"{PROC}/{pid}/environ", "rb") as handle:
+            pairs = dict(item.split(b"=", 1) for item in handle.read().split(b"\0") if b"=" in item)
+        found = pairs.get(b"DESKTOP_CLUSTER", b"").decode(errors="replace")
+        config = pairs.get(b"KUBECONFIG", b"").decode(errors="replace")
+        # Only a kubeconfig of ocl's says which cluster: ~/.kube/config could be any of them.
+        if not found and os.path.dirname(config) == CLUSTER_STORE and config.endswith(".kubeconfig"):
+            found = os.path.basename(config)[:-len(".kubeconfig")]
+    except (OSError, ValueError):
+        pass
+    ENVIRON[pid] = (start, found)
+    return found
+
+
+def children(pid):
+    try:
+        with open(f"{PROC}/{pid}/task/{pid}/children") as handle:
+            return handle.read().split()
+    except OSError:
+        return []
+
+
+def cluster_under(pid, depth=4):
+    """The cluster of a pane: its own process's, or failing that the nearest one under it.
+
+    An agent's record names the agent's process, but opencode and codex send none, and an
+    agent started from an ocl shell in a plain pane is a child of that shell, not the pane.
+    """
+    found = cluster_in(pid)
+    if found or depth == 0:
+        return found
+    for child in children(pid):
+        found = cluster_under(child, depth - 1)
+        if found:
+            return found
+    return ""
+
+
+PRODUCTION = {"mtime": None, "names": set()}
+
+
+def production():
+    """The clusters marked prod=true in clusters.conf, read again only when it changes."""
+    try:
+        mtime = os.stat(CLUSTERS_CONF).st_mtime
+    except OSError:
+        return set()
+    if PRODUCTION["mtime"] != mtime:
+        names = set()
+        try:
+            with open(CLUSTERS_CONF) as handle:
+                for line in handle:
+                    words = line.split("#", 1)[0].split()
+                    if len(words) >= 2 and "prod=true" in words[2:]:
+                        names.add(words[0])
+        except OSError:
+            pass
+        PRODUCTION.update(mtime=mtime, names=names)
+    return PRODUCTION["names"]
+
+
+def cluster_part(name):
+    """A cluster as it is drawn: the helm and its name, red for production."""
+    return (f"{CLUSTER_MARK} {name}", "red" if name in production() else "blue")
+
+
 # Which agent a session's row speaks for, when it has several: the one most in need of you.
 # A finished turn counts only until it has been read, and an agent sitting at its prompt
 # not at all -- a row marked for every idle agent would be marked always.
@@ -359,11 +469,11 @@ def collect():
     listing = tmux("list-windows", "-a", "-F",
                    "#{session_name}\t#{window_index}\t#{@agent_state}\t#{@ai_group}"
                    "\t#{@term_group}\t#{session_path}\t#{@ai_model}\t#{b:@worktree}"
-                   "\t#{window_name}\t#{window_id}")
+                   "\t#{window_name}\t#{window_id}\t#{pane_pid}\t#{@cluster}")
     sessions = {}
     for line in listing.splitlines():
-        parts = (line.split("\t") + [""] * 10)[:10]
-        name, index, mark, group, tabs, path, model, task, window, window_id = parts
+        parts = (line.split("\t") + [""] * 12)[:12]
+        name, index, mark, group, tabs, path, model, task, window, window_id, pane_pid, cluster = parts
         if group or tabs:
             owner, where = belong.get(group or tabs) or (None, "")
             if not owner:
@@ -371,6 +481,9 @@ def collect():
         else:
             owner, where = name, index
             sessions.setdefault(owner, {"path": path, "agents": []})["path"] = path
+            # ocl's own sessions are marked with the cluster they are for.
+            if cluster:
+                sessions[owner]["cluster"] = cluster
         session = sessions.setdefault(owner, {"path": "", "agents": []})
         record = records.get(f"{name}:{index}", {})
         state = state_of(record, mark)
@@ -397,6 +510,8 @@ def collect():
             "asked": record.get("asked", ""),
             "where": number(where), "tab": number(index), "model": kind,
             "name": called_here,
+            # The agent's own process where its record names one, else the pane's.
+            "cluster": cluster_in(record.get("pid")) or cluster_under(pane_pid),
         })
     # In the order they sit on screen: by the window holding them, then by tab. A session
     # with agents in more than one window says which, as tmux numbers them: "2:claude 1".
@@ -456,6 +571,9 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
         # and detailed, its review. A session whose directory is no checkout keeps to one.
         own = branch(found["path"], module) if found["path"] else {}
         parts = detail_of(own) if own.get("branch") else []
+        # A cluster's session has no branch worth the line: the cluster is what it is for.
+        if found.get("cluster"):
+            parts = [cluster_part(found["cluster"])]
         if not detailed:
             parts = parts[:next((i for i, part in enumerate(parts) if part[1] == "blue"), len(parts))]
         if parts:
@@ -496,6 +614,10 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
         })
         state = agent["state"]
         parts = [(WORDS.get(state, "idle"), COLOURS.get(state, "dim"))]
+        # Before the task: which cluster a kubectl it runs would reach matters more than
+        # which branch it is on, and the end of a line is what gives way.
+        if agent.get("cluster"):
+            parts.append(cluster_part(agent["cluster"]))
         if agent.get("task"):
             parts.append((f"· {agent['task']}", "dim"))
         out.append({"kind": "sub", "session": selected, "parts": parts,

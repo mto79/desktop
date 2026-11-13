@@ -117,6 +117,11 @@ own, said in a word on its second line:
 
 A session whose dot is `○` or `·` is one you can leave alone.
 
+An agent that can reach a Kubernetes cluster says which on its second line, after its
+state: `blocked ⎈ ocp204`, red for one marked `prod=true`. A cluster's own session
+(`k8s-NAME`, made by `ocl`) has the cluster where a repository has its branch. Both are in
+[clusters.md](clusters.md).
+
 | Key in the sidebar | Does |
 |---|---|
 | click, `Enter`, `l` | Go to the session; on an agent, straight to that agent |

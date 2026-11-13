@@ -5,6 +5,7 @@ OpenShift, RKE2, Talos and any other Kubernetes cluster, reached the same way:
 
     ocl                     pick a cluster, then a shell on it
     ocl NAME                a shell on NAME, signing in first when it is needed
+    ocl --here NAME         the same, in this terminal rather than NAME's tmux session
     ocl -k NAME             k9s            ocl -a NAME     Argo CD (argo9s)
     ocl -c NAME             web console    ocl -t NAME     Talos dashboard
     ocl -x NAME CMD...      one command    ocl -e NAME     exports for this shell
@@ -13,6 +14,37 @@ OpenShift, RKE2, Talos and any other Kubernetes cluster, reached the same way:
 
 The same is in the menu (`Go → Clusters`), on the dashboard's Infrastructure tab, and in
 voice commands: "k9s on lab", "argo on ocp302", "talos dashboard on edge".
+
+## A tmux session per cluster
+
+A cluster is a place, as a repository is. `ocl NAME` goes to its tmux session, `k8s-NAME`,
+making it the first time: a `shell` window, and `k9s`, `argo` and `talos` windows as
+`-k`, `-a` and `-t` ask for them -- each opened once and gone back to after, found by a
+`@cluster_action` mark rather than by its name, which the shell in it is free to change.
+Inside tmux this client switches there; outside, the terminal attaches to it, so the menu
+and voice commands land in the same session.
+
+The cluster is in the session's environment (`KUBECONFIG`, `DESKTOP_CLUSTER`,
+`DESKTOP_CLUSTER_KIND`, and `TALOSCONFIG` for Talos), so every window opened in it later
+is on that cluster too. An agent column or a terminal's tabs opened there are tmux
+sessions of their own, which tmux would start from the global environment instead;
+`desktop-agent-tabs` and `desktop-terminal-tabs` copy the cluster over (`cluster_env`).
+The session carries `@cluster NAME`, which is how the sidebar knows it.
+
+`ocl --here NAME` is the old way: a shell in the terminal you are in. Without tmux
+installed, that is what every `ocl` does.
+
+## In the tmux sidebar
+
+A cluster's session is listed with the repositories, with the cluster as its second line
+where a repository has its branch: `⎈ ocp204`. And an agent that can reach a cluster says
+which, after its state: `blocked ⎈ ocp204 · fix-runner`. That is read from the agent's own
+process -- `DESKTOP_CLUSTER`, or a `KUBECONFIG` in ocl's store -- so it is the cluster a
+`kubectl` it runs would reach, not a guess; opencode and codex, which report no process,
+are found under their pane. A process's environment cannot change, so each is read once.
+
+`prod=true` in clusters.conf draws the cluster in red, in the sidebar and in the shell's
+first line. An agent with production in reach should be seen to have it.
 
 ## One kubeconfig per cluster
 
@@ -46,7 +78,7 @@ repository: it names hosts, and the repository is public.
 | `talos` | `talosctl kubeconfig` with `talosconfig=` and `nodes=`. `ocl -t` opens `talosctl dashboard` with the same, and `TALOSCONFIG` is set in the shell. | `talosconfig=` |
 | `kubernetes` | A kubeconfig you already have, copied from `kubeconfig=`. | `kubeconfig=` |
 
-Any kind also takes `namespace=` (to start in), `console=` (for `-c`; OpenShift finds its
+Any kind also takes `prod=true` (drawn in red; see above), `namespace=` (to start in), `console=` (for `-c`; OpenShift finds its
 own), `argocd=` (Argo CD's namespace: `openshift-gitops` on OpenShift, `argocd` elsewhere),
 `insecure=true` and `ca=`.
 
@@ -62,6 +94,8 @@ sign in again for a network that is down.
 | The command | `bin/desktop-cluster`; `ocl` is a fish function calling it, `config/fish/functions/ocl.fish` |
 | Dashboard | `desktop-dash infra` → `desktop-cluster status --json`; drawn by `shell/Dashboard/InfraPage.qml` |
 | Menu | `show_clusters_menu` in `bin/desktop-menu` |
+| Sessions | `to_session` in `bin/desktop-cluster`; `cluster_env` in `desktop-agent-tabs` and `desktop-terminal-tabs` |
+| Sidebar | `cluster_in`, `cluster_under`, `production` in `bin/desktop-tmux-sidebar` |
 | Voice | `cluster_said` in `bin/desktop-voice`: any name in clusters.conf, as a word of its own |
 | Completions | `config/fish/completions/desktop-cluster.fish`, `ocl.fish` |
 | Clients | `oc` and `kubectl` (pinned, `desktop-update-oc`, `desktop-update-kubectl`); `talosctl` and kubie (`desktop-update-releases`); k9s; argo9s |
@@ -73,5 +107,6 @@ The old script is left where it was; the fish function is found before it.
 
 ## Checking it
 
-    ./test/cluster-test.sh      every kind signed in to, with stubs; status; the migration
+    ./test/cluster-test.sh      every kind signed in to, with stubs; sessions; status; the migration
+    ./test/tmux-sidebar-test.sh a cluster's session and each agent's cluster, from a /proc of its own
     ocl status                  the real clusters
