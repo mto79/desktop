@@ -35,8 +35,14 @@ ok("every Ui component is in qmldir") if not missing else no(
 registry = (root / "shell/Bar/WidgetRegistry.qml").read_text()
 known = set(re.findall(r'"([a-z]+)":\s*\w+', registry))
 layout = json.loads((root / "config/desktop/shell.json").read_text())["bar"]["layout"]
-unknown = sorted({w["id"] for sec in layout.values() for w in sec
-                  if not w.get("type") and w.get("id") not in known})
+# A group's widgets are in the layout too, one level down.
+def flat(entries):
+    for w in entries:
+        yield w
+        yield from flat(w.get("widgets") or [])
+widgets = [w for sec in layout.values() for w in flat(sec)]
+unknown = sorted({w.get("type") or w["id"] for w in widgets
+                  if (w.get("type") or w.get("id")) not in known})
 ok("every widget id in shell.json has a component") if not unknown else no(
     "every widget id in shell.json has a component", " ".join(unknown))
 

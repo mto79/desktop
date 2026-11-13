@@ -11,6 +11,14 @@
     "background": "#11111b",
     "text": "#c0caf5",
     "muted": "#565f89",
-    "activeWorkspace": "#7dcfff"
+    "activeWorkspace": "#7dcfff",
+    "pill": "#1a1b2a",
+    "raised": "#24263a",
+    "outline": "#2a2e45",
+    "opacity": 0.85
+  },
+  "popup": {
+    "hover": "#24263a",
+    "border": "#2a2e45"
   }
 }

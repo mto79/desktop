@@ -49,8 +49,13 @@ QtObject {
 
   readonly property var generic: ({
       "command": commandWidget,
-      "qml": qmlModule
+      "qml": qmlModule,
+      "group": groupWidget
     })
+
+  property Component groupWidget: Component {
+    Group {}
+  }
 
   property Component commandWidget: Component {
     CommandWidget {}

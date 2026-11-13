@@ -21,6 +21,14 @@ Which widgets the bar shows, and in what order, is `~/.config/desktop/shell.json
 deployed from `config/desktop/shell.json`. So are the positions and sizes of the launcher,
 notifications and OSD.
 
+The right of the bar is five pills: connection, sound, agents, alerts and system. A pill is a
+layout entry of `"type": "group"` with its widgets under `"widgets"`. With a `"show"` list it
+shows, at rest, its widgets from the first one listed there to the end, and from any
+widget earlier than that which has something to say -- `notable`: memory past 75%, the
+disk past 90%, the VPN up. Hovered, or while a panel opened from one of its widgets is up,
+it opens leftwards over its neighbours, so nothing on the bar moves under the pointer.
+Without `"show"` a group is only a pill round its widgets. See `shell/Bar/widgets/Group.qml`.
+
 When a section has no room left beside the centred clock -- the laptop screen on its own --
 widgets give up their text, one at a time until it fits (`shell/Bar/fit.js`). A widget with a
 short form is shortened first: the CPU drops its graph and keeps its percentage, set by

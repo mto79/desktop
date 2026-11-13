@@ -96,99 +96,141 @@
           }
         },
         {
-          "id": "spacer"
+          "id": "spacer",
+          "width": 6
         },
         {
-          "id": "bluetooth"
-        },
-        {
-          "id": "vpn"
-        },
-        {
-          "id": "network"
-        },
-        {
-          "id": "spacer"
-        },
-        {
-          "id": "audio"
-        },
-        {
-          "id": "microphone"
-        },
-        {
-          "id": "spacer"
-        },
-        {
-          "id": "ai",
-          "type": "command",
-          "exec": "desktop-status-ai",
-          "interval": 15,
-          "icon": "󱁉",
-          "colors": {
-            "critical": "urgent",
-            "warning": "attention",
-            "busy": "accent",
-            "waiting": "urgent",
-            "done": "good",
-            "active": "muted"
-          },
-          "pulse": [
-            "waiting",
-            "done"
+          "id": "connection",
+          "type": "group",
+          "show": [
+            "network"
           ],
-          "panel": "ai",
-          "onRightClick": "desktop-menu agents",
-          "orb": true
+          "widgets": [
+            {
+              "id": "bluetooth"
+            },
+            {
+              "id": "vpn"
+            },
+            {
+              "id": "network"
+            }
+          ]
         },
         {
-          "id": "camera",
-          "type": "command",
-          "exec": "desktop-status-camera",
-          "interval": 3,
-          "icon": "",
-          "colors": {
-            "on": "urgent"
-          },
-          "onClick": "desktop-menu camera"
+          "id": "spacer",
+          "width": 6
         },
         {
-          "id": "spacer"
+          "id": "sound",
+          "type": "group",
+          "widgets": [
+            {
+              "id": "audio"
+            },
+            {
+              "id": "microphone"
+            }
+          ]
         },
         {
-          "id": "security"
+          "id": "spacer",
+          "width": 6
         },
         {
-          "id": "backup",
-          "type": "command",
-          "exec": "desktop-backup status --bar",
-          "interval": 300,
-          "icon": "󰅧",
-          "hideWhenEmpty": false,
-          "colors": {
-            "stale": "urgent",
-            "never": "urgent",
-            "running": "accent",
-            "unconfigured": "attention",
-            "unreachable": "muted"
-          },
-          "panel": "backup"
+          "id": "agents",
+          "type": "group",
+          "widgets": [
+            {
+              "id": "ai",
+              "type": "command",
+              "exec": "desktop-status-ai",
+              "interval": 15,
+              "icon": "󱁉",
+              "colors": {
+                "critical": "urgent",
+                "warning": "attention",
+                "busy": "accent",
+                "waiting": "urgent",
+                "done": "good",
+                "active": "muted"
+              },
+              "pulse": [
+                "waiting",
+                "done"
+              ],
+              "panel": "ai",
+              "onRightClick": "desktop-menu agents",
+              "orb": true
+            },
+            {
+              "id": "camera",
+              "type": "command",
+              "exec": "desktop-status-camera",
+              "interval": 3,
+              "icon": "",
+              "colors": {
+                "on": "urgent"
+              },
+              "onClick": "desktop-menu camera"
+            }
+          ]
         },
         {
-          "id": "spacer"
+          "id": "spacer",
+          "width": 6
         },
         {
-          "id": "disk",
-          "path": "/"
+          "id": "alerts",
+          "type": "group",
+          "widgets": [
+            {
+              "id": "security"
+            },
+            {
+              "id": "backup",
+              "type": "command",
+              "exec": "desktop-backup status --bar",
+              "interval": 300,
+              "icon": "󰅧",
+              "hideWhenEmpty": false,
+              "colors": {
+                "stale": "urgent",
+                "never": "urgent",
+                "running": "accent",
+                "unconfigured": "attention",
+                "unreachable": "muted"
+              },
+              "panel": "backup"
+            }
+          ]
         },
         {
-          "id": "memory"
+          "id": "spacer",
+          "width": 6
         },
         {
-          "id": "cpu"
-        },
-        {
-          "id": "battery"
+          "id": "system",
+          "type": "group",
+          "show": [
+            "cpu",
+            "battery"
+          ],
+          "widgets": [
+            {
+              "id": "disk",
+              "path": "/"
+            },
+            {
+              "id": "memory"
+            },
+            {
+              "id": "cpu"
+            },
+            {
+              "id": "battery"
+            }
+          ]
         }
       ]
     }

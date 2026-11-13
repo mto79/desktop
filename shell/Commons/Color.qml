@@ -50,6 +50,18 @@ QtObject {
   property color barWorkspaceBackground: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.08)
   property color barHover: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.1)
 
+  // The bar's surfaces, from the bar up: a pill sitting on it (a group, the clock, a
+  // workspace), something raised above that (a hover, a group opened), and the line
+  // round a pill. A theme names them, because "the text colour at 8%" is a different
+  // colour on every background -- muddy on Nord's lighter bar, nearly invisible on Tokyo
+  // Night's. Without them they are mixed from the text colour, as they always were.
+  property color barPill: barWorkspaceBackground
+  property color barRaised: barHover
+  property color barOutline: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.12)
+  // How much of the bar's background is drawn: below 1 the wallpaper shows through,
+  // blurred by Hyprland (default/hypr/apps/desktop-shell.lua).
+  property real barOpacity: 1
+
   // Popup surfaces. Same contract as the bar roles: each defaults to a foundational
   // colour, so a theme that ships no `popup` subtree still renders a legible panel.
   property color popupBackground: background
@@ -125,8 +137,12 @@ QtObject {
     barGood = pick(bar, "good", good);
     barAttention = pick(bar, "attention", caution);
     barActiveWorkspace = pick(bar, "activeWorkspace", barAccent);
-    barHover = Qt.rgba(barText.r, barText.g, barText.b, 0.1);
-    barWorkspaceBackground = pick(bar, "workspaceBackground", Qt.rgba(barText.r, barText.g, barText.b, 0.08));
+    barPill = pick(bar, "pill", Qt.rgba(barText.r, barText.g, barText.b, 0.08));
+    barRaised = pick(bar, "raised", Qt.rgba(barText.r, barText.g, barText.b, 0.1));
+    barOutline = pick(bar, "outline", Qt.rgba(barText.r, barText.g, barText.b, 0.12));
+    barHover = pick(bar, "hover", barRaised);
+    barWorkspaceBackground = pick(bar, "workspaceBackground", barPill);
+    barOpacity = (typeof bar.opacity === "number" && bar.opacity > 0 && bar.opacity <= 1) ? bar.opacity : 1;
 
     var popup = parsed.popup || {};
     popupBackground = pick(popup, "background", background);
@@ -135,7 +151,7 @@ QtObject {
     popupAccent = pick(popup, "accent", accent);
     popupUrgent = pick(popup, "urgent", urgent);
     popupBorder = pick(popup, "border", Qt.rgba(popupText.r, popupText.g, popupText.b, 0.18));
-    popupHover = Qt.rgba(popupText.r, popupText.g, popupText.b, 0.1);
+    popupHover = pick(popup, "hover", Qt.rgba(popupText.r, popupText.g, popupText.b, 0.1));
     popupSelected = Qt.rgba(popupAccent.r, popupAccent.g, popupAccent.b, 0.18);
 
     var tooltip = parsed.tooltip || {};

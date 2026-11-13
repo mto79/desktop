@@ -274,7 +274,9 @@ Item {
     Rectangle {
       anchors.fill: parent
       radius: Style.radius
-      color: root.transparent ? "transparent" : Color.barBackground
+      // The theme's opacity lets the wallpaper through, blurred: Hyprland blurs the
+      // layer behind the bar (default/hypr/apps/desktop-shell.lua).
+      color: root.transparent ? "transparent" : Qt.rgba(Color.barBackground.r, Color.barBackground.g, Color.barBackground.b, Color.barOpacity)
     }
 
     // The centre section is placed first and by nothing but the screen: its anchor -- the
@@ -424,6 +426,9 @@ Item {
           item.widgetConfig = modelData;
           item.popups = popupHost;
           item.tooltips = tooltipHost;
+          // A group builds its own widgets, from the same registry.
+          if (item.registry !== undefined)
+            item.registry = root.widgetRegistry;
         }
 
         Component.onCompleted: {

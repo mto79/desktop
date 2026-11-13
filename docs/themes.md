@@ -19,6 +19,25 @@ ship: `catppuccin`, `nord`, `tokyo-night`.
 | `backgrounds/` | Wallpapers |
 | `light.mode` | Present only in a light theme |
 
+### The shell's colours
+
+`shell.json` names nine colours at the top -- `background`, `foreground`, `muted`, `accent`,
+`urgent`, `good`, `caution`, `warning` -- and can override any of them for the bar, panels
+and tooltips under `bar`, `popup` and `tooltip`. The bar also takes its surfaces, from the
+bar up:
+
+| Key under `bar` | Is |
+|---|---|
+| `pill` | A pill on the bar: a group, the clock, a workspace |
+| `raised` | Above a pill: a hover, a group opened |
+| `outline` | The line round a pill |
+| `opacity` | How much of the bar's background is drawn, 0 to 1; below 1 the wallpaper shows through, blurred |
+
+Each falls back to a mix of the text colour, which is what every theme had before, so a
+theme without them still works. The mix is a different colour on every background, though
+-- muddy on Nord's lighter bar -- which is why the three themes here name their own.
+`popup` takes `hover` and `border` the same way.
+
 ## How the active theme is found
 
 `~/.config/desktop/current/theme` is a symlink to the active theme, and

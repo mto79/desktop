@@ -83,6 +83,13 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- The right of the bar is five pills -- connection, sound, agents, alerts, system -- instead of
+  nineteen loose icons. The connection and system pills show only the network, the CPU and
+  the battery at rest, plus whatever has something to say (the VPN up, memory nearly full),
+  and open over their neighbours on hover.
+- Themes name the bar's surfaces -- a pill, a raised hover, an outline -- rather than mixing
+  them from the text colour, which was muddy on Nord. The bar is slightly see-through, with
+  the wallpaper blurred behind it.
 - An idle desktop with twenty-odd repository sessions open does a third of the work it did:
   half as many processes started a second, the tmux server at half its CPU, lazygit at a
   quarter. lazygit fetches every ten minutes and refreshes when looked at; a sidebar off
