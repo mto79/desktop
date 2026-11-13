@@ -10,7 +10,8 @@
 # helm, lazygit and kubie are not in Fedora (or not at a version worth having), and each
 # had an install script that fetched "latest" once and nothing ever fetched again: a year
 # on, all three were several releases behind, and kubie's was installed without anything
-# checked at all. The aws cli is the same, through its own installer.
+# checked at all. The aws cli is the same, through its own installer. talosctl, for the
+# Talos clusters desktop-cluster reaches, came later and is installed the same way.
 #
 # These follow upstream's newest release, not a pinned one -- unlike oc and kubectl, none of
 # them has to match a server. Every download is checked against a checksum published apart
@@ -24,7 +25,7 @@ set -uo pipefail
 
 DESKTOP_PATH=${DESKTOP_PATH:-$HOME/.local/share/desktop}
 BIN=${DESKTOP_RELEASES_BIN:-/usr/local/bin}
-TOOLS=(helm lazygit kubie aws)
+TOOLS=(helm lazygit kubie talosctl aws)
 
 case "$(uname -m)" in
 x86_64) arch=amd64 longarch=x86_64 ;;
@@ -71,6 +72,17 @@ latest_kubie() {
   json=$(github kubie-org/kubie) && [[ -n $json ]] || return 1
   want=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
   line=$(asset "$json" "^kubie-linux-${arch}$")
+  url=${line%%$'\t'*} sum=${line#*$'\t'} member=""
+}
+
+# talosctl manages Talos releases older than its own (upstream's promise), so it follows the
+# newest rather than one cluster's version, as oc and kubectl must.
+have_talosctl() { talosctl version --client 2>/dev/null | sed -n 's/^[[:space:]]*Tag:[[:space:]]*v//p' | head -1; }
+latest_talosctl() {
+  local json line
+  json=$(github siderolabs/talos) && [[ -n $json ]] || return 1
+  want=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
+  line=$(asset "$json" "^talosctl-linux-${arch}$")
   url=${line%%$'\t'*} sum=${line#*$'\t'} member=""
 }
 

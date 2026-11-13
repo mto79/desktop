@@ -12,6 +12,14 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `ocl` reaches RKE2, Talos and any Kubernetes cluster as well as OpenShift, from a list in
+  `~/.config/desktop/clusters.conf` rather than one written into the script. Each cluster has
+  a kubeconfig of its own, so a terminal stays on the cluster it was opened on whatever
+  another one switches to. RKE2's kubeconfig is fetched over ssh and Talos's from
+  talosctl; `ocl -t` opens the Talos dashboard, `-c` the web console, `ocl status` asks every
+  cluster at once. The clusters are also in the menu (Go → Clusters), on the dashboard with
+  what runs each, and in voice commands by any name in the list. The old list and sign-ins
+  are carried over. talosctl is installed and kept current.
 - Every Claude Code session starts with Remote Control on, so an agent running in tmux can
   be followed and answered from the Claude app on a phone or in a browser. Turning it off in
   `/config` sticks.

@@ -96,6 +96,8 @@ stays_home() { # the sentence
   local said projects
   said=$(normalise "$1")
   [[ $said =~ ocp[0-9]{3} ]] && return 0
+  # Any cluster in clusters.conf: "lab" and "edge" are names too, and say where you work.
+  cluster_said >/dev/null && return 0
   projects=$(desktop-agent-sessions --json 2>/dev/null | jq -r '[.sessions[]?.project // empty] | unique | .[]' 2>/dev/null | tr '[:upper:]-_' '[:lower:]  ')
   local project
   while IFS= read -r project; do
@@ -334,6 +336,17 @@ tell_agent() { # project words, then what to tell it
 # each is a quoted string handed to this. What matched is in BASH_REMATCH afterwards.
 is() { [[ $said =~ $1 ]]; }
 
+# The cluster named in what was said: any in clusters.conf, as a word of its own -- "lab"
+# in "collaborate" is not the lab cluster. An OpenShift name like ocp204 arrives whole,
+# put back together by normalise.
+cluster_said() {
+  local name
+  while IFS= read -r name; do
+    [[ -n $name && " $said " == *" ${name,,} "* ]] && { echo "$name"; return 0; }
+  done < <(desktop-cluster names 2>/dev/null)
+  return 1
+}
+
 # What was done last, so that "again" has something to mean. Only things that can be done
 # twice without thinking: not a message to an agent, and nothing that was refused.
 remember() { mkdir -p "$RUN_DIR" 2>/dev/null && printf '%s\n' "$1" >"$RUN_DIR/last"; }
@@ -404,7 +417,7 @@ understand() { # the sentence -> a sentence the list knows, or nothing
           + "brief: say what is waiting or needs attention\ntime: say the time\n"
           + "louder / quieter / mute: the sound volume\nhush: stop talking now\nvoice_off / voice_on: turn the spoken voice off or on\n"
           + "screenshot: take a screenshot\nfocus: switch to an open application window; arg is its name, e.g. firefox\n"
-          + "shell / k9s / argo: open a shell, k9s, or Argo CD on an OpenShift cluster; arg is the cluster like ocp204\n"
+          + "shell / k9s / argo: open a shell, k9s, or Argo CD on a cluster; arg is the cluster name, like ocp204 or lab\n"
           + "waiting_agent: go to the coding agent that is waiting\n"
           + "start_task: start a new coding task; arg is its name\nfinish_task: finish the current coding task\n"
           + "news: show news; arg is tech or world\nheadlines: read headlines aloud; arg is a site or tech or world, or empty\n"
@@ -478,7 +491,8 @@ understand() { # the sentence -> a sentence the list knows, or nothing
   voice_on) echo "voice on" ;;
   screenshot) echo "screenshot" ;;
   focus) [[ -n $arg ]] && echo "go to $arg" ;;
-  shell | k9s | argo) [[ ${arg// /} =~ ^ocp[0-9]{3}$ ]] && echo "$action on ${arg// /}" ;;
+  # Only a cluster that is in the list: a model may make a name up.
+  shell | k9s | argo) desktop-cluster names 2>/dev/null | grep -qxF -- "${arg// /}" && echo "$action on ${arg// /}" ;;
   waiting_agent) echo "go to the waiting agent" ;;
   start_task) [[ -n $arg ]] && echo "start a task called $arg" ;;
   finish_task) echo "finish the task" ;;
@@ -712,15 +726,18 @@ interpret() { # the sentence
   elif is '(screenshot|screen shot)$'; then
     did "Screenshot"
     setsid -f desktop-cmd-screenshot >/dev/null 2>&1
-  elif is '(ocp[0-9]{3})'; then
-    cluster=${BASH_REMATCH[1]}
+  elif cluster=$(cluster_said) && [[ -n $cluster ]]; then
     # "K9s" is heard as "nines", "canines", "k nines"; anything with nines in it will do.
     if is '(k9s|nines|k 9)'; then
-      terminal ocl -k "$cluster" && did "k9s on $cluster"
+      terminal desktop-cluster -k "$cluster" && did "k9s on $cluster"
     elif is 'argo'; then
-      terminal ocl -a "$cluster" && did "Argo CD on $cluster"
+      terminal desktop-cluster -a "$cluster" && did "Argo CD on $cluster"
+    elif is '(talos )?dashboard'; then
+      terminal desktop-cluster -t "$cluster" && did "Talos dashboard on $cluster"
+    elif is 'console'; then
+      desktop-cluster -c "$cluster" && did "Console of $cluster"
     else
-      terminal ocl "$cluster" && did "Shell on $cluster"
+      terminal desktop-cluster "$cluster" && did "Shell on $cluster"
     fi
   elif is '^(open|focus|go to|switch to|show)( the)? (.+)$'; then
     local name=${BASH_REMATCH[3]} address

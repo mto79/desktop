@@ -131,41 +131,19 @@ cmd_watch() {
 
 # ---------------------------------------------------------------------------------- infra
 
-# The clusters ocl knows, each asked briefly and all at once: six clusters asked one after
-# the other, with a timeout each, is half a minute of nothing on a page being looked at.
-cluster() { # name
-  local name=$1 version nodes
-  if ! oc --context "$name" --request-timeout=4s whoami >/dev/null 2>&1; then
-    jq -cn --arg name "$name" '{name: $name, state: "signed-out"}'
-    return
-  fi
-  version=$(oc --context "$name" --request-timeout=6s get clusterversion version -o json 2>/dev/null)
-  nodes=$(oc --context "$name" --request-timeout=6s get nodes -o json 2>/dev/null)
-  jq -cn --arg name "$name" --argjson version "${version:-null}" --argjson nodes "${nodes:-null}" '
-    def ready: [.status.conditions[]? | select(.type == "Ready" and .status == "True")] | length > 0;
-    {name: $name,
-     version: ($version.status.desired.version // ""),
-     updating: ([$version.status.conditions[]? | select(.type == "Progressing" and .status == "True")] | length > 0),
-     nodes: ($nodes.items // [] | length),
-     ready: ([$nodes.items[]? | select(ready)] | length)}
-    | .state = (if .nodes == 0 then "unknown" elif .ready < .nodes then "degraded" elif .updating then "updating" else "healthy" end)'
-}
-
+# The clusters in clusters.conf, whatever runs them: desktop-cluster asks them all at once,
+# each with its own kubeconfig, and is the one place that knows how to ask an OpenShift
+# cluster its version and an RKE2 or Talos one its API server's.
 cmd_infra() {
-  local names name work
+  local answer
   cached infra 120 && return
-  command -v oc >/dev/null 2>&1 || { sample infra; return; }
-  # The names are ocl's: it is the one place the list of clusters is written down.
-  names=$(sed -n 's/^OCL_NAMES=(\(.*\))$/\1/p' "$(readlink -f "$(command -v ocl 2>/dev/null)")" 2>/dev/null)
-  [[ -n $names ]] || { sample infra; return; }
-  work=$(mktemp -d)
-  for name in $names; do cluster "$name" >"$work/$name.json" & done
-  wait
-  cat "$work"/*.json | jq -cs --argjson now "$(date +%s)" '
+  command -v desktop-cluster >/dev/null 2>&1 || { sample infra; return; }
+  [[ -n $(desktop-cluster names 2>/dev/null) ]] || { sample infra; return; }
+  answer=$(desktop-cluster status --json 2>/dev/null) || { sample infra; return; }
+  jq -c --argjson now "$(date +%s)" '
     {connected: true, checked: $now, clusters: sort_by(.name),
-     signed_in: ([.[] | select(.state != "signed-out")] | length),
-     trouble: ([.[] | select(.state == "degraded")] | length)}' | keep infra
-  rm -rf "$work"
+     signed_in: ([.[] | select(.state | IN("signed-out", "unreachable", "misconfigured") | not)] | length),
+     trouble: ([.[] | select(.state | IN("degraded", "unreachable"))] | length)}' <<<"$answer" | keep infra
 }
 
 # ----------------------------------------------------------------------------------- home
@@ -276,12 +254,14 @@ from_file() { # tab
 sample() { # tab
   case "$1" in
   infra)
-    jq -cn '{connected: false, how: ["Sign in to a cluster with ocl and it appears here.", "The list of clusters is the one in ocl."],
+    jq -cn '{connected: false, how: ["List your clusters in ~/.config/desktop/clusters.conf (ocl edit) and they appear here.", "Sign in to one with ocl NAME; OpenShift, RKE2, Talos and any kubeconfig will do."],
       clusters: [
-        {name: "ocp202", state: "healthy", version: "4.20.12", nodes: 9, ready: 9, updating: false},
-        {name: "ocp203", state: "updating", version: "4.20.14", nodes: 9, ready: 9, updating: true},
-        {name: "ocp204", state: "degraded", version: "4.22.16", nodes: 12, ready: 11, updating: false},
-        {name: "ocp302", state: "signed-out"}], signed_in: 3, trouble: 1}'
+        {name: "ocp202", kind: "openshift", state: "healthy", version: "4.20.12", nodes: 9, ready: 9, updating: false},
+        {name: "lab", kind: "rke2", state: "healthy", version: "v1.31.4+rke2r1", nodes: 5, ready: 5, updating: false},
+        {name: "ocp203", kind: "openshift", state: "updating", version: "4.20.14", nodes: 9, ready: 9, updating: true},
+        {name: "edge", kind: "talos", state: "unreachable"},
+        {name: "ocp204", kind: "openshift", state: "degraded", version: "4.22.16", nodes: 12, ready: 11, updating: false},
+        {name: "ocp302", kind: "openshift", state: "signed-out"}], signed_in: 4, trouble: 2}'
     ;;
   home)
     jq -cn '{connected: false, how: [

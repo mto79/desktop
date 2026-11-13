@@ -14,9 +14,16 @@ trap 'rm -rf "$sandbox"' EXIT
 stubs="$sandbox/stubs"
 mkdir -p "$stubs"
 
-for cmd in desktop-shell desktop-say desktop-power wpctl tmux desktop-menu-agents desktop-cmd-screenshot uwsm desktop-brief systemctl; do
+for cmd in desktop-cluster desktop-shell desktop-say desktop-power wpctl tmux desktop-menu-agents desktop-cmd-screenshot uwsm desktop-brief systemctl; do
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s $*" >>"%s/calls"\n' "$cmd" "$sandbox" >"$stubs/$cmd"
 done
+# The clusters in clusters.conf, as desktop-cluster names them; anything else it is asked
+# is written down like the rest.
+cat >"$stubs/desktop-cluster" <<STUB
+#!/usr/bin/env bash
+[[ \$1 == names ]] && { printf '%s\\n' ocp203 ocp204 ocp302 lab edge; exit; }
+printf '%s\\n' "desktop-cluster \$*" >>"$sandbox/calls"
+STUB
 cat >"$stubs/hyprctl" <<STUB
 #!/usr/bin/env bash
 if [[ \$1 == clients ]]; then
@@ -99,13 +106,21 @@ check "the volume" did "wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 10%+"
 
 # The cluster's name arrives in pieces, and "k9s" as almost anything.
 say "Nines on OCP 204."
-check "k9s on a cluster, as it is actually heard" did "uwsm app -- ghostty -e ocl -k ocp204"
+check "k9s on a cluster, as it is actually heard" did "uwsm app -- ghostty -e desktop-cluster -k ocp204"
 say "K nines on O C P two oh four"
-check "and spelled out" did "uwsm app -- ghostty -e ocl -k ocp204"
+check "and spelled out" did "uwsm app -- ghostty -e desktop-cluster -k ocp204"
 say "argo on ocp 302"
-check "Argo CD on a cluster" did "uwsm app -- ghostty -e ocl -a ocp302"
+check "Argo CD on a cluster" did "uwsm app -- ghostty -e desktop-cluster -a ocp302"
 say "shell on ocp203"
-check "a shell on a cluster" did "uwsm app -- ghostty -e ocl ocp203"
+check "a shell on a cluster" did "uwsm app -- ghostty -e desktop-cluster ocp203"
+say "k9s on lab"
+check "any cluster in clusters.conf, not only an OpenShift name" did "uwsm app -- ghostty -e desktop-cluster -k lab"
+say "talos dashboard on edge"
+check "the Talos dashboard" did "uwsm app -- ghostty -e desktop-cluster -t edge"
+say "shell on ocp999"
+check "a cluster that is not in the list is not opened" lacks "desktop-cluster ocp999" "$sandbox/calls"
+say "collaborate on this"
+check "a cluster's name inside another word is not that cluster" lacks "desktop-cluster" "$sandbox/calls"
 
 say "go to firefox"
 check "a window by a word in its name" did 'hyprctl dispatch hl.dsp.focus({ window = "address:0xaa" })'
@@ -247,6 +262,12 @@ check "what the list knows never goes to the model" test ! -e "$sandbox/asked"
 model_says '{"action":"k9s","arg":"ocp204; rm -rf ~"}'
 say "do the cluster thing"
 check "an argument with a command in it comes to nothing" lacks 'ghostty' "$sandbox/calls"
+model_says '{"action":"k9s","arg":"ocp777"}'
+say "do the cluster thing"
+check "a cluster the model made up is not opened" lacks 'ghostty' "$sandbox/calls"
+model_says '{"action":"k9s","arg":"lab"}'
+say "do the cluster thing"
+check "one in the list is" did "uwsm app -- ghostty -e desktop-cluster -k lab"
 model_says '{"action":"focus","arg":"$(reboot)"}'
 say "bring that thing forward"
 check "and cannot reach a shell" lacks -E '\$\(|reboot' "$sandbox/calls"
@@ -336,6 +357,8 @@ cloud "workspace 4"
 check "what the list knows still never leaves" test ! -e "$sandbox/body"
 cloud "do the usual on o c p two oh four"
 check "a sentence naming a cluster stays on this machine" test ! -e "$sandbox/body"
+cloud "is the edge one still sulking"
+check "whatever the cluster is called, not only an OpenShift name" test ! -e "$sandbox/body"
 cloud "how is idrac security getting on"
 check "and so does one naming a project an agent is working on" test ! -e "$sandbox/body"
 cloud "tell desktop to lock the door"

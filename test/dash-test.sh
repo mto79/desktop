@@ -80,29 +80,26 @@ run watch --json >/dev/null
 check "the answer is kept, so the network is not asked every time the tab is opened" test ! -s "$sandbox/urls"
 
 # --- infrastructure
-cat >"$stubs/oc" <<'STUB'
+# desktop-cluster is the one that asks the clusters (test/cluster-test.sh); here it is a
+# stub, and what is checked is what the dashboard makes of its answer.
+cat >"$stubs/desktop-cluster" <<'STUB'
 #!/usr/bin/env bash
-ctx=""; for ((i = 1; i <= $#; i++)); do [[ ${!i} == --context ]] && { j=$((i + 1)); ctx=${!j}; }; done
-case " $* " in
-*" whoami "*) [[ $ctx == ocp202 || $ctx == ocp204 ]] ;;
-*" clusterversion "*) echo '{"status":{"desired":{"version":"4.22.16"},"conditions":[{"type":"Progressing","status":"False"}]}}' ;;
-*" nodes "*)
-  if [[ $ctx == ocp204 ]]; then
-    echo '{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}},{"status":{"conditions":[{"type":"Ready","status":"False"}]}}]}'
-  else
-    echo '{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}'
-  fi ;;
+case "$1" in
+names) printf '%s\n' ocp202 ocp203 ocp204 lab ;;
+status)
+  echo '[{"name":"ocp202","kind":"openshift","state":"healthy","nodes":3,"ready":3,"version":"4.22.16"},
+         {"name":"ocp203","kind":"openshift","state":"signed-out","nodes":0,"ready":0,"version":""},
+         {"name":"ocp204","kind":"openshift","state":"degraded","nodes":2,"ready":1,"version":"4.22.16"},
+         {"name":"lab","kind":"rke2","state":"unreachable","nodes":0,"ready":0,"version":""}]' ;;
 esac
 STUB
-printf '#!/usr/bin/env bash\nOCL_NAMES=(ocp202 ocp203 ocp204)\n' >"$stubs/ocl"
-chmod +x "$stubs/oc" "$stubs/ocl"
+chmod +x "$stubs/desktop-cluster"
 answer=$(run infra --json)
-cluster() { jq -r --arg n "$1" '.clusters[] | select(.name == $n) | .state' <<<"$answer"; }
-check "the clusters are the ones ocl lists" test "$(jq -r '.clusters | length' <<<"$answer")" = 3
-check "one with every node ready is healthy" test "$(cluster ocp202)" = healthy
-check "one with a node that is not is degraded" test "$(cluster ocp204)" = degraded
-check "one there is no token for is signed out, not broken" test "$(cluster ocp203)" = signed-out
-check "trouble is counted" test "$(jq -r '"\(.signed_in) \(.trouble)"' <<<"$answer")" = "2 1"
+check "the clusters are the ones desktop-cluster lists" test "$(jq -r '.clusters | length' <<<"$answer")" = 4
+check "they are real, not the sample" test "$(jq -r .connected <<<"$answer")" = true
+check "and keep their kind" test "$(jq -r '.clusters[] | select(.name == "lab") | .kind' <<<"$answer")" = rke2
+check "signed in counts neither the signed out nor the unreachable" test "$(jq -r .signed_in <<<"$answer")" = 2
+check "trouble counts a degraded cluster and one that does not answer" test "$(jq -r .trouble <<<"$answer")" = 2
 
 # --- home
 check "with nothing configured, the house is sample data" test "$(run home --json | jq -r .connected)" = false
