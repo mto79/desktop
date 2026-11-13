@@ -119,10 +119,15 @@ BarWidget {
     }
   }
 
+  // A faint lozenge inside the pill rather than a block the bar's full height: in a pill
+  // the block stood out above and below it.
   Rectangle {
-    anchors.fill: parent
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.verticalCenter: parent.verticalCenter
+    height: Math.round(Style.barSize * 0.74) - 6
     color: root.hoverEnabled && mouseArea.containsMouse ? root.hoverColor : "transparent"
-    radius: Style.barRadius
+    radius: height / 2
 
     Behavior on color {
       ColorAnimation {

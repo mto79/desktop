@@ -140,7 +140,9 @@ QtObject {
     barPill = pick(bar, "pill", Qt.rgba(barText.r, barText.g, barText.b, 0.08));
     barRaised = pick(bar, "raised", Qt.rgba(barText.r, barText.g, barText.b, 0.1));
     barOutline = pick(bar, "outline", Qt.rgba(barText.r, barText.g, barText.b, 0.12));
-    barHover = pick(bar, "hover", barRaised);
+    // A tint over whatever is under it -- the bar or a pill -- rather than a surface of its
+    // own: a hover only has to say where the pointer is.
+    barHover = pick(bar, "hover", Qt.rgba(barText.r, barText.g, barText.b, 0.07));
     barWorkspaceBackground = pick(bar, "workspaceBackground", barPill);
     barOpacity = (typeof bar.opacity === "number" && bar.opacity > 0 && bar.opacity <= 1) ? bar.opacity : 1;
 
