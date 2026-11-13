@@ -116,6 +116,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- On the laptop screen alone the bar's CPU widget shows its percentage again. Short of
+  room, the bar dropped its whole label, number and all; it now drops the graph first.
 - The agent columns' bar figures no longer start a process each time tmux asks for them
   while the answer is fresh, as they were meant to.
 - The brightness overlay shows the screen's brightness. It had been reading the discrete

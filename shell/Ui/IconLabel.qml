@@ -27,11 +27,22 @@ RowLayout {
   // Set by the bar when the section this sits in has run out of room: the text goes and
   // the glyph stays. A label with no glyph has nothing to fall back to, so it is left be.
   property bool compact: false
-  readonly property bool textShown: root.text !== "" && !(root.compact && root.icon !== "")
-  // What going compact gives back. Read off the text's implicit width, which Qt keeps
-  // whether or not the text is drawn -- so this does not move when `compact` does, and
-  // the bar can add it back to work out what the section would need at full size.
-  readonly property real compactSaving: root.icon !== "" && root.text !== "" ? label.implicitWidth + 6 : 0
+  // What is left of the text when compact, for a widget whose number is the point and the
+  // rest decoration: the CPU's history graph goes and its percentage stays. Without one
+  // the text goes altogether.
+  property string shortText: ""
+  readonly property bool shortened: root.compact && root.icon !== "" && root.shortText !== ""
+  readonly property bool textShown: root.text !== "" && !(root.compact && root.icon !== "" && root.shortText === "")
+  // What going compact gives back. Measured rather than read off the label, whose text is
+  // the short one while compact -- so this does not move when `compact` does, and the bar
+  // can add it back to work out what the section would need at full size.
+  readonly property real compactSaving: {
+    if (root.icon === "" || root.text === "")
+      return 0;
+    if (root.shortText !== "")
+      return Math.max(0, full.advanceWidth - brief.advanceWidth);
+    return full.advanceWidth + 6;
+  }
 
   spacing: root.icon !== "" && root.textShown ? 6 : 0
 
@@ -114,11 +125,25 @@ RowLayout {
     }
   }
 
+  TextMetrics {
+    id: full
+
+    text: root.text
+    font: label.font
+  }
+
+  TextMetrics {
+    id: brief
+
+    text: root.shortText
+    font: label.font
+  }
+
   Text {
     id: label
 
     visible: root.textShown
-    text: root.text
+    text: root.shortened ? root.shortText : root.text
     color: root.color
     font.family: Style.fontFamily
     font.pixelSize: root.fontSize

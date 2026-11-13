@@ -83,6 +83,7 @@ BarWidget {
     return null;
   }
   compactSaving: compactLabel ? compactLabel.compactSaving : 0
+  compactKeepsText: compactLabel ? compactLabel.shortText !== "" : false
 
   Binding {
     target: root.compactLabel

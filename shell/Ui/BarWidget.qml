@@ -35,6 +35,8 @@ Item {
   // How many pixels narrower this gets when compact. Zero, the default, means it has
   // nothing to give and is never asked. Must not depend on `compact`.
   property real compactSaving: 0
+  // Compact keeps a short form of the text -- the CPU its number -- rather than none.
+  property bool compactKeepsText: false
   // Who gives up their text first when there is no room: the lowest number, and among
   // equals whoever gives the most back. A widget whose text is the point of it -- the
   // network's speeds -- sets this higher and is asked last. {"keepText": true} in

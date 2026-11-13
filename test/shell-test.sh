@@ -229,4 +229,21 @@ check "a panel's header can show a drawing in place of its glyph" grep -q 'prope
 check "the AI panel's header is the bar's network" grep -A3 -q 'art: Component {' "$ROOT/shell/Bar/panels/AiPanel.qml"
 check "  which moves only while the panel is open and an agent works" grep -q 'running: root.workingCount > 0 && root.visible' "$ROOT/shell/Bar/panels/AiPanel.qml"
 
+# Out of room, a widget with a short form is shortened before any loses its text: on the
+# laptop screen the CPU's graph and number together were the widest text, so it lost both
+# and showed a bare glyph, while what had to go was only the graph.
+if command -v node >/dev/null; then
+  fit() { node -e "
+    const { choose } = require('$ROOT/shell/Bar/fit.js');
+    const w = (name, saving, keeps, order) => ({ name, compactSaving: saving, compactKeepsText: keeps, compactOrder: order || 0, compact: false });
+    const able = [w('memory', 60, false), w('cpu', 40, true), w('disk', 50, false), w('network', 90, false, 1)];
+    choose(Number(process.argv[1]), 1000, able);
+    console.log(able.filter(x => x.compact).map(x => x.name).join(' '));
+  " "$1"; }
+  check "with room for everything, nothing is shortened" test -z "$(fit 1000)"
+  check "a little short, the one that keeps its number goes first" test "$(fit 1030)" = cpu
+  check "then the one that gives most back loses its text" test "$(fit 1070)" = "memory cpu"
+  check "and one that would rather keep its text is asked last" test "$(fit 1200)" = "memory cpu disk network"
+fi
+
 finish

@@ -21,6 +21,12 @@ Which widgets the bar shows, and in what order, is `~/.config/desktop/shell.json
 deployed from `config/desktop/shell.json`. So are the positions and sizes of the launcher,
 notifications and OSD.
 
+When a section has no room left beside the centred clock -- the laptop screen on its own --
+widgets give up their text, one at a time until it fits (`shell/Bar/fit.js`). A widget with a
+short form is shortened first: the CPU drops its graph and keeps its percentage, set by
+`shortText` on its `IconLabel`. Then the one giving back the most loses its text, keeping its
+glyph. `{"keepText": true}` on a widget in `shell.json` puts it last in line.
+
 ## Starting, restarting, falling back
 
 `desktop-launch-shell` starts the shell and supervises it. Quickshell links against Qt's

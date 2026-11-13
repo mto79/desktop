@@ -7,6 +7,7 @@ import Quickshell.Wayland
 import qs.Commons
 
 import "panels"
+import "fit.js" as Fit
 
 // One layer-shell panel per monitor, laid out from shell.json's `bar` subtree.
 //
@@ -379,15 +380,7 @@ Item {
           widget.compact = false;
         }
       }
-      // Those that would rather keep their text are asked last; among the rest, the one
-      // that gives the most back goes first, so as few as possible lose theirs.
-      able.sort((a, b) => (a.compactOrder - b.compactOrder) || (b.compactSaving - a.compactSaving));
-      for (var j = 0; j < able.length; j++) {
-        var over = full > maxWidth;
-        if (over)
-          full -= able[j].compactSaving;
-        able[j].compact = over;
-      }
+      Fit.choose(full, maxWidth, able);
     }
 
     onMaxWidthChanged: Qt.callLater(fit)
