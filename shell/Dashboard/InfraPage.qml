@@ -6,7 +6,7 @@ import qs.Ui
 // Infrastructure, under two headings.
 //
 // "Clusters" is each cluster as a tile, from desktop-dash infra, which asks every cluster
-// ocl knows that there is a token for, all at once. "Network" is where this machine is:
+// in clusters.conf -- OpenShift, RKE2, Talos or any kubeconfig -- all at once. "Network" is where this machine is:
 // the place, the link it is on, the router and what lies beyond, drawn as the path a
 // packet takes and said again in sentences. That is desktop-dash network, which asks
 // NetworkManager and the routing table and nobody outside.
@@ -446,17 +446,24 @@ ColumnLayout {
   }
 
   function tone(state) {
-    return state === "healthy" ? Color.good : state === "degraded" ? Color.popupUrgent : state === "updating" ? Color.popupAccent : Color.popupMuted;
+    return state === "healthy" ? Color.good : (state === "degraded" || state === "unreachable") ? Color.popupUrgent : state === "updating" ? Color.popupAccent : Color.popupMuted;
   }
 
+  // Each line starts with what runs the cluster: with OpenShift, RKE2 and Talos side by
+  // side, "4.22.16" and "v1.31.4" mean nothing until you know which is which.
   function words(cluster) {
+    var kind = cluster.kind ? cluster.kind + "  ·  " : "";
     if (cluster.state === "signed-out")
-      return "no token  ·  ocl " + cluster.name;
+      return kind + "signed out  ·  ocl " + cluster.name;
+    if (cluster.state === "unreachable")
+      return kind + "does not answer";
+    if (cluster.state === "misconfigured")
+      return "written down wrong  ·  ocl edit";
     if (cluster.state === "degraded")
-      return (cluster.nodes - cluster.ready) + " of " + cluster.nodes + " nodes not ready";
+      return kind + (cluster.nodes - cluster.ready) + " of " + cluster.nodes + " nodes not ready";
     if (cluster.state === "updating")
-      return "updating  ·  " + cluster.ready + " of " + cluster.nodes + " nodes ready";
-    return cluster.ready + " of " + cluster.nodes + " nodes ready";
+      return kind + "updating  ·  " + cluster.ready + " of " + cluster.nodes + " nodes ready";
+    return kind + cluster.ready + " of " + cluster.nodes + " nodes ready";
   }
 
   Unconnected {
@@ -536,7 +543,7 @@ ColumnLayout {
             color: tile.tone
 
             SequentialAnimation on opacity {
-              running: tile.modelData.state === "degraded" && page.active
+              running: (tile.modelData.state === "degraded" || tile.modelData.state === "unreachable") && page.active
               loops: Animation.Infinite
               onRunningChanged: if (!running)
                 light.opacity = 1

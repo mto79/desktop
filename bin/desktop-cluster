@@ -1,0 +1,405 @@
+#!/usr/bin/env bash
+
+# desktop-cluster (also: ocl): the Kubernetes clusters this desktop knows, whatever runs them.
+#
+#   ocl                     pick a cluster, then a shell on it
+#   ocl NAME                a shell on NAME, signing in first when it is needed
+#   ocl -k NAME             k9s on NAME
+#   ocl -a NAME             Argo CD on NAME (argo9s)
+#   ocl -c NAME             NAME's web console, in the browser
+#   ocl -t NAME [NODE...]   the Talos dashboard (talos clusters only)
+#   ocl -x NAME CMD...      one command against NAME, then back
+#   ocl -e NAME             the environment for NAME, for this shell:  ocl -e NAME | source
+#   ocl login NAME          sign in again, or fetch the kubeconfig again
+#   ocl logout NAME         forget NAME's credentials
+#   ocl list                every cluster: name, kind, where it is
+#   ocl status [NAME...]    every cluster asked, all at once: signed in, nodes, version
+#   ocl status --json NAME  the same for one, as the dashboard reads it
+#   ocl names               the names, one per line
+#   ocl edit                open the clusters file
+#
+# ocl began as a script for OpenShift alone, with its list of clusters written into the
+# script and every login landing in the one ~/.kube/config. That shared file is what this
+# replaces: a cluster has a kubeconfig of its own, under ~/.local/state/desktop/clusters,
+# and a shell, k9s or Argo CD on it is handed that file and nothing else. Two terminals on
+# two clusters cannot pull each other's context away, a `kubectl delete` cannot land on the
+# cluster another window switched to, and signing out of one is deleting one file.
+#
+# The clusters are listed in ~/.config/desktop/clusters.conf, a line each:
+#
+#   # name    kind       how to reach it, and anything else
+#   ocp202    openshift  server=https://api.ocp202.example:6443
+#   lab       rke2       ssh=admin@lab-cp1.example server=https://lab-cp1.example:6443
+#   edge      talos      talosconfig=~/.talos/edge.yaml nodes=192.0.2.11
+#   kind      kubernetes kubeconfig=~/.kube/clusters/kind.yaml
+#
+# How each kind is signed in to:
+#   openshift   oc login at server=. login=password (the default) asks for a user and a
+#               password, login=web goes through the browser, login=token asks for a token.
+#   rke2        the kubeconfig RKE2 writes on a server node: fetched over ssh= (it needs
+#               sudo there), or copied from kubeconfig=. server= replaces the 127.0.0.1 in it.
+#   talos       talosctl kubeconfig, with talosconfig= and nodes= (or the talosconfig's own).
+#   kubernetes  a kubeconfig file you already have, copied from kubeconfig=.
+#
+# And for any kind: namespace= to start in, console= for -c, argocd= for the namespace
+# Argo CD runs in (openshift-gitops on OpenShift, argocd elsewhere), insecure=true to skip
+# TLS verification, ca= for a CA file to verify it with.
+#
+# Never written into the repository: the file names hosts, and the repository is public.
+
+set -uo pipefail
+
+CONF="${DESKTOP_CLUSTERS:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/clusters.conf}"
+STORE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/clusters"
+ME=${0##*/}
+RESERVED=" list status names login logout edit help "
+
+die() {
+  echo "$ME: $*" >&2
+  # Started from a key or the voice there is no terminal to read this in, or one about to close.
+  [[ -t 2 || ${QUIET:-} ]] || notify-send -u critical "Cluster" "$*" 2>/dev/null || true
+  exit 1
+}
+
+usage() { sed -n '3,19s/^# \{0,1\}//p' "$0"; }
+
+# ------------------------------------------------------------------------------ the file
+
+# Every cluster, "name<TAB>kind<TAB>key=value ...", comments and blank lines gone.
+entries() {
+  [[ -r $CONF ]] || return 0
+  awk '{ sub(/#.*/, "") } NF >= 2 { name = $1; kind = $2; $1 = ""; $2 = ""; sub(/^ +/, ""); print name "\t" kind "\t" $0 }' "$CONF"
+}
+
+names() { entries | cut -f1; }
+
+# load NAME: sets KIND and the cluster's settings (opt_server, opt_login, ...), and FILE,
+# the cluster's own kubeconfig.
+load() {
+  local line kv key value
+  line=$(entries | awk -F'\t' -v n="$1" '$1 == n { print; exit }')
+  [[ -n $line ]] || die "no cluster called $1 in $CONF (there are: $(names | paste -sd' '))"
+  NAME=$1
+  KIND=$(cut -f2 <<<"$line")
+  opt_server="" opt_login="" opt_kubeconfig="" opt_talosconfig="" opt_nodes="" opt_ssh=""
+  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca=""
+  for kv in $(cut -f3 <<<"$line"); do
+    key=${kv%%=*} value=${kv#*=}
+    [[ $kv == *=* ]] || die "$NAME: '$kv' is not key=value"
+    value=${value/#\~/$HOME}
+    case "$key" in
+    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca)
+      printf -v "opt_$key" '%s' "$value" ;;
+    *) die "$NAME: unknown setting '$key'" ;;
+    esac
+  done
+  case "$KIND" in
+  openshift) [[ -n $opt_server ]] || die "$NAME: an openshift cluster needs server=" ;;
+  rke2) [[ -n $opt_ssh || -n $opt_kubeconfig ]] || die "$NAME: an rke2 cluster needs ssh= or kubeconfig=" ;;
+  talos) [[ -n $opt_talosconfig || -n ${TALOSCONFIG:-} || -r $HOME/.talos/config ]] || die "$NAME: a talos cluster needs talosconfig=" ;;
+  kubernetes) [[ -n $opt_kubeconfig ]] || die "$NAME: a kubernetes cluster needs kubeconfig=" ;;
+  *) die "$NAME: unknown kind '$KIND' (openshift, rke2, talos or kubernetes)" ;;
+  esac
+  FILE="$STORE/$NAME.kubeconfig"
+}
+
+# ------------------------------------------------------------------------------ signing in
+
+kc() { kubectl --kubeconfig "$FILE" "$@"; }
+
+# Whether the kubeconfig is there and the cluster takes it: "ok", "signed-out" or "unreachable".
+reach() {
+  local err
+  [[ -s $FILE ]] || { echo signed-out; return; }
+  if [[ $KIND == openshift ]] && command -v oc >/dev/null 2>&1; then
+    err=$(oc --kubeconfig "$FILE" --request-timeout=5s whoami 2>&1 >/dev/null) && { echo ok; return; }
+  else
+    # /apis needs an authenticated user; /version does not, so it would say nothing.
+    err=$(kc --request-timeout=5s get --raw /apis 2>&1 >/dev/null) && { echo ok; return; }
+  fi
+  if grep -qiE 'unauthori[sz]ed|forbidden|must be logged in|401|credentials|expired|certificate.*(signed by unknown|has expired)' <<<"$err"; then
+    echo signed-out
+  else
+    echo unreachable
+  fi
+}
+
+talos_args() {
+  local args=()
+  [[ -n $opt_talosconfig ]] && args+=(--talosconfig "$opt_talosconfig")
+  [[ -n $opt_nodes ]] && args+=(--nodes "$opt_nodes")
+  ((${#args[@]})) && printf '%s\n' "${args[@]}"
+  return 0
+}
+
+# The new kubeconfig is written beside the old and moved over it only once it is whole:
+# a sign-in that fails, or is cancelled at its password prompt, leaves the old one.
+login() {
+  local tmp raw server
+  mkdir -p "$STORE" && chmod 700 "$STORE"
+  tmp=$(mktemp "$STORE/.$NAME.XXXXXX")
+  chmod 600 "$tmp"
+  # EXIT, not RETURN: die leaves by exit, and a RETURN trap does not see that.
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmp' '$tmp.raw'" EXIT
+  case "$KIND" in
+  openshift)
+    command -v oc >/dev/null 2>&1 || die "oc is not installed (desktop-update-oc)"
+    local args=(--kubeconfig "$tmp" --server "$opt_server")
+    [[ $opt_insecure == true ]] && args+=(--insecure-skip-tls-verify=true)
+    [[ -n $opt_ca ]] && args+=(--certificate-authority "$opt_ca")
+    case "${opt_login:-password}" in
+    password) echo "Signing in to $NAME ($opt_server)" ;;
+    web) args+=(--web) ;;
+    token)
+      local token
+      read -rsp "Token for $NAME (from the console, Copy login command): " token && echo
+      [[ -n $token ]] || die "no token given"
+      args+=(--token "$token")
+      ;;
+    *) die "$NAME: login= is password, web or token" ;;
+    esac
+    oc login "${args[@]}" || die "signing in to $NAME failed"
+    ;;
+  rke2 | kubernetes)
+    if [[ -n $opt_ssh ]]; then
+      echo "Fetching $NAME's kubeconfig from $opt_ssh"
+      ssh "$opt_ssh" 'sudo cat /etc/rancher/rke2/rke2.yaml' >"$tmp.raw" || die "could not read /etc/rancher/rke2/rke2.yaml on $opt_ssh"
+      # RKE2 writes it for use on the node itself; from here the API is the node's own name.
+      server=${opt_server:-https://${opt_ssh#*@}:6443}
+    else
+      [[ -r $opt_kubeconfig ]] || die "$NAME: cannot read $opt_kubeconfig"
+      cp "$opt_kubeconfig" "$tmp.raw"
+      server=$opt_server
+    fi
+    KUBECONFIG="$tmp.raw" kubectl config view --raw --flatten --minify >"$tmp" || die "$NAME: that is not a kubeconfig"
+    if [[ -n $server ]]; then
+      raw=$(KUBECONFIG="$tmp" kubectl config view --minify -o jsonpath='{.clusters[0].name}')
+      KUBECONFIG="$tmp" kubectl config set-cluster "$raw" --server "$server" >/dev/null
+    fi
+    ;;
+  talos)
+    command -v talosctl >/dev/null 2>&1 || die "talosctl is not installed (desktop-update-releases talosctl)"
+    local targs
+    mapfile -t targs < <(talos_args)
+    # --force: the file mktemp made is empty and talosctl would otherwise not write over it.
+    talosctl "${targs[@]}" kubeconfig --force --merge=false "$tmp" || die "talosctl could not get $NAME's kubeconfig"
+    ;;
+  esac
+  [[ $opt_insecure == true && $KIND != openshift ]] &&
+    KUBECONFIG="$tmp" kubectl config set-cluster "$(KUBECONFIG="$tmp" kubectl config view --minify -o jsonpath='{.clusters[0].name}')" \
+      --insecure-skip-tls-verify=true >/dev/null
+  # Named after the cluster, whatever the tool called it: it is what the prompt shows, and
+  # "default@default" for every RKE2 cluster says nothing.
+  KUBECONFIG="$tmp" kubectl config rename-context "$(KUBECONFIG="$tmp" kubectl config current-context)" "$NAME" >/dev/null 2>&1 || true
+  [[ -n $opt_namespace ]] && KUBECONFIG="$tmp" kubectl config set-context "$NAME" --namespace "$opt_namespace" >/dev/null
+  # Again after the tools have had it: oc and kubectl write a new file rather than the one
+  # they were given, and it holds a token.
+  chmod 600 "$tmp" && mv -f "$tmp" "$FILE"
+  rm -f "$tmp.raw"
+  echo "Signed in to $NAME"
+}
+
+ensure() {
+  case "$(reach)" in
+  ok) ;;
+  signed-out) login ;;
+  unreachable)
+    [[ -s $FILE ]] || login
+    echo "$ME: $NAME does not answer; going on with what is there" >&2
+    ;;
+  esac
+}
+
+environment() {
+  export KUBECONFIG=$FILE DESKTOP_CLUSTER=$NAME DESKTOP_CLUSTER_KIND=$KIND
+  if [[ $KIND == talos ]]; then
+    [[ -n $opt_talosconfig ]] && export TALOSCONFIG=$opt_talosconfig
+  fi
+  return 0
+}
+
+# Columns without column(1): util-linux's, which is not on every machine this runs from.
+table() { awk -F'\t' '{ for (i = 1; i <= NF; i++) { cell[NR, i] = $i; if (length($i) > w[i]) w[i] = length($i) } n[NR] = NF }
+  END { for (r = 1; r <= NR; r++) { line = ""; for (i = 1; i <= n[r]; i++) line = line sprintf(i < n[r] ? "%-" w[i] + 2 "s" : "%s", cell[r, i]); sub(/ +$/, "", line); print line } }'; }
+
+title() { printf '\e]0;%s\a' "$1"; }
+
+# ------------------------------------------------------------------------------ status
+
+# One cluster, as one line of JSON: what the dashboard and `ocl status` show.
+status_json() {
+  local state version="" nodes="null" updating=false cv
+  state=$(reach)
+  if [[ $state == ok ]]; then
+    nodes=$(kc --request-timeout=6s get nodes -o json 2>/dev/null) || nodes=null
+    if [[ $KIND == openshift ]]; then
+      cv=$(kc --request-timeout=6s get clusterversion version -o json 2>/dev/null) || cv=null
+      version=$(jq -r '.status.desired.version // ""' <<<"${cv:-null}" 2>/dev/null)
+      jq -e '[.status.conditions[]? | select(.type == "Progressing" and .status == "True")] | length > 0' \
+        <<<"${cv:-null}" >/dev/null 2>&1 && updating=true
+    else
+      version=$(kc --request-timeout=6s version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion // ""' 2>/dev/null)
+    fi
+  fi
+  jq -cn --arg name "$NAME" --arg kind "$KIND" --arg reach "$state" --arg version "$version" \
+    --argjson nodes "${nodes:-null}" --argjson updating "$updating" '
+    def ready: [.status.conditions[]? | select(.type == "Ready" and .status == "True")] | length > 0;
+    {name: $name, kind: $kind, version: $version, updating: $updating,
+     nodes: ($nodes.items // [] | length),
+     ready: ([$nodes.items[]? | select(ready)] | length)}
+    | .state = (if $reach == "signed-out" then "signed-out"
+                elif $reach == "unreachable" then "unreachable"
+                elif .nodes == 0 then "unknown"
+                elif .ready < .nodes then "degraded"
+                elif .updating then "updating" else "healthy" end)'
+}
+
+cmd_status() {
+  local json=0 work name list=()
+  [[ ${1:-} == --json ]] && { json=1; shift; }
+  if ((json)) && (($# == 1)); then
+    QUIET=1
+    load "$1" && status_json
+    return
+  fi
+  (($#)) && list=("$@") || mapfile -t list < <(names)
+  ((${#list[@]})) || { echo "no clusters in $CONF"; return; }
+  work=$(mktemp -d)
+  QUIET=1
+  # Asked all at once: six clusters one after the other, each with a timeout, is half a minute.
+  # One written down wrong is shown as that, not left out, and does not stop the others.
+  for name in "${list[@]}"; do
+    { (load "$name" && status_json) 2>/dev/null ||
+      jq -cn --arg name "$name" '{name: $name, kind: "", state: "misconfigured", nodes: 0, ready: 0, version: ""}'; } >"$work/$name.json" &
+  done
+  wait
+  if ((json)); then
+    cat "$work"/*.json | jq -cs 'sort_by(.name)'
+  else
+    cat "$work"/*.json | jq -rs 'sort_by(.name)[] |
+      [.name, .kind, .state, (if .nodes > 0 then "\(.ready)/\(.nodes) nodes" else "" end), .version] | @tsv' |
+      table
+  fi
+  rm -rf "$work"
+}
+
+cmd_list() {
+  entries | while IFS=$'\t' read -r name kind rest; do
+    where=$(grep -oE '(server|ssh|talosconfig|kubeconfig)=[^ ]+' <<<"$rest" | head -1)
+    printf '%s\t%s\t%s\n' "$name" "$kind" "${where#*=}"
+  done | table
+}
+
+# ------------------------------------------------------------------------------ choosing
+
+pick() {
+  local all
+  all=$(names)
+  [[ -n $all ]] || die "no clusters yet: add them to $CONF (ocl edit)"
+  if [[ -t 0 && -t 1 ]] && command -v fzf >/dev/null 2>&1; then
+    cmd_list | fzf --prompt 'cluster> ' --height 40% --reverse | awk '{ print $1 }'
+  elif command -v desktop-menu-select >/dev/null 2>&1; then
+    desktop-menu-select --prompt "Cluster" <<<"$all"
+  else
+    select name in $all; do echo "$name"; break; done
+  fi
+}
+
+cmd_edit() {
+  mkdir -p "$(dirname "$CONF")"
+  [[ -f $CONF ]] || sed -n '/^# The clusters are listed/,/^#   kind /p' "$0" | sed 's/^# \{0,1\}/# /' >"$CONF"
+  exec "${EDITOR:-nvim}" "$CONF"
+}
+
+# ------------------------------------------------------------------------------ main
+
+action=shell
+case "${1:-}" in
+-h | --help | help) usage; exit 0 ;;
+list) cmd_list; exit ;;
+names) names; exit ;;
+status) shift; cmd_status "$@"; exit ;;
+edit) cmd_edit ;;
+login) [[ -n ${2:-} ]] || die "usage: $ME login NAME"; load "$2"; login; exit ;;
+logout)
+  [[ -n ${2:-} ]] || die "usage: $ME logout NAME"
+  load "$2"
+  if [[ $KIND == openshift && -s $FILE ]]; then oc --kubeconfig "$FILE" logout >/dev/null 2>&1 || true; fi
+  rm -f "$FILE" && echo "Signed out of $NAME"
+  exit
+  ;;
+-k) action=k9s; shift ;;
+-a) action=argo; shift ;;
+-c) action=console; shift ;;
+-t) action=talos; shift ;;
+-x) action=exec; shift ;;
+-e) action=env; shift ;;
+-*) die "unknown option $1 (see $ME --help)" ;;
+esac
+
+name=${1:-}
+[[ -n $name ]] || name=$(pick)
+[[ -n $name ]] || exit 0
+[[ $RESERVED == *" $name "* ]] && die "'$name' is a command, not a cluster"
+shift 2>/dev/null || true
+load "$name"
+
+case "$action" in
+shell)
+  ensure
+  environment
+  title "$NAME · $KIND"
+  echo "$NAME ($KIND): KUBECONFIG is its own; leave with exit"
+  exec "${SHELL:-bash}"
+  ;;
+k9s)
+  command -v k9s >/dev/null 2>&1 || die "k9s is not installed"
+  ensure
+  environment
+  title "k9s · $NAME"
+  exec k9s "$@"
+  ;;
+argo)
+  command -v argo9s >/dev/null 2>&1 || die "argo9s is not installed (install/packaging/argo9s.sh)"
+  ensure
+  environment
+  ns=${opt_argocd:-$([[ $KIND == openshift ]] && echo openshift-gitops || echo argocd)}
+  title "Argo CD · $NAME"
+  if argo9s --help 2>&1 | grep -q -- '--namespace'; then
+    exec argo9s --namespace "$ns" "$@"
+  fi
+  exec argo9s "$@"
+  ;;
+console)
+  url=$opt_console
+  if [[ -z $url && $KIND == openshift ]]; then
+    ensure >&2
+    url=$(oc --kubeconfig "$FILE" whoami --show-console 2>/dev/null)
+  fi
+  [[ -n $url ]] || die "$NAME has no console: set console= in $CONF"
+  xdg-open "$url" >/dev/null 2>&1 &
+  disown
+  ;;
+talos)
+  [[ $KIND == talos ]] || die "$NAME is $KIND, not talos"
+  command -v talosctl >/dev/null 2>&1 || die "talosctl is not installed (desktop-update-releases talosctl)"
+  environment
+  mapfile -t targs < <(talos_args)
+  (($#)) && targs+=(--nodes "$(IFS=,; echo "$*")")
+  title "talos · $NAME"
+  exec talosctl "${targs[@]}" dashboard
+  ;;
+exec)
+  (($#)) || die "usage: $ME -x NAME COMMAND..."
+  ensure >&2
+  environment
+  exec "$@"
+  ;;
+env)
+  # Plain `export` lines: bash and zsh eval them, and fish has an export that takes them.
+  printf 'export KUBECONFIG=%q\nexport DESKTOP_CLUSTER=%q\n' "$FILE" "$NAME"
+  [[ $KIND == talos && -n $opt_talosconfig ]] && printf 'export TALOSCONFIG=%q\n' "$opt_talosconfig"
+  [[ -s $FILE ]] || echo "$ME: not signed in to $NAME yet: ocl login $NAME" >&2
+  ;;
+esac

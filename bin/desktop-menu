@@ -326,8 +326,40 @@ show_system_menu() {
   esac
 }
 
+# A window of its own for each cluster, as the voice opens them, not the menu's "Desktop" one.
+cluster_terminal() { setsid -f uwsm app -- ghostty -e desktop-cluster "$@" >/dev/null 2>&1; }
+
+# The clusters in clusters.conf, then what to open on the one chosen. What is offered
+# depends on what runs it: a console where there is one, the Talos dashboard on Talos.
+show_clusters_menu() {
+  local name kind actions
+  name=$(menu "Cluster" "$(desktop-cluster list 2>/dev/null | awk '{ printf "%s  %s\\n", $1, $2 }')Edit clusters")
+  name=${name%% *}
+  case "$name" in
+  "") back_to show_main_menu ;;
+  Edit) present_terminal "desktop-cluster edit" ;;
+  *)
+    kind=$(desktop-cluster list | awk -v n="$name" '$1 == n { print $2 }')
+    actions="Shell\nk9s\nArgo CD"
+    [[ $kind == openshift ]] && actions+="\nConsole"
+    [[ $kind == talos ]] && actions+="\nTalos dashboard"
+    actions+="\nSign in again\nSign out"
+    case "$(menu "$name" "$actions")" in
+    Shell) cluster_terminal "$name" ;;
+    k9s) cluster_terminal -k "$name" ;;
+    "Argo CD") cluster_terminal -a "$name" ;;
+    Console) desktop-cluster -c "$name" ;;
+    "Talos dashboard") cluster_terminal -t "$name" ;;
+    "Sign in again") present_terminal "desktop-cluster login $name" ;;
+    "Sign out") desktop-cluster logout "$name" >/dev/null && notify-send "Signed out of $name" ;;
+    *) back_to show_clusters_menu ;;
+    esac
+    ;;
+  esac
+}
+
 show_main_menu() {
-  go_to_menu "$(menu "Go" "󰀻  Apps\n󰧑  Learn\n󱓞  Trigger\n  Style\n  Setup\n󰉉  Install\n󰭌  Remove\n  Update\n  About\n  System")"
+  go_to_menu "$(menu "Go" "󰀻  Apps\n󰧑  Learn\n󱓞  Trigger\n  Style\n  Setup\n󱃾  Clusters\n󰉉  Install\n󰭌  Remove\n  Update\n  About\n  System")"
 }
 
 go_to_menu() {
@@ -344,6 +376,7 @@ go_to_menu() {
   *monitor*) show_monitors_menu ;;
   *camera*) show_camera_menu ;;
   *agent*) desktop-menu-agents ;;
+  *cluster*) show_clusters_menu ;;
   *install*) show_install_menu ;;
   *remove*) show_remove_menu ;;
   *update*) show_update_menu ;;

@@ -42,6 +42,7 @@ tool() {
   helm) printf '#!/usr/bin/env bash\necho v%s\n' "$2" ;;
   lazygit) printf '#!/usr/bin/env bash\necho "commit=, build date=, version=%s, os=linux"\n' "$2" ;;
   kubie) printf '#!/usr/bin/env bash\necho "kubie %s"\n' "$2" ;;
+  talosctl) printf '#!/usr/bin/env bash\nprintf "Client:\\n\\tTag:         v%s\\n\\tSHA:         abc\\n"\n' "$2" ;;
   aws) printf '#!/usr/bin/env bash\necho "aws-cli/%s Python/3 Linux/7 exe/x86_64"\n' "$2" ;;
   esac >"$3"
   chmod +x "$3"
@@ -77,6 +78,10 @@ kubie_release() {
   tool kubie "$1" "$sandbox/kubie-build"
   github_release kubie-org/kubie "v$1" "kubie-linux-$arch" "$sandbox/kubie-build" "${2:-}"
 }
+talosctl_release() {
+  tool talosctl "$1" "$sandbox/talosctl-build"
+  github_release siderolabs/talos "v$1" "talosctl-linux-$arch" "$sandbox/talosctl-build" "${2:-}"
+}
 aws_release() {
   mkdir -p "$site/raw.githubusercontent.com/aws/aws-cli/v2"
   printf 'CHANGELOG\n=========\n\n%s\n=======\n' "$1" >"$site/raw.githubusercontent.com/aws/aws-cli/v2/CHANGELOG.rst"
@@ -91,6 +96,7 @@ version() { "$bin/$1" version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | 
 helm_release 4.3.1
 lazygit_release 0.66.2
 kubie_release 0.28.0
+talosctl_release 1.11.5
 aws_release 2.39.6
 
 run >/dev/null 2>&1
@@ -119,6 +125,8 @@ check "and nothing is said" test ! -s "$sandbox/notified"
 
 run kubie >/dev/null 2>&1
 check "a tool named is installed" test "$(version kubie)" = 0.28.0
+run talosctl >/dev/null 2>&1
+check "talosctl, for Talos clusters, from siderolabs' release" test "$(version talosctl)" = 1.11.5
 
 # The digest GitHub gives and the file disagreeing: the case the check is for.
 lazygit_release 0.67.0 0000000000000000000000000000000000000000000000000000000000000000
@@ -146,7 +154,7 @@ check "and says what it left" grep -q 'helm: could not ask upstream.*left at 4.3
 
 check "an unknown tool is refused" bash -c "! PATH='$stubs:/usr/bin:/bin' bash '$UPDATE' nosuch 2>/dev/null"
 check "desktop-update runs it" grep -qx 'desktop-update-releases' "$ROOT/bin/desktop-update"
-for t in helm lazygit kubie; do
+for t in helm lazygit kubie talosctl; do
   check "a clean install of $t uses it" grep -q "desktop-update-releases\" $t" "$ROOT/install/packaging/$t.sh"
 done
 

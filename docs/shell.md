@@ -82,7 +82,7 @@ tray) or runs a `desktop-*` command and reads its JSON:
 | Tasks panel | `desktop-worktree tasks --json` |
 | Dashboard | `desktop-dash <tab> --json` |
 | Dashboard, AI tab | `desktop-dash ai` (the prompts), `desktop-dash agents` (sessions, limits, tokens), `desktop-dash rights` (what each may do) |
-| Dashboard, Infrastructure tab | `desktop-dash infra` (the clusters), `desktop-dash network` (where this machine is) |
+| Dashboard, Infrastructure tab | `desktop-dash infra` (the clusters, from `desktop-cluster status`), `desktop-dash network` (where this machine is) |
 
 A dashboard tab can have headings of its own, changed with the up and down keys: the AI
 tab has Presence, Agents, Rights, Voice commands and Prompts, the Infrastructure tab Clusters and
