@@ -15,8 +15,6 @@ BarItem {
   property var names: []
 
   readonly property bool connected: names.length > 0
-  // A tunnel up is worth knowing at a glance: it decides where traffic goes.
-  notable: connected
   // Off is worth showing: an icon that only exists while connected cannot be told apart
   // from a widget that has quietly stopped working. Set "hideWhenOff": true to reclaim
   // the space anyway.

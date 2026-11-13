@@ -84,9 +84,7 @@ Add a line under the current month in the same commit as the change it describes
 ### Changed
 
 - The right of the bar is five pills -- connection, sound, agents, alerts, system -- instead of
-  nineteen loose icons. The connection and system pills show only the network, the CPU and
-  the battery at rest, plus whatever has something to say (the VPN up, memory nearly full),
-  and open over their neighbours on hover.
+  nineteen loose icons, each a soft background round its widgets.
 - Themes name the bar's surfaces -- a pill, a raised hover, an outline -- rather than mixing
   them from the text colour, which was muddy on Nord. The bar is slightly see-through, with
   the wallpaper blurred behind it.

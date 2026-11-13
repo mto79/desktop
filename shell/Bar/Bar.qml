@@ -374,12 +374,18 @@ Item {
         var widget = loader.item;
         if (!widget)
           continue;
-        if (widget.compactSaving > 0) {
-          able.push(widget);
-          if (widget.compact)
-            full += widget.compactSaving;
-        } else {
-          widget.compact = false;
+        // A group's widgets are candidates themselves: the CPU in the system pill
+        // shortens as it would on its own.
+        var candidates = widget.compactables !== undefined ? widget.compactables : [widget];
+        for (var c = 0; c < candidates.length; c++) {
+          var each = candidates[c];
+          if (each.compactSaving > 0) {
+            able.push(each);
+            if (each.compact)
+              full += each.compactSaving;
+          } else {
+            each.compact = false;
+          }
         }
       }
       Fit.choose(full, maxWidth, able);
@@ -416,6 +422,10 @@ Item {
           ignoreUnknownSignals: true
 
           function onCompactSavingChanged() {
+            Qt.callLater(section.fit);
+          }
+
+          function onCompactablesChanged() {
             Qt.callLater(section.fit);
           }
         }

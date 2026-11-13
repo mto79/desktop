@@ -20,8 +20,6 @@ BarItem {
   // Three quarters spoken for is when it is worth a look; nine tenths is when the kernel
   // starts to make room by throwing cache out and swapping.
   readonly property int percent: totalGb > 0 ? Math.round(usedGb / totalGb * 100) : 0
-  // Where its colour turns: from here it shows in a closed group.
-  notable: percent >= 75
 
   tooltip: totalGb > 0 ? usedGb.toFixed(1) + "G used of " + totalGb.toFixed(1) + "G (" + percent + "%)" : ""
 

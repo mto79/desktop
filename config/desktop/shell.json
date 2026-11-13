@@ -102,9 +102,6 @@
         {
           "id": "connection",
           "type": "group",
-          "show": [
-            "network"
-          ],
           "widgets": [
             {
               "id": "bluetooth"
@@ -212,10 +209,6 @@
         {
           "id": "system",
           "type": "group",
-          "show": [
-            "cpu",
-            "battery"
-          ],
           "widgets": [
             {
               "id": "disk",

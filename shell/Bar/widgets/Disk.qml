@@ -22,8 +22,6 @@ BarItem {
   property real lastTime: 0
   readonly property bool busy: rate >= 10
   readonly property bool full: parseInt(usedPercent, 10) >= 90
-  // Full, not busy: busy comes and goes by the second, and the pill would breathe with it.
-  notable: full
 
   function sample(text) {
     var bytes = 0;
