@@ -426,9 +426,17 @@ check "running it twice wires nothing twice" \
 check "the retired notification hook is taken out" lacks desktop-agent-notify <<<"$settings"
 check "an unrelated hook is kept, matcher and all" \
   test "$(jq -r '.hooks.PreToolUse[0].matcher' <<<"$settings")" = Bash
+check "Remote Control is on for every session" \
+  test "$(jq '.remoteControlAtStartup' <<<"$settings")" = true
 check "everything that is not a hook is left exactly as it was" \
-  test "$(jq 'del(.hooks)' <<<"$settings")" = "$before"
+  test "$(jq 'del(.hooks, .remoteControlAtStartup)' <<<"$settings")" = "$before"
 check "--check agrees once everything is wired" env CLAUDE_CONFIG_DIR="$config" bash "$HOOKS" --check
+
+# Remote Control switched off by hand, or in /config, stays off.
+jq '.remoteControlAtStartup = false' "$config/settings.json" >"$config/off" && mv "$config/off" "$config/settings.json"
+CLAUDE_CONFIG_DIR="$config" bash "$HOOKS" >/dev/null
+check "Remote Control turned off by hand is left off" \
+  test "$(jq '.remoteControlAtStartup' "$config/settings.json")" = false
 
 printf '{ broken' >"$config/settings.json"
 CLAUDE_CONFIG_DIR="$config" bash "$HOOKS" >/dev/null 2>&1

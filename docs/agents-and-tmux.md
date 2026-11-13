@@ -218,6 +218,17 @@ tmux.conf loads no plugins. TPM used to run at the end of it, for tmux-resurrect
 tmux-yank, but neither was ever installed. `desktop-tmux-restore` does resurrect's job,
 and `set-clipboard on` does yank's.
 
+## Remote Control
+
+Every Claude Code session starts with Remote Control on: it shows up in the Claude app
+(claude.ai/code, and the phone app) under its directory's name, where it can be read,
+answered and approved without coming back to the desk. `desktop-agent-hooks` sets
+`remoteControlAtStartup: true` in the user's `settings.json` when the key is absent; it is
+the same switch as "Enable Remote Control for all sessions" in `/config`. A `false` there
+is left alone, so turning it off in `/config` sticks. It must be set at user scope: Claude
+Code ignores a `true` in a project's settings. Sessions already running pick it up when
+they are next started; `/remote-control` turns it on for one session in the meantime.
+
 ## What an agent is doing
 
 `desktop-agent-hooks` merges hooks into Claude Code's `settings.json`. Each hook event

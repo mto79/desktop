@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Every Claude Code session starts with Remote Control on, so an agent running in tmux can
+  be followed and answered from the Claude app on a phone or in a browser. Turning it off in
+  `/config` sticks.
 - `CTRL` with the brightness keys turns the keyboard's backlight up and down, a level at a
   time, and the overlay shows where it is.
 - `SUPER + ~` drops an agent console over whatever is on screen, and the same key puts it
