@@ -17,6 +17,11 @@
 # hook event, without a restart. (Observed, not documented -- the first session to report
 # here was one that had been running for forty minutes before the hooks existed.)
 #
+# And it asks you before an agent touches a cluster: a PreToolUse hook running
+# desktop-agent-cluster-guard on the tools that could, which answers "ask" for a kubectl, a
+# talosctl, a kubeconfig opened and the like. Added once, beside any PreToolUse hooks of
+# your own.
+#
 # It also turns Remote Control on for every session -- remoteControlAtStartup, the
 # "Enable Remote Control for all sessions" switch in /config -- so an agent left running in
 # tmux can be followed and answered from the Claude app on a phone. It has to be set at
@@ -33,6 +38,9 @@ EVENTS='["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Sto
 # $HOME is left literal: Claude Code runs the hook through a shell, and a hook does not
 # inherit the desktop session's PATH.
 COMMAND='$HOME/.local/share/desktop/bin/desktop-agent-state'
+GUARD='$HOME/.local/share/desktop/bin/desktop-agent-cluster-guard'
+# The tools that can reach a cluster: Bash runs kubectl, the rest can open a kubeconfig.
+GUARDED='Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob'
 
 # desktop-agent-notify used to be wired to Notification on its own, and desktop-agent-state
 # now does its job -- without the toast Claude's idle reminder sent after every turn. It is
@@ -48,6 +56,10 @@ MERGE='
     then .
     else .hooks[$event] = ((.hooks[$event] // []) + [{hooks: [{type: "command", command: $command, timeout: 5}]}])
     end)
+  | if [.hooks.PreToolUse[]?.hooks[]?.command // empty] | any(contains("desktop-agent-cluster-guard"))
+    then .
+    else .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: $guarded, hooks: [{type: "command", command: $guard, timeout: 5}]}])
+    end
   | if has("remoteControlAtStartup") then . else .remoteControlAtStartup = true end'
 
 mkdir -p "$(dirname "$SETTINGS")"
@@ -61,7 +73,8 @@ if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
   exit 1
 fi
 
-merged=$(jq --argjson events "$EVENTS" --arg command "$COMMAND" "$MERGE" "$SETTINGS") || exit 1
+merged=$(jq --argjson events "$EVENTS" --arg command "$COMMAND" --arg guard "$GUARD" --arg guarded "$GUARDED" \
+  "$MERGE" "$SETTINGS") || exit 1
 
 if [[ ${1:-} == --check ]]; then
   [[ $merged == "$(jq . "$SETTINGS")" ]]
@@ -69,10 +82,10 @@ if [[ ${1:-} == --check ]]; then
 fi
 
 if [[ $merged == "$(jq . "$SETTINGS")" ]]; then
-  echo "Claude Code hooks and Remote Control already set"
+  echo "Claude Code hooks, the cluster guard and Remote Control already set"
   exit 0
 fi
 
 tmp="$SETTINGS.$$"
 printf '%s\n' "$merged" >"$tmp" && mv -f "$tmp" "$SETTINGS"
-echo "Claude Code hooks wired to desktop-agent-state and Remote Control set; sessions report from their next event"
+echo "Claude Code hooks wired to desktop-agent-state, the cluster guard and Remote Control set; sessions report from their next event"

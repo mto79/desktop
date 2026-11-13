@@ -426,6 +426,9 @@ check "running it twice wires nothing twice" \
 check "the retired notification hook is taken out" lacks desktop-agent-notify <<<"$settings"
 check "an unrelated hook is kept, matcher and all" \
   test "$(jq -r '.hooks.PreToolUse[0].matcher' <<<"$settings")" = Bash
+check "the cluster guard runs before every tool that could reach a cluster, once" \
+  test "$(jq -r '[.hooks.PreToolUse[] | select(.hooks[].command | contains("desktop-agent-cluster-guard")) | .matcher] | join(",")' <<<"$settings")" \
+  = "Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob"
 check "Remote Control is on for every session" \
   test "$(jq '.remoteControlAtStartup' <<<"$settings")" = true
 check "everything that is not a hook is left exactly as it was" \

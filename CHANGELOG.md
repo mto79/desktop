@@ -12,6 +12,12 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Claude Code asks you before an agent touches a cluster, every time, a read included:
+  a kubectl, oc, helm, talosctl or kubeconfig opened stops at a permission prompt
+  that names the cluster, and says when it is production.
+- `prefix + K`, or `ocl` with no name, lists the clusters in a popup like the agents' list
+  on `prefix + g`, with each one's last known state; Enter goes to its session, and
+  `^k` `^a` `^t` open k9s, Argo CD or the Talos dashboard there.
 - Each cluster has a tmux session of its own: `ocl NAME` goes to `k8s-NAME`, with windows for
   its shell, k9s, Argo CD and the Talos dashboard, and everything opened there -- agents
   included -- is on that cluster. The tmux sidebar lists those sessions with the

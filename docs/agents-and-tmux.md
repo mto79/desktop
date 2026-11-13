@@ -33,6 +33,7 @@ holds tabs too, through `desktop-terminal-tabs`.
 | `e` | The sidebar: a row per session, with its agents' state (see below) |
 | `N` | Go to the agent needing you most; press again for the next |
 | `g` | Every agent on this machine in a list, needing you first |
+| `K` | Every cluster in a list; Enter goes to its session ([clusters.md](clusters.md)) |
 | `s`, `S` | Pick a session, pick a tab |
 | `D` | Finish the task this window is on |
 | `?` | Every key this desktop adds (`desktop-tmux-keys`) |
@@ -120,7 +121,9 @@ A session whose dot is `○` or `·` is one you can leave alone.
 An agent that can reach a Kubernetes cluster says which on its second line, after its
 state: `blocked ⎈ ocp204`, red for one marked `prod=true`. A cluster's own session
 (`k8s-NAME`, made by `ocl`) has the cluster where a repository has its branch. Both are in
-[clusters.md](clusters.md).
+[clusters.md](clusters.md). An agent asks you before it touches a cluster at all: a
+`PreToolUse` hook, `desktop-agent-cluster-guard`, turns every kubectl, talosctl or
+kubeconfig opened into a permission prompt naming the cluster.
 
 | Key in the sidebar | Does |
 |---|---|

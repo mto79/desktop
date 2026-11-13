@@ -105,6 +105,7 @@ has-session) [[ -e "$sandbox/tmux-session" ]]; exit ;;
 new-session) touch "$sandbox/tmux-session"; echo @1 ;;
 new-window) echo @2 ;;
 list-windows) cat "$sandbox/tmux-windows" 2>/dev/null ;;
+display-message) echo /dev/pts/3 ;;
 set-option) [[ \$2 == -w ]] && echo "\$4 \$6" >>"$sandbox/tmux-windows" ;;
 esac
 exit 0
@@ -139,7 +140,7 @@ store="$sandbox/state/desktop/clusters"
 
 # --- the list
 check "--help lists every command, the last included" \
-  bash -c "bash '$CLUSTER' --help | tail -1 | grep -q 'ocl edit'"
+  bash -c "bash '$CLUSTER' --help | tail -1 | grep -q 'ocl pick'"
 check "and --here, which keeps to the terminal you are in" bash -c "bash '$CLUSTER' --help | grep -q -- '--here'"
 check "the names are the file's, comments and all left out" \
   test "$(run names | paste -sd' ')" = "ocp202 ocp203 lab edge kind broken"
@@ -240,6 +241,44 @@ check "asked again, the k9s window there is gone back to, not opened twice" \
   bash -c "! grep -q 'new-window' '$log' && grep -q 'tmux select-window -t @2' '$log'"
 check "the Talos dashboard is refused for a cluster that is not Talos, before any session" \
   bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run -t lab 2>&1 | grep -q 'not talos'"
+
+# --- choosing one: the same fzf list everywhere, a popup inside tmux
+# fzf writes down what it was shown and answers with $sandbox/fzf-key and the line for lab.
+cat >"$stubs/fzf" <<STUB
+#!/usr/bin/env bash
+echo "fzf \$*" >>"$log"
+cat >"$sandbox/fzf-shown"
+printf '%s\n' "\$(cat "$sandbox/fzf-key" 2>/dev/null)"
+grep "^lab	" "$sandbox/fzf-shown"
+STUB
+chmod +x "$stubs/fzf"
+mkdir -p "$sandbox/cache/desktop/dashboard"
+echo '{"clusters":[{"name":"lab","state":"degraded"}]}' >"$sandbox/cache/desktop/dashboard/infra.json"
+echo 'prod      openshift   server=https://api.prod.example:6443 prod=true' >>"$sandbox/config/desktop/clusters.conf"
+pick() { XDG_CACHE_HOME="$sandbox/cache" run "$@" >/dev/null 2>&1; }
+
+: >"$log"; : >"$sandbox/fzf-key"
+TMUX=/tmp/tmux-1/default,1,0 pick
+check "inside tmux, ocl with no name opens the list in a popup on this client" \
+  bash -c "grep -q 'tmux display-popup -c .* -E -w 90% -h 40% -T  Clusters ' '$log'"
+check "the popup runs the list, knowing which client to move" \
+  bash -c "grep -q 'DESKTOP_CLUSTER_CLIENT=.*desktop-cluster pick shell' '$log'"
+: >"$log"
+DESKTOP_CLUSTER_POPUP=1 DESKTOP_CLUSTER_CLIENT=/dev/pts/7 pick pick
+check "in the popup, the list is fzf as the agents' is: reversed, coloured, keys in the header" \
+  bash -c "grep -q 'fzf --ansi --no-sort --layout=reverse .*--prompt=cluster> ' '$log'"
+check "each cluster with the dashboard's last state, never a fresh look" \
+  bash -c "grep -P '^lab\t' '$sandbox/fzf-shown' | grep -q degraded"
+check "a production cluster says so" grep -q 'production' "$sandbox/fzf-shown"
+check "Enter goes to the cluster's session, moving the client that opened the popup" \
+  called "tmux switch-client -c /dev/pts/7 -t =k8s-lab"
+: >"$log"; echo ctrl-k >"$sandbox/fzf-key"
+DESKTOP_CLUSTER_POPUP=1 DESKTOP_CLUSTER_CLIENT=/dev/pts/7 pick pick
+check "ctrl-k in the list opens k9s there instead" called "tmux set-option -w -t @2 @cluster_action k9s"
+: >"$log"; : >"$sandbox/fzf-key"
+TMUX="" pick -e 2>/dev/null
+check "ocl -e with no name asks in the terminal and gives the exports here, not a session" lacks 'new-session\|attach' "$log"
+check "prefix + K opens the list" grep -q "bind-key K run-shell -b \"desktop-cluster pick --client '#{client_name}'\"" "$ROOT/config/tmux/tmux.conf"
 
 # --- signing out
 run logout ocp202 >/dev/null 2>&1

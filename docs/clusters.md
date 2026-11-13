@@ -12,6 +12,20 @@ OpenShift, RKE2, Talos and any other Kubernetes cluster, reached the same way:
     ocl status              every cluster asked at once: signed in, nodes, version
     ocl login NAME | logout NAME | list | names | edit
 
+`ocl` with no name, or `prefix + K` in tmux, opens the list of clusters in a popup, the
+same shape as the agents' on `prefix + g`:
+
+     cluster>
+     healthy      ocp202               openshift   https://api.ocp202.example:6443
+     degraded     ocp204               openshift   https://api.ocp204.example:6443  production
+     ?            lab                  rke2        admin@lab-cp1.example
+       Enter goes there · ^k k9s · ^a Argo CD · ^t Talos · ^o console · Esc closes
+
+Enter goes to the cluster's session; `ocl -k` with no name makes Enter open k9s instead.
+The state is the dashboard's last look (`?` when it has none): the list opens at once rather
+than wait seconds for every cluster to answer. Outside tmux it is the same list in the
+terminal, and with no terminal at all -- started from a key -- the desktop's own menu.
+
 The same is in the menu (`Go → Clusters`), on the dashboard's Infrastructure tab, and in
 voice commands: "k9s on lab", "argo on ocp302", "talos dashboard on edge".
 
@@ -45,6 +59,24 @@ are found under their pane. A process's environment cannot change, so each is re
 
 `prod=true` in clusters.conf draws the cluster in red, in the sidebar and in the shell's
 first line. An agent with production in reach should be seen to have it.
+
+## Agents ask before they touch a cluster
+
+Every time, a read included. `desktop-agent-hooks` gives Claude Code a `PreToolUse` hook,
+`desktop-agent-cluster-guard`, which answers "ask" for any tool call that would reach a
+cluster, and the agent stops at a permission prompt naming which:
+
+    This runs kubectl: it reaches a Kubernetes cluster (PRODUCTION cluster ocp204).
+    Allow it this once?
+
+What counts: kubectl, oc, helm, k9s, talosctl, argocd, flux, kubie, ocl and the like in
+command position -- first, after `;` `&&` `|` `$(`, or behind `sudo`, `env` or
+`watch -n 2` -- and any tool opening a kubeconfig or talosconfig, or a Bash call naming
+one. A command that only mentions one (`grep oc`, `echo kubectl`) is let through, and so
+is anything the guard cannot read: it must never be what breaks an agent. It takes about
+fifteen milliseconds a call.
+
+Only Claude Code sends hooks: opencode and codex are not covered.
 
 ## One kubeconfig per cluster
 
@@ -96,6 +128,8 @@ sign in again for a network that is down.
 | Menu | `show_clusters_menu` in `bin/desktop-menu` |
 | Sessions | `to_session` in `bin/desktop-cluster`; `cluster_env` in `desktop-agent-tabs` and `desktop-terminal-tabs` |
 | Sidebar | `cluster_in`, `cluster_under`, `production` in `bin/desktop-tmux-sidebar` |
+| Picker | `cmd_pick` and `fzf_pick` in `bin/desktop-cluster`; `prefix + K` in `config/tmux/tmux.conf` |
+| Permission | `bin/desktop-agent-cluster-guard`, wired by `bin/desktop-agent-hooks` |
 | Voice | `cluster_said` in `bin/desktop-voice`: any name in clusters.conf, as a word of its own |
 | Completions | `config/fish/completions/desktop-cluster.fish`, `ocl.fish` |
 | Clients | `oc` and `kubectl` (pinned, `desktop-update-oc`, `desktop-update-kubectl`); `talosctl` and kubie (`desktop-update-releases`); k9s; argo9s |
@@ -109,4 +143,5 @@ The old script is left where it was; the fish function is found before it.
 
     ./test/cluster-test.sh      every kind signed in to, with stubs; sessions; status; the migration
     ./test/tmux-sidebar-test.sh a cluster's session and each agent's cluster, from a /proc of its own
+    ./test/agent-cluster-guard-test.sh  what asks and what does not
     ocl status                  the real clusters
