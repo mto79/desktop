@@ -88,15 +88,9 @@ BarWidget {
 
   notable: notables.some(n => n)
   implicitWidth: restWidth
-  // Above its neighbours while open, so it covers them rather than slipping under.
-  z: open ? 10 : 0
-
-  Binding {
-    target: root.parent
-    property: "z"
-    value: root.open ? 10 : 0
-    when: root.parent !== null
-  }
+  // No z to put it above its neighbours while open: it opens leftwards, over the ones
+  // before it, which a row already draws underneath it. Raising it was tried, and the
+  // restacking under a still pointer made Qt take the hover away the moment it opened.
 
   Rectangle {
     id: capsule
