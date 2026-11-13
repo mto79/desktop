@@ -24,7 +24,7 @@ resolve fails the whole transaction. Check a name before adding it:
 
 Config that carries machine state cannot be copied over. Claude Code's `settings.json`
 holds authentication next to its configuration, so `desktop-agent-hooks` merges the hooks
-into it instead and leaves the rest alone.
+(and the Remote Control switch) into it instead and leaves the rest alone.
 
 ## Update
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
-# desktop-agent-hooks: wire Claude Code's hooks to desktop-agent-state.
+# desktop-agent-hooks: wire Claude Code's hooks to desktop-agent-state, and turn on
+# Remote Control.
 #
 #   desktop-agent-hooks            # add whatever is missing, change nothing else
 #   desktop-agent-hooks --check    # exit 1 if anything is missing
@@ -15,6 +16,12 @@
 # Claude Code notices the change: sessions already open start reporting from their next
 # hook event, without a restart. (Observed, not documented -- the first session to report
 # here was one that had been running for forty minutes before the hooks existed.)
+#
+# It also turns Remote Control on for every session -- remoteControlAtStartup, the
+# "Enable Remote Control for all sessions" switch in /config -- so an agent left running in
+# tmux can be followed and answered from the Claude app on a phone. It has to be set at
+# user scope: Claude Code ignores a true in a project's settings. Only an absent key is
+# set; a false put there by hand, or by /config, is a decision and is kept.
 
 set -uo pipefail
 
@@ -40,7 +47,8 @@ MERGE='
     if [.hooks[$event][]?.hooks[]?.command // empty] | any(contains("desktop-agent-state"))
     then .
     else .hooks[$event] = ((.hooks[$event] // []) + [{hooks: [{type: "command", command: $command, timeout: 5}]}])
-    end)'
+    end)
+  | if has("remoteControlAtStartup") then . else .remoteControlAtStartup = true end'
 
 mkdir -p "$(dirname "$SETTINGS")"
 [[ -f $SETTINGS ]] || echo '{}' >"$SETTINGS"
@@ -61,10 +69,10 @@ if [[ ${1:-} == --check ]]; then
 fi
 
 if [[ $merged == "$(jq . "$SETTINGS")" ]]; then
-  echo "Claude Code hooks already wired"
+  echo "Claude Code hooks and Remote Control already set"
   exit 0
 fi
 
 tmp="$SETTINGS.$$"
 printf '%s\n' "$merged" >"$tmp" && mv -f "$tmp" "$SETTINGS"
-echo "Claude Code hooks wired to desktop-agent-state; sessions report from their next event"
+echo "Claude Code hooks wired to desktop-agent-state and Remote Control set; sessions report from their next event"

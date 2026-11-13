@@ -18,6 +18,7 @@ systemctl --user enable --now ssh-agent.service
 
 # Claude Code's hooks, which report each session's state -- working, waiting on you,
 # finished -- to the tmux tab, the AI panel, the bar and a notification when you are needed.
+# It also turns Remote Control on, so every session can be reached from the Claude app.
 #
 # settings.json cannot simply be copied from config/ like everything else: it carries
 # machine state -- auth, the auto-mode environment -- alongside its configuration, and
