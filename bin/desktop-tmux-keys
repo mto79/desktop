@@ -28,6 +28,8 @@ A	A	pick a model from a menu
 g	g	every agent on this machine; Enter goes to it
 N	N	the agent needing you most; again for the next
 S	S	every AI tab, by column and model
+# Clusters
+K	K	every cluster; Enter goes to its session, ^k k9s, ^a Argo CD
 # Tasks -- a change in a worktree of its own
 T	T	new task: a branch name, and a tab whose agent works there
 D	D	finish the task on show: push, open the review, remove it
@@ -39,7 +41,7 @@ w	w	the window
 q	q	the session
 Q	Q	every session: the tmux server itself
 # Getting around
-s	s	the sessions you work in
+s	s	every place to work: sessions, views, clusters, repositories; ^n saves this one as a view
 f	f	sessionizer: a repository or a task, laid out
 e	e	sidebar: a row per session and its agents, on or off
 Space	Space	the window you were in before

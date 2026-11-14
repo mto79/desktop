@@ -122,11 +122,12 @@ def window_record(session, index, name, worktree, layout):
 
 def snapshot():
     """Every session worth going back to, or None if tmux could not be asked."""
-    listing = tmux("list-sessions", "-F", "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{session_path}")
+    listing = tmux("list-sessions", "-F",
+                   "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{session_path}\t#{@cluster}\t#{@view}")
     if listing is None:
         return None
     sessions = []
-    for name, ai_group, term_group, path in rows(listing):
+    for name, ai_group, term_group, path, cluster, view in (row + [""] * (6 - len(row)) for row in rows(listing)):
         # The sessions behind a column or a terminal are not places of their own: they come
         # back with the window they belong to.
         if ai_group or term_group:
@@ -139,7 +140,14 @@ def snapshot():
             windows.append(window_record(name, index, window, worktree, layout))
             if is_active == "1":
                 active = window
-        sessions.append({"name": name, "dir": path, "active": active, "windows": windows})
+        session = {"name": name, "dir": path, "active": active, "windows": windows}
+        if view:
+            # One of desktop-view's: built again from its file, cluster and prompt and all.
+            session["view"] = view
+        elif cluster:
+            # One of ocl's: it is rebuilt by ocl, which puts the cluster in its environment.
+            session["cluster"] = cluster
+        sessions.append(session)
     return {"saved": int(time.time()), "sessions": sessions}
 
 
@@ -277,6 +285,29 @@ def build_task(record):
     return True
 
 
+# The windows desktop-cluster makes in a cluster's session, and the flag that asks for each.
+CLUSTER_WINDOWS = {"shell": [], "k9s": ["-k"], "argo": ["-a"], "talos": ["-t"]}
+
+
+def build_cluster(session):
+    """A cluster's session, made by desktop-cluster as ocl made it the first time.
+
+    Built as a plain session it came back with its name and none of what it is for: no
+    cluster in its environment, so an agent started there would reach whatever
+    ~/.kube/config pointed at, in a session whose name says otherwise. Its other windows
+    are built after, as any window is, and inherit the cluster from the session.
+    """
+    made = 0
+    for record in session.get("windows", []):
+        flag = CLUSTER_WINDOWS.get(record.get("name"))
+        if flag is None:
+            continue
+        if subprocess.run(["desktop-cluster", "--detached", *flag, session["cluster"]],
+                          capture_output=True).returncode == 0:
+            made += 1
+    return made
+
+
 def restore():
     try:
         data = json.loads(snapshot_file().read_text())
@@ -292,6 +323,14 @@ def restore():
         for session in data.get("sessions", []):
             name = session["name"]
             placeholder = None
+            if session.get("view") and tmux("has-session", "-t", f"={name}") is None:
+                # From its file, as it is opened by hand; a window added since is put back
+                # below, as any window is, and is on the view's cluster with the rest.
+                if subprocess.run(["desktop-view", "open", "--detached", session["view"]],
+                                  capture_output=True).returncode == 0:
+                    built += 1
+            if session.get("cluster") and tmux("has-session", "-t", f"={name}") is None:
+                built += build_cluster(session)
             if tmux("has-session", "-t", f"={name}") is None:
                 directory = session.get("dir") or ""
                 # A session cannot be made without a window. This one holds it open while

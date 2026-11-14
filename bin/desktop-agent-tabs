@@ -52,6 +52,20 @@ exact() { echo "=$1"; }
 # is right there.
 in_session() { echo "=$1:"; }
 
+# cluster_env SESSION: "-e VAR=value" for the cluster SESSION is on, if it is one of ocl's
+# (k8s-NAME), one per line. tmux gives a new session the global environment, not that of
+# the session it was opened from, so without these an agent or a terminal opened in a
+# cluster's session would be on no cluster -- or on whichever ~/.kube/config last chose.
+cluster_env() {
+  local var line
+  [[ -n $1 ]] || return 0
+  tmux show-environment -t "=$1" DESKTOP_CLUSTER >/dev/null 2>&1 || return 0
+  for var in KUBECONFIG DESKTOP_CLUSTER DESKTOP_CLUSTER_KIND TALOSCONFIG; do
+    line=$(tmux show-environment -t "=$1" "$var" 2>/dev/null) || continue
+    [[ $line == "$var="* ]] && printf '%s\n%s\n' -e "$line"
+  done
+}
+
 slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g;s/--*/-/g;s/^-//;s/-$//'; }
 
 session_for() { echo "ai-$1-$2"; }
@@ -128,7 +142,15 @@ ensure_session() { # session group dir model [width height]
   if tmux has-session -t "$(exact "$session")" 2>/dev/null; then
     return 0
   fi
-  tmux new-session -d -s "$session" -c "$dir" -n "$model" -x "$width" -y "$height" || return 1
+  # The session whose window holds the column, for the cluster it may be on. By the pane that
+  # is marked with the group -- or, when desktop-agent-layout asks before that pane exists,
+  # by the window the group is named after: group-for ends it with the window's id.
+  local owner env=()
+  owner=$(tmux list-panes -a -F '#{session_name}	#{@ai_column}' 2>/dev/null | awk -F'\t' -v g="$group" '$2 == g { print $1; exit }')
+  [[ -n $owner || ! ${group##*-} =~ ^[0-9]+$ ]] ||
+    owner=$(tmux display-message -p -t "@${group##*-}" '#{session_name}' 2>/dev/null)
+  mapfile -t env < <(cluster_env "$owner")
+  tmux new-session -d -s "$session" -c "$dir" -n "$model" -x "$width" -y "$height" "${env[@]}" || return 1
   tmux set-option -t "$(in_session "$session")" status-position bottom
   # Nothing on the left: the model is on the top bar, and the tabs are only numbers.
   tmux set-option -t "$(in_session "$session")" status-left ""

@@ -12,6 +12,32 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- codex and opencode show what they are doing, as Claude Code does: working, waiting on you,
+  done, in the sidebar, on their tab, on the bar and as a notification when you are needed.
+  codex through its hooks, which it asks you to trust once when it next starts; opencode
+  through a plugin.
+- codex and opencode ask before touching a cluster too, each through its own rules: codex
+  shows its approval prompt for kubectl, helm, talosctl and the rest, and opencode its
+  permission prompt, after any rule of your own that would otherwise let them through.
+- Views: a tmux session laid out once and kept in `~/.config/desktop/views/NAME.toml` -- agent
+  windows with a prompt typed in, k9s and Argo CD on a cluster, panes running commands --
+  built again by `desktop-view open NAME`. A view can name a cluster, and everything in it,
+  agents included, is then on that cluster. `^n` in the picker saves the session you are in
+  as one. They come back after a reboot from their file.
+- `prefix + s` lists every place to work in one popup: open sessions, views, clusters and
+  repositories, the open ones first. Enter goes there, or opens what is not open yet.
+- Claude Code asks you before an agent touches a cluster, every time, a read included:
+  a kubectl, oc, helm, talosctl or kubeconfig opened stops at a permission prompt
+  that names the cluster, and says when it is production.
+- `prefix + K`, or `ocl` with no name, lists the clusters in a popup like the agents' list
+  on `prefix + g`, with each one's last known state; Enter goes to its session, and
+  `^k` `^a` `^t` open k9s, Argo CD or the Talos dashboard there.
+- Each cluster has a tmux session of its own: `ocl NAME` goes to `k8s-NAME`, with windows for
+  its shell, k9s, Argo CD and the Talos dashboard, and everything opened there -- agents
+  included -- is on that cluster. The tmux sidebar lists those sessions with the
+  repositories, and each agent says which cluster it can reach, in red for one marked
+  `prod=true`. They come back after a reboot with their cluster. `ocl --here NAME` keeps to
+  the terminal you are in.
 - `ocl` reaches RKE2, Talos and any Kubernetes cluster as well as OpenShift, from a list in
   `~/.config/desktop/clusters.conf` rather than one written into the script. Each cluster has
   a kubeconfig of its own, so a terminal stays on the cluster it was opened on whatever

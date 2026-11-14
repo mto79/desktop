@@ -33,7 +33,9 @@ holds tabs too, through `desktop-terminal-tabs`.
 | `e` | The sidebar: a row per session, with its agents' state (see below) |
 | `N` | Go to the agent needing you most; press again for the next |
 | `g` | Every agent on this machine in a list, needing you first |
-| `s`, `S` | Pick a session, pick a tab |
+| `K` | Every cluster in a list; Enter goes to its session ([clusters.md](clusters.md)) |
+| `s` | Every place to work: open sessions, views, clusters, repositories; Enter goes there or opens it ([views.md](views.md)) |
+| `S` | Pick a tab |
 | `D` | Finish the task this window is on |
 | `?` | Every key this desktop adds (`desktop-tmux-keys`) |
 
@@ -91,8 +93,10 @@ column. A name too long for the row loses its middle, not its end: four agents i
 repository are `opentofu-monorepo-b1`, `-14`, `-d8` and `-a1`. The name comes from Claude
 Code's record of each running session, in `~/.claude/sessions/`, and counts only while that
 session's process is alive and is the one that started then. An agent in a plain pane is named after its window. When a session has agents
-in more than one window, each says which: `2:claude 1`. opencode and codex send no hooks,
-so their tabs are always shown idle.
+in more than one window, each says which: `2:claude 1`. All three agents report their state,
+Claude Code and codex through their hooks and opencode through a plugin (see below); one
+that reports nothing yet -- started before the hooks were wired, or a codex whose hooks are
+not trusted yet -- is shown idle.
 
 Each agent's name is drawn in its own colour, the one its tabs and pane border have:
 `@agent-claude-colour`, `@agent-codex-colour` and `@agent-opencode-colour`, set by the theme
@@ -116,6 +120,13 @@ own, said in a word on its second line:
 | `·` | | a session with no agent at all | |
 
 A session whose dot is `○` or `·` is one you can leave alone.
+
+An agent that can reach a Kubernetes cluster says which on its second line, after its
+state: `blocked ⎈ ocp204`, red for one marked `prod=true`. A cluster's own session
+(`k8s-NAME`, made by `ocl`) has the cluster where a repository has its branch. Both are in
+[clusters.md](clusters.md). An agent asks you before it touches a cluster at all: a
+`PreToolUse` hook, `desktop-agent-cluster-guard`, turns every kubectl, talosctl or
+kubeconfig opened into a permission prompt naming the cluster.
 
 | Key in the sidebar | Does |
 |---|---|
@@ -201,8 +212,8 @@ The text goes in as one bracketed paste, so a message of several lines is one me
 then Enter. Sent from an agent's own pane, it is headed with who sent it and the command to
 answer with, since the agent at the other end has no other way to know. The address is the
 session and either the label (`opencode 1`, typed with or without its space) or a Claude
-agent's name. It cannot tell whether opencode or codex is in the middle of a turn -- they
-report nothing -- so a message to a busy one is handled however that agent handles typing.
+agent's name. It does not wait for a turn to finish, so a message to a busy agent is handled
+however that agent handles typing.
 
 ## Saving and restoring
 
@@ -231,17 +242,37 @@ they are next started; `/remote-control` turns it on for one session in the mean
 
 ## What an agent is doing
 
-`desktop-agent-hooks` merges hooks into Claude Code's `settings.json`. Each hook event
-calls `desktop-agent-state`, which keeps one JSON file per session under
-`$XDG_RUNTIME_DIR/desktop/agents`:
+All three agents report what they are doing to `desktop-agent-state`, with the same JSON,
+which `desktop-agent-hooks` sets up:
 
-| Hook event | State |
+| Agent | How | Where |
+|---|---|---|
+| Claude Code | hooks | `~/.claude/settings.json` |
+| codex | hooks, in Claude Code's format | `~/.codex/hooks.json` |
+| opencode | a plugin turning its events into the same JSON | `~/.config/opencode/plugin/desktop-agent-state.js` (from `config/opencode/plugin/`) |
+
+**codex asks once** to trust hooks that are new or changed: "Hooks need review" when it
+starts, then *Trust all and continue*. Until then they do not run, and codex is shown idle.
+They are its safeguard, not this desktop's, so they are left for you to answer.
+
+`desktop-agent-state` keeps one JSON file per session under
+`$XDG_RUNTIME_DIR/desktop/agents`, with the agent it is (`claude`, `codex`, `opencode`):
+
+| Event | State |
 |---|---|
 | `SessionStart` | ready |
 | `UserPromptSubmit`, `PostToolUse` | working |
-| `Notification` | waiting (a permission prompt or a question), or done (the idle reminder) |
+| `Notification`; codex's `PermissionRequest` | waiting (a permission prompt or a question); Claude's idle reminder is done |
 | `Stop` | done |
+| codex's `Interrupt` | ready: a turn you stopped is not a result to read |
 | `SessionEnd` | the record is removed |
+
+opencode's plugin sends `UserPromptSubmit` when a turn starts (with the prompt), `Notification`
+on `permission.asked`, `PostToolUse` on `permission.replied`, and `Stop` on `session.idle` or
+`session.error`. It keeps one record per opencode process, since one opencode switches
+conversations within its pane. Which agent sent an event is read from the process that ran
+the hook (`claude`, `codex`) or said by the plugin (`DESKTOP_AGENT_KIND`), and a record
+counts only while a process of that agent with its pid is alive.
 
 The record holds the tmux pane and its server's socket, so a panel can jump straight to
 the session, and the agent's pid, so a crashed session can be told from a quiet one: a

@@ -4,6 +4,8 @@
 #
 #   ocl                     pick a cluster, then a shell on it
 #   ocl NAME                a shell on NAME, signing in first when it is needed
+#   ocl --here NAME         the same, in this terminal rather than NAME's tmux session
+#   ocl --detached [-k] NAME  make NAME's session and window, and stay where you are
 #   ocl -k NAME             k9s on NAME
 #   ocl -a NAME             Argo CD on NAME (argo9s)
 #   ocl -c NAME             NAME's web console, in the browser
@@ -17,6 +19,7 @@
 #   ocl status --json NAME  the same for one, as the dashboard reads it
 #   ocl names               the names, one per line
 #   ocl edit                open the clusters file
+#   ocl pick                the list in a popup (prefix + K in tmux): Enter goes there
 #
 # ocl began as a script for OpenShift alone, with its list of clusters written into the
 # script and every login landing in the one ~/.kube/config. That shared file is what this
@@ -41,7 +44,14 @@
 #   talos       talosctl kubeconfig, with talosconfig= and nodes= (or the talosconfig's own).
 #   kubernetes  a kubeconfig file you already have, copied from kubeconfig=.
 #
-# And for any kind: namespace= to start in, console= for -c, argocd= for the namespace
+# Each cluster is a place, as a repository is: a tmux session of its own, k8s-NAME, with a
+# window for the shell and one each for k9s, Argo CD and the Talos dashboard, opened once
+# and gone back to after. ocl NAME goes there -- switching this tmux client, or attaching
+# when there is none -- and the session's environment carries the cluster, so every
+# window opened in it, and every agent started there, is on that cluster and on no other.
+# The tmux sidebar lists it with the repositories. --here keeps to the terminal you are in.
+#
+# And for any kind: prod=true to have it drawn in red wherever it is named, namespace= to start in, console= for -c, argocd= for the namespace
 # Argo CD runs in (openshift-gitops on OpenShift, argocd elsewhere), insecure=true to skip
 # TLS verification, ca= for a CA file to verify it with.
 #
@@ -52,7 +62,7 @@ set -uo pipefail
 CONF="${DESKTOP_CLUSTERS:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/clusters.conf}"
 STORE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/clusters"
 ME=${0##*/}
-RESERVED=" list status names login logout edit help "
+RESERVED=" list status names login logout edit help pick "
 
 die() {
   echo "$ME: $*" >&2
@@ -61,7 +71,8 @@ die() {
   exit 1
 }
 
-usage() { sed -n '3,19s/^# \{0,1\}//p' "$0"; }
+# The title and the commands, as the header has them: up to its second empty comment line.
+usage() { awk 'NR >= 3 { if ($0 == "#" && ++blank == 2) exit; sub(/^# ?/, ""); print }' "$0"; }
 
 # ------------------------------------------------------------------------------ the file
 
@@ -82,13 +93,13 @@ load() {
   NAME=$1
   KIND=$(cut -f2 <<<"$line")
   opt_server="" opt_login="" opt_kubeconfig="" opt_talosconfig="" opt_nodes="" opt_ssh=""
-  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca=""
+  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca="" opt_prod=""
   for kv in $(cut -f3 <<<"$line"); do
     key=${kv%%=*} value=${kv#*=}
     [[ $kv == *=* ]] || die "$NAME: '$kv' is not key=value"
     value=${value/#\~/$HOME}
     case "$key" in
-    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca)
+    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca | prod)
       printf -v "opt_$key" '%s' "$value" ;;
     *) die "$NAME: unknown setting '$key'" ;;
     esac
@@ -293,17 +304,71 @@ cmd_list() {
 
 # ------------------------------------------------------------------------------ choosing
 
-pick() {
-  local all
-  all=$(names)
-  [[ -n $all ]] || die "no clusters yet: add them to $CONF (ocl edit)"
-  if [[ -t 0 && -t 1 ]] && command -v fzf >/dev/null 2>&1; then
-    cmd_list | fzf --prompt 'cluster> ' --height 40% --reverse | awk '{ print $1 }'
-  elif command -v desktop-menu-select >/dev/null 2>&1; then
-    desktop-menu-select --prompt "Cluster" <<<"$all"
-  else
-    select name in $all; do echo "$name"; break; done
+# The dashboard's last look at the clusters, never a new one: the list has to open at once,
+# and asking every cluster takes seconds. "name<TAB>state".
+last_states() {
+  jq -r '.clusters[]? | "\(.name)\t\(.state)"' "${XDG_CACHE_HOME:-$HOME/.cache}/desktop/dashboard/infra.json" 2>/dev/null
+}
+
+# fzf_pick [ACTION]: the clusters in fzf, as prefix + g lists the agents -- reversed, a
+# coloured state, the keys in the header -- and "action<TAB>name" for the one chosen.
+# Enter is ACTION (a shell, unless ocl -k and the like asked for another); the keys in the
+# header pick another on the way.
+fzf_pick() {
+  local default=${1:-shell} states out key name
+  command -v fzf >/dev/null 2>&1 || die "fzf is not installed"
+  states=$(last_states)
+  out=$(entries | while IFS=$'\t' read -r name kind rest; do
+    local state colour where prod
+    state=$(awk -F'\t' -v n="$name" '$1 == n { print $2; exit }' <<<"$states")
+    case "$state" in
+    healthy) colour=32 ;; degraded | unreachable) colour=31 ;; updating) colour=33 ;; *) colour=2 ;;
+    esac
+    where=$(grep -oE '(server|ssh|talosconfig|kubeconfig)=[^ ]+' <<<"$rest" | head -1)
+    prod=""
+    [[ $rest =~ (^|[[:space:]])prod=true($|[[:space:]]) ]] && prod=$'  \e[1;31mproduction\e[0m'
+    printf '%s\t\e[%sm%-12s\e[0m %-20s %-11s \e[2m%s\e[0m%s\n' "$name" "$colour" "${state:-?}" "$name" "$kind" "${where#*=}" "$prod"
+  done | fzf --ansi --no-sort --layout=reverse --delimiter=$'\t' --with-nth=2 --prompt='cluster> ' \
+    --header='Enter goes there · ^k k9s · ^a Argo CD · ^t Talos · ^o console · Esc closes' --info=hidden \
+    --expect=ctrl-k,ctrl-a,ctrl-t,ctrl-o) || return 0
+  key=$(head -1 <<<"$out")
+  name=$(sed -n 2p <<<"$out" | cut -f1)
+  [[ -n $name ]] || return 0
+  case "$key" in
+  ctrl-k) default=k9s ;; ctrl-a) default=argo ;; ctrl-t) default=talos ;; ctrl-o) default=console ;;
+  esac
+  printf '%s\t%s\n' "$default" "$name"
+}
+
+# cmd_pick [--client CLIENT] [ACTION]: choose a cluster, then go there.
+#
+# Inside tmux it is a popup on the client -- prefix + K, or ocl typed with no name -- as the
+# agents' list is on prefix + g. Outside tmux it is the same list in the terminal. With no
+# terminal at all, it is the desktop's own menu.
+cmd_pick() {
+  local client="" action=shell self choice
+  [[ ${1:-} == --client ]] && { client=$2; shift 2; }
+  [[ -n ${1:-} ]] && action=$1
+  [[ -n $(names) ]] || die "no clusters yet: add them to $CONF (ocl edit)"
+  [[ -z $client && -n ${TMUX:-} ]] && client=$(tmux display-message -p '#{client_name}' 2>/dev/null)
+  if [[ -n $client && -z ${DESKTOP_CLUSTER_POPUP:-} ]]; then
+    self=$(readlink -f "$0")
+    exec tmux display-popup -c "$client" -E -w 90% -h 40% -T " Clusters " \
+      "DESKTOP_CLUSTER_POPUP=1 DESKTOP_CLUSTER_CLIENT=$(printf %q "$client") $(printf %q "$self") pick $action"
   fi
+  if [[ -t 0 || -n ${DESKTOP_CLUSTER_POPUP:-} ]]; then
+    choice=$(fzf_pick "$action")
+  else
+    choice=$(desktop-menu-select --prompt "Cluster" <<<"$(names)")
+    [[ -n $choice ]] && choice="$action"$'\t'"$choice"
+  fi
+  [[ -n $choice ]] || exit 0
+  action=${choice%%$'\t'*}
+  load "${choice#*$'\t'}"
+  case "$action" in
+  console) exec "$(readlink -f "$0")" -c "$NAME" ;;
+  *) to_session "$action" ;;
+  esac
 }
 
 cmd_edit() {
@@ -312,11 +377,56 @@ cmd_edit() {
   exec "${EDITOR:-nvim}" "$CONF"
 }
 
+# ------------------------------------------------------------------------------ its session
+
+# tmux does not allow "." or ":" in a session name.
+session_name() { printf '%s%s' "k8s-" "$(tr '.:' '__' <<<"$NAME")"; }
+
+# to_session ACTION [ARGS...]: open ACTION in the cluster's session, then go there. A window
+# per action, found again by the mark it carries rather than by its name, which the shell
+# in it is free to change.
+to_session() {
+  local action=$1 session window flag cmd self envs=()
+  shift
+  session=$(session_name)
+  case "$action" in shell) flag=() ;; k9s) flag=(-k) ;; argo) flag=(-a) ;; talos) flag=(-t) ;; esac
+  self=$(readlink -f "$0")
+  cmd=$(printf '%q ' "$self" --here "${flag[@]}" "$NAME" "$@")
+  if ! tmux has-session -t "=$session" 2>/dev/null; then
+    # In the session's environment, so a window opened in it later -- prefix + c, an agent
+    # column -- is on the cluster too.
+    envs=(-e "KUBECONFIG=$FILE" -e "DESKTOP_CLUSTER=$NAME" -e "DESKTOP_CLUSTER_KIND=$KIND")
+    [[ $KIND == talos && -n $opt_talosconfig ]] && envs+=(-e "TALOSCONFIG=$opt_talosconfig")
+    window=$(tmux new-session -d -P -F '#{window_id}' -s "$session" -n "$action" -c "$HOME" "${envs[@]}" "$cmd") ||
+      die "could not make the tmux session $session"
+    tmux set-option -t "=$session:" @cluster "$NAME" >/dev/null
+  else
+    window=$(tmux list-windows -t "=$session:" -F '#{window_id} #{@cluster_action}' | awk -v a="$action" '$2 == a { print $1; exit }')
+    [[ -n $window ]] || window=$(tmux new-window -d -P -F '#{window_id}' -t "=$session:" -n "$action" -c "$HOME" "$cmd")
+  fi
+  tmux set-option -w -t "$window" @cluster_action "$action" >/dev/null
+  tmux select-window -t "$window"
+  ((detached)) && exit 0
+  # A popup has a client but is no pane of it: the client is named, as the sidebar names it.
+  if [[ -n ${DESKTOP_CLUSTER_CLIENT:-} ]]; then
+    tmux switch-client -c "$DESKTOP_CLUSTER_CLIENT" -t "=$session"
+  elif [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "=$session"
+  else
+    exec tmux attach-session -t "=$session"
+  fi
+  exit
+}
+
 # ------------------------------------------------------------------------------ main
 
-action=shell
+action=shell here=0 detached=0
+[[ ${1:-} == --here ]] && { here=1; shift; }
+# Make the cluster's session and window, and go nowhere: desktop-tmux-restore builds them so.
+[[ ${1:-} == --detached ]] && { detached=1; shift; }
 case "${1:-}" in
 -h | --help | help) usage; exit 0 ;;
+pick) shift; cmd_pick "$@"; exit ;;
 list) cmd_list; exit ;;
 names) names; exit ;;
 status) shift; cmd_status "$@"; exit ;;
@@ -333,17 +443,31 @@ logout)
 -a) action=argo; shift ;;
 -c) action=console; shift ;;
 -t) action=talos; shift ;;
--x) action=exec; shift ;;
--e) action=env; shift ;;
+-x) action="exec"; shift ;;
+-e) action="env"; shift ;;
 -*) die "unknown option $1 (see $ME --help)" ;;
 esac
 
 name=${1:-}
-[[ -n $name ]] || name=$(pick)
+# No name: choose one. A shell, k9s, Argo CD or the Talos dashboard goes on to the cluster's
+# session from the list; ocl --here, -x and -e want the name back here.
+if [[ -z $name ]]; then
+  if ((!here)) && [[ $action =~ ^(shell|k9s|argo|talos|console)$ ]]; then
+    cmd_pick "$action"
+    exit
+  fi
+  name=$(fzf_pick | cut -f2)
+fi
 [[ -n $name ]] || exit 0
 [[ $RESERVED == *" $name "* ]] && die "'$name' is a command, not a cluster"
 shift 2>/dev/null || true
 load "$name"
+
+# Somewhere to be rather than something to run: those go to the cluster's tmux session.
+if ((!here)) && [[ $action =~ ^(shell|k9s|argo|talos)$ ]] && command -v tmux >/dev/null 2>&1; then
+  [[ $action == talos && $KIND != talos ]] && die "$NAME is $KIND, not talos"
+  to_session "$action" "$@"
+fi
 
 case "$action" in
 shell)
@@ -351,6 +475,7 @@ shell)
   environment
   title "$NAME · $KIND"
   echo "$NAME ($KIND): KUBECONFIG is its own; leave with exit"
+  [[ $opt_prod == true ]] && printf '\e[1;31m%s is production.\e[0m\n' "$NAME"
   exec "${SHELL:-bash}"
   ;;
 k9s)

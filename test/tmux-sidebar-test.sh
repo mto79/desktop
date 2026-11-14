@@ -39,7 +39,11 @@ case "$args" in
   printf 'ai-alpha-2-claude\t1\twaiting\talpha-2\t\t/w/alpha\tclaude\tfix-runner\tclaude\t@21\n'
   printf 'ai-alpha-2-claude\t2\tdone\talpha-2\t\t/w/alpha\tclaude\t\tclaude\t@22\n'
   printf 'ai-alpha-2-claude\t3\twaiting\talpha-2\t\t/w/alpha\tclaude\t\tclaude\t@23\n'
-  printf 'ai-alpha-2-opencode\t1\t\talpha-2\t\t/w/alpha\topencode\t\topencode\n'
+  printf 'ai-alpha-2-opencode\t1\t\talpha-2\t\t/w/alpha\topencode\t\topencode\t@24\t5002\n'
+  # With clusters (\$SANDBOX/with-clusters): ocl's session for the lab cluster, marked so.
+  [[ -e $SANDBOX/with-clusters ]] && printf 'k8s-lab\t1\t\t\t\t/home/u\t\t\tshell\t@40\t5001\tlab\n'
+  # And a view's session, built by desktop-view with the lab cluster.
+  [[ -e $SANDBOX/with-clusters ]] && printf 'view-upgrade\t1\t\t\t\t/home/u\t\t\tide\t@41\t5001\tlab\tupgrade\n'
   # A terminal's tabs in alpha, and a column whose window has gone.
   printf 'term-alpha-3\t1\t\t\talpha-3\t/w/alpha\t\t\tfish\n'
   printf 'ai-gone-9-claude\t1\twaiting\tgone-9\t\t/w\tclaude\t\tclaude\n'
@@ -92,7 +96,7 @@ cat <<'JSON'
    "pane": "%7", "cwd": "/w/alpha.worktrees/fix-runner", "agent": "claude",
    "asked": "make the runner retry"},
   {"state": "waiting", "for": "3m", "socket": "/tmp/here", "target": "beta:1.2", "agent": "claude",
-   "pane": "%6", "cwd": "/w/beta"},
+   "pane": "%6", "cwd": "/w/beta", "pid": 4242},
   {"state": "working", "stuck": true, "quiet": "7m", "for": "40m", "socket": "/tmp/here",
    "target": "delta:1.2", "pane": "%8", "cwd": "/w/delta"},
   {"state": "done", "unseen": false, "for": "1h", "socket": "/tmp/here",
@@ -112,7 +116,7 @@ chmod +x "$sandbox/path/tmux" "$sandbox/path/desktop-agent-sessions" "$sandbox/p
 # The script is loaded rather than run: its drawing and its tmux commands are what is
 # being checked, and a curses screen needs a terminal no test has.
 cat >"$sandbox/drive.py" <<'DRIVER'
-import importlib.machinery, importlib.util, sys
+import importlib.machinery, importlib.util, os, sys
 
 loader = importlib.machinery.SourceFileLoader("sidebar", sys.argv[1])
 spec = importlib.util.spec_from_loader("sidebar", loader)
@@ -120,6 +124,8 @@ sidebar = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sidebar)
 # Colours belong to a screen that was never started; only the text is under test.
 sidebar.curses.color_pair = lambda pair: 0
+# Processes are read from a /proc of the test's own, never the machine's.
+sidebar.PROC = os.environ["FAKE_PROC"]
 
 
 class Branches:
@@ -201,6 +207,8 @@ elif what == "names":
     for found in sidebar.rows("alpha:2"):
         if found["kind"] == "agent" and found["session"] == "alpha":
             print(sidebar.line_of(found, 40)[0].rstrip())
+elif what == "cluster-colours":
+    print(sidebar.cluster_part("lab")[1], sidebar.cluster_part("edge")[1])
 elif what == "attach":
     sidebar.attach("alpha:2")
 elif what == "toggle":
@@ -211,8 +219,8 @@ DRIVER
 
 drive() {
   env -i PATH="$sandbox/path:/usr/bin:/bin" HOME=/home/u SANDBOX="$sandbox" TERM=dumb \
-    CLAUDE_CONFIG_DIR="$sandbox/claude" \
-    python3 "$sandbox/drive.py" "$ROOT/bin/desktop-tmux-sidebar" "$1" 2>&1
+    CLAUDE_CONFIG_DIR="$sandbox/claude" FAKE_PROC="$sandbox/proc" XDG_STATE_HOME="$sandbox/state" \
+    DESKTOP_CLUSTERS="$sandbox/clusters.conf" python3 "$sandbox/drive.py" "$ROOT/bin/desktop-tmux-sidebar" "$1" 2>&1
 }
 
 # Claude Code's records of its running sessions, with the name each answers to: one in
@@ -429,5 +437,39 @@ if [[ -n $real ]]; then
   check "tmux reads tmux.conf without an error" test -z "$errors"
   [[ -n $errors ]] && echo "      $(head -3 <<<"$errors")"
 fi
+
+# --- clusters
+# A process as /proc has it: its start time in stat, its environment NUL-separated.
+process() { # pid ppid environment...
+  mkdir -p "$sandbox/proc/$1/task/$1"
+  echo "$1 (x) S $2 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 77 0" >"$sandbox/proc/$1/stat"
+  shift 2
+  printf '%s\0' PATH=/usr/bin "$@" >"$sandbox/proc/${pid}/environ"
+}
+pid=4242 process 4242 1 DESKTOP_CLUSTER=lab KUBECONFIG=/home/u/.local/state/desktop/clusters/lab.kubeconfig
+# The opencode tab: a wrapper with no cluster, and under it opencode, started from an
+# ocl -e shell, with only a KUBECONFIG of ocl's to say which.
+pid=5002 process 5002 1
+pid=5003 process 5003 5002 "KUBECONFIG=$sandbox/state/desktop/clusters/edge.kubeconfig"
+echo 5003 >"$sandbox/proc/5002/task/5002/children"
+pid=5001 process 5001 1 DESKTOP_CLUSTER=lab
+printf 'lab   rke2  ssh=admin@lab.example prod=true\nedge  talos talosconfig=/t\n' >"$sandbox/clusters.conf"
+touch "$sandbox/with-clusters"
+clustered=$(drive rows)
+# second_line <session>: the line drawn under a session's row.
+second_line() { grep -A1 -x " · $1" <<<"$clustered" | sed -n 2p; }
+check "a cluster's own session has the cluster as its second line" \
+  test "$(second_line k8s-lab)" = '   ⎈ lab'
+check "an agent says which cluster it can reach, after its state" \
+  grep -qx '   blocked ⎈ lab' <<<"$(drive select-beta)"
+check "found under the pane when its own process is not the one on it" \
+  grep -qx '   idle ⎈ edge' <<<"$clustered"
+check "and from a kubeconfig of ocl's when nothing else says" \
+  test "$(grep -c '⎈ edge' <<<"$clustered")" = 1
+check "a view's session says so, with its cluster after it" \
+  test "$(second_line view-upgrade)" = '   ◆ view ⎈ lab'
+check "a production cluster is red, any other blue" test "$(drive cluster-colours)" = "red blue"
+rm -rf "$sandbox/with-clusters" "$sandbox/proc"
+check "an agent on no cluster says nothing of one" lacks '⎈' <<<"$(drive rows)"
 
 finish

@@ -292,8 +292,12 @@ check "and a window with a plain agent pane still cycles in place" \
 plain=$(desktop-agent-tabs sessions | cut -f4)
 check "prefix + s shows the sessions you work in" grep -qx work <<<"$plain"
 check "and leaves out the sessions behind a column" lacks '^ai-' <<<"$plain"
-check "and the binding is that menu" \
-  grep -q "^bind-key s run-shell \"desktop-agent-tabs pick .* sessions\"" "$ROOT/config/tmux/tmux.conf"
+# The binding is the picker of every place to work now (desktop-pick, test/view-test.sh),
+# which leaves the columns' sessions out the same way.
+check "and the binding is the session picker" \
+  grep -q "^bind-key s run-shell -b \"desktop-pick --client " "$ROOT/config/tmux/tmux.conf"
+check "which leaves out the sessions behind a column too" \
+  grep -q 'if ai or term:' "$ROOT/bin/desktop-pick"
 
 # prefix + S is the other half, and is a menu built from this list rather than the same
 # tree with the filter turned round: since tmux 3.7 choose-tree keeps a window of several

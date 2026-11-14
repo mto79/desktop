@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+
+# desktop-agent-cluster-guard: Claude Code asks you before an agent touches a cluster.
+#
+# A PreToolUse hook, wired by desktop-agent-hooks. Claude Code hands it the tool call on
+# stdin; when the call would reach a Kubernetes or Talos cluster it answers "ask", and the
+# agent stops at a permission prompt that says which cluster. Anything else it lets
+# through without a word.
+#
+# Every time, including `kubectl get`: reading a cluster is access too, a secret read is
+# a secret leaked into a transcript, and an agent that can be trusted with ocp202 is not
+# thereby trusted with ocp204. Which cluster is read from the agent's own environment, as
+# the tmux sidebar reads it (DESKTOP_CLUSTER, set by ocl), and one marked prod=true in
+# clusters.conf is said to be production.
+#
+# What counts as reaching a cluster:
+#   - a command that talks to one: kubectl, oc, helm, k9s, talosctl, argocd, flux, ...
+#     anywhere in a Bash call, after a pipe, a ;, an && or a sudo as well as first;
+#   - ocl / desktop-cluster itself;
+#   - a Bash call naming KUBECONFIG, TALOSCONFIG, a kubeconfig or a talosconfig;
+#   - reading or writing such a file with any other tool: it holds the credentials.
+#
+# It must never be what breaks an agent: input it cannot read is let through, and it
+# always exits 0. It is Claude Code's. codex's hooks cannot answer "ask" -- it calls that
+# unsupported and runs the command -- and opencode has no hooks; both are told the same list
+# of tools in their own words instead (desktop-agent-hooks): codex as rules that need your
+# approval, opencode as commands it asks about.
+
+set -uo pipefail
+
+CONF="${DESKTOP_CLUSTERS:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/clusters.conf}"
+
+TOOLS='kubectl|oc|helm|helmfile|k9s|talosctl|argocd|argo9s|argo|flux|kubie|kubectx|kubens|kubeseal|stern|kubecolor|virtctl|tkn|istioctl|velero|ocl|desktop-cluster|kapp|kn'
+# A command word: first on a line, after ; & | ( or $( or a backtick, or behind a sudo, env,
+# time, exec, xargs, watch or nohup in front of it, flags and all ("watch -n 2") -- and with its path (/usr/bin/kubectl)
+# or without. Only in command position: "grep oc" names no cluster.
+COMMAND="(^|[;&|(\`"$'\n'"]|\\\$\\(|\\b(sudo|env|time|exec|xargs|watch|nohup|command)([[:space:]]+-[^[:space:]]+([[:space:]]+[0-9][^[:space:]]*)?)*([[:space:]]+[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*)*[[:space:]]+)[[:space:]]*([^[:space:];&|]*/)?($TOOLS)([[:space:]]|$|[;&|)])"
+# Files that are a cluster's credentials, or a variable pointing at one.
+FILES='KUBECONFIG|TALOSCONFIG|\.kube/|kubeconfig|talosconfig|\.talos/|/desktop/clusters/|/etc/rancher/rke2/|/var/run/secrets/kubernetes\.io'
+
+# --tools: the list above, one a line, for the agents that are told it another way --
+# codex's rules and opencode's permissions, written by desktop-agent-hooks.
+if [[ ${1:-} == --tools ]]; then
+  tr '|' '\n' <<<"$TOOLS"
+  exit 0
+fi
+
+input=$(cat) || exit 0
+# One per line, each encoded: a command can hold newlines and tabs of its own.
+mapfile -t field < <(jq -r '.tool_name // "", (.tool_input.command // "" | @base64),
+  (.tool_input.file_path // .tool_input.path // .tool_input.notebook_path // "" | @base64)' <<<"$input" 2>/dev/null)
+((${#field[@]} == 3)) || exit 0
+tool=${field[0]}
+command=$(base64 -d <<<"${field[1]}" 2>/dev/null)
+path=$(base64 -d <<<"${field[2]}" 2>/dev/null)
+
+what=""
+if [[ $tool == Bash ]]; then
+  if [[ $command =~ $COMMAND ]]; then
+    what="runs ${BASH_REMATCH[7]}"
+  elif grep -qE "$FILES" <<<"$command"; then
+    what="uses a cluster's credentials"
+  fi
+elif [[ -n $path ]] && grep -qE "$FILES" <<<"$path"; then
+  what="opens $path, a cluster's credentials"
+fi
+[[ -n $what ]] || exit 0
+
+cluster=${DESKTOP_CLUSTER:-}
+if [[ -n $cluster ]]; then
+  where="cluster $cluster"
+  if [[ -r $CONF ]] && awk -v n="$cluster" '{ sub(/#.*/, "") } $1 == n && / prod=true( |$)/ { found = 1 } END { exit !found }' "$CONF"; then
+    where="PRODUCTION cluster $cluster"
+  fi
+elif [[ -n ${KUBECONFIG:-} ]]; then
+  where="whatever $KUBECONFIG points at"
+else
+  where="whatever ~/.kube/config points at"
+fi
+
+jq -cn --arg reason "This $what: it reaches a Kubernetes cluster ($where). Allow it this once?" '
+  {hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: $reason}}'
+exit 0

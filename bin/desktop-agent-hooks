@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
-# desktop-agent-hooks: wire Claude Code's hooks to desktop-agent-state, and turn on
-# Remote Control.
+# desktop-agent-hooks: wire the coding agents to the desktop -- Claude Code's and codex's
+# hooks, and opencode's plugin, to desktop-agent-state; each agent's way of asking before it
+# touches a cluster; and Remote Control for Claude Code.
 #
 #   desktop-agent-hooks            # add whatever is missing, change nothing else
 #   desktop-agent-hooks --check    # exit 1 if anything is missing
@@ -16,6 +17,11 @@
 # Claude Code notices the change: sessions already open start reporting from their next
 # hook event, without a restart. (Observed, not documented -- the first session to report
 # here was one that had been running for forty minutes before the hooks existed.)
+#
+# And it asks you before an agent touches a cluster: a PreToolUse hook running
+# desktop-agent-cluster-guard on the tools that could, which answers "ask" for a kubectl, a
+# talosctl, a kubeconfig opened and the like. Added once, beside any PreToolUse hooks of
+# your own.
 #
 # It also turns Remote Control on for every session -- remoteControlAtStartup, the
 # "Enable Remote Control for all sessions" switch in /config -- so an agent left running in
@@ -33,6 +39,12 @@ EVENTS='["SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Sto
 # $HOME is left literal: Claude Code runs the hook through a shell, and a hook does not
 # inherit the desktop session's PATH.
 COMMAND='$HOME/.local/share/desktop/bin/desktop-agent-state'
+GUARD='$HOME/.local/share/desktop/bin/desktop-agent-cluster-guard'
+# Where this script is: the guard's list of tools, and the plugin in config/, come from here.
+DESKTOP_DIR=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+GUARD_BIN="$DESKTOP_DIR/bin/desktop-agent-cluster-guard"
+# The tools that can reach a cluster: Bash runs kubectl, the rest can open a kubeconfig.
+GUARDED='Bash|Read|Edit|Write|MultiEdit|NotebookEdit|Grep|Glob'
 
 # desktop-agent-notify used to be wired to Notification on its own, and desktop-agent-state
 # now does its job -- without the toast Claude's idle reminder sent after every turn. It is
@@ -48,31 +60,123 @@ MERGE='
     then .
     else .hooks[$event] = ((.hooks[$event] // []) + [{hooks: [{type: "command", command: $command, timeout: 5}]}])
     end)
+  | if [.hooks.PreToolUse[]?.hooks[]?.command // empty] | any(contains("desktop-agent-cluster-guard"))
+    then .
+    else .hooks.PreToolUse = ((.hooks.PreToolUse // []) + [{matcher: $guarded, hooks: [{type: "command", command: $guard, timeout: 5}]}])
+    end
   | if has("remoteControlAtStartup") then . else .remoteControlAtStartup = true end'
 
-mkdir -p "$(dirname "$SETTINGS")"
-[[ -f $SETTINGS ]] || echo '{}' >"$SETTINGS"
+# --- Claude Code -------------------------------------------------------------------------
 
-# A settings file that does not parse is left alone rather than replaced by one that does:
-# it holds more than hooks, and a broken file is the user's to see, not this script's to
-# quietly throw away.
-if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
-  echo "desktop-agent-hooks: $SETTINGS is not valid JSON; not touching it" >&2
-  exit 1
+# merge_json <file> <description> <jq args...>: the file with the jq program applied, written
+# back only when it changed. A file that does not parse is left alone rather than replaced by
+# one that does: it holds more than this, and a broken file is the user's to see, not this
+# script's to quietly throw away. --check only says whether anything would change.
+changed=0 failed=0
+merge_json() {
+  local file=$1 what=$2 merged
+  shift 2
+  mkdir -p "$(dirname "$file")"
+  [[ -f $file ]] || echo '{}' >"$file"
+  if ! jq -e . "$file" >/dev/null 2>&1; then
+    echo "desktop-agent-hooks: $file is not valid JSON; not touching it" >&2
+    failed=1
+    return
+  fi
+  merged=$(jq "$@" "$file") || { failed=1; return; }
+  [[ $merged == "$(jq . "$file")" ]] && return
+  changed=1
+  [[ $CHECK == 1 ]] && return
+  printf '%s\n' "$merged" >"$file.$$" && mv -f "$file.$$" "$file"
+  echo "$what"
+}
+
+CHECK=0
+[[ ${1:-} == --check ]] && CHECK=1
+
+merge_json "$SETTINGS" "Claude Code: hooks wired to desktop-agent-state, the cluster guard and Remote Control set" \
+  --argjson events "$EVENTS" --arg command "$COMMAND" --arg guard "$GUARD" --arg guarded "$GUARDED" "$MERGE"
+
+# --- codex --------------------------------------------------------------------------------
+#
+# codex's hooks.json takes Claude Code's format, and its events carry the same JSON, so the
+# same desktop-agent-state reads them -- with two of codex's own: PermissionRequest, its
+# approval prompt, and Interrupt. codex asks you once to trust hooks that are new or changed
+# ("Hooks need review" when it starts); until you do, they do not run.
+#
+# Not the cluster guard: codex 0.169 calls a PreToolUse "ask" unsupported, and then runs the
+# command. What makes codex ask is its own rules -- prefix_rule(..., decision="prompt") in
+# ~/.codex/rules/ -- which it shows as "Would you like to run the following command?" when it
+# is allowed to ask (approval policy on-request), and refuses outright when it is not. So a
+# cluster command is either asked about or not run; it is never run unasked.
+CODEX_DIR="${CODEX_HOME:-$HOME/.codex}"
+CODEX_EVENTS='["SessionStart", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "Interrupt"]'
+if [[ -d $CODEX_DIR ]] || command -v codex >/dev/null 2>&1; then
+  merge_json "$CODEX_DIR/hooks.json" "codex: hooks wired to desktop-agent-state (codex asks once to trust them)" \
+    --argjson events "$CODEX_EVENTS" --arg command "$COMMAND" '
+    reduce ($events[]) as $event (.;
+      if [.hooks[$event][]?.hooks[]?.command // empty] | any(contains("desktop-agent-state"))
+      then .
+      else .hooks[$event] = ((.hooks[$event] // []) + [{hooks: [{type: "command", command: $command, timeout: 5}]}])
+      end)'
+
+  # The rules file is this script's own, written whole: a tool added to the guard's list
+  # reaches codex on the next run.
+  rules="$CODEX_DIR/rules/desktop-clusters.rules"
+  wanted=$(
+    echo "# Written by desktop-agent-hooks: every command that can reach a Kubernetes cluster needs"
+    echo "# your approval. The list is desktop-agent-cluster-guard --tools. Do not edit; it is rewritten."
+    "$GUARD_BIN" --tools | while read -r tool; do
+      printf 'prefix_rule(pattern=["%s"], decision="prompt", justification="reaches a Kubernetes cluster")\n' "$tool"
+    done
+  )
+  if [[ $(cat "$rules" 2>/dev/null) != "$wanted" ]]; then
+    changed=1
+    if [[ $CHECK == 0 ]]; then
+      mkdir -p "$(dirname "$rules")"
+      printf '%s\n' "$wanted" >"$rules"
+      echo "codex: cluster commands need your approval ($rules)"
+    fi
+  fi
 fi
 
-merged=$(jq --argjson events "$EVENTS" --arg command "$COMMAND" "$MERGE" "$SETTINGS") || exit 1
+# --- opencode -----------------------------------------------------------------------------
+#
+# opencode has no hooks. Its plugin, config/opencode/plugin/desktop-agent-state.js, sends the
+# same JSON from opencode's own events; it is copied with the rest of config/ on an install,
+# and here for a machine set up before it existed. And its permissions are told the guard's
+# list -- "kubectl *": "ask" and the rest -- which opencode checks against every command of a
+# line, after && and | as well as first. opencode takes the last rule that matches, so these
+# are put after any of yours, a catch-all "*" included; a value of your own for one of the
+# same patterns is kept.
+OPENCODE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+if [[ -d $OPENCODE_DIR ]] || command -v opencode >/dev/null 2>&1; then
+  plugin_src="$DESKTOP_DIR/config/opencode/plugin/desktop-agent-state.js"
+  plugin="$OPENCODE_DIR/plugin/desktop-agent-state.js"
+  if [[ -f $plugin_src ]] && ! cmp -s "$plugin_src" "$plugin"; then
+    changed=1
+    if [[ $CHECK == 0 ]]; then
+      mkdir -p "$(dirname "$plugin")"
+      cp "$plugin_src" "$plugin"
+      echo "opencode: plugin installed, it reports to desktop-agent-state ($plugin)"
+    fi
+  fi
+  rules=$("$GUARD_BIN" --tools | jq -Rn '[inputs | select(. != "") | ({key: "\(.) *", value: "ask"}, {key: ., value: "ask"})] | from_entries')
+  merge_json "$OPENCODE_DIR/opencode.json" "opencode: cluster commands ask first" --argjson rules "$rules" '
+    if (.permission | type) == "string" then .
+    else .permission.bash = (if (.permission.bash | type) == "string" then {"*": .permission.bash} else (.permission.bash // {}) end)
+         # Last: opencode takes the last rule that matches, so a "*": "allow" after these would
+         # undo them. A value of your own for one of them is kept, in its new place.
+         | .permission.bash as $mine
+         | .permission.bash = (($mine | with_entries(select(.key as $k | $rules | has($k) | not)))
+                               + ($rules | with_entries(.value = ($mine[.key] // .value))))
+    end'
+fi
 
-if [[ ${1:-} == --check ]]; then
-  [[ $merged == "$(jq . "$SETTINGS")" ]]
+((failed)) && exit 1
+if ((CHECK)); then
+  ((changed == 0))
   exit
 fi
-
-if [[ $merged == "$(jq . "$SETTINGS")" ]]; then
-  echo "Claude Code hooks and Remote Control already set"
-  exit 0
-fi
-
-tmp="$SETTINGS.$$"
-printf '%s\n' "$merged" >"$tmp" && mv -f "$tmp" "$SETTINGS"
-echo "Claude Code hooks wired to desktop-agent-state and Remote Control set; sessions report from their next event"
+((changed)) || echo "Agent hooks, the cluster guard and Remote Control already set"
+exit 0

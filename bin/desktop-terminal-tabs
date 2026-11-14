@@ -37,6 +37,20 @@ die() {
 exact() { echo "=$1"; }
 in_session() { echo "=$1:"; }
 
+# cluster_env SESSION: "-e VAR=value" for the cluster SESSION is on, if it is one of ocl's
+# (k8s-NAME), one per line. tmux gives a new session the global environment, not that of
+# the session it was opened from, so without these an agent or a terminal opened in a
+# cluster's session would be on no cluster -- or on whichever ~/.kube/config last chose.
+cluster_env() {
+  local var line
+  [[ -n $1 ]] || return 0
+  tmux show-environment -t "=$1" DESKTOP_CLUSTER >/dev/null 2>&1 || return 0
+  for var in KUBECONFIG DESKTOP_CLUSTER DESKTOP_CLUSTER_KIND TALOSCONFIG; do
+    line=$(tmux show-environment -t "=$1" "$var" 2>/dev/null) || continue
+    [[ $line == "$var="* ]] && printf '%s\n%s\n' -e "$line"
+  done
+}
+
 slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g;s/--*/-/g;s/^-//;s/-$//'; }
 
 session_for() { echo "term-$1"; }
@@ -94,7 +108,9 @@ make_tabs() { # pane -> session
   session=$(session_for "$group")
   read -r width height < <(tmux display-message -p -t "$pane" '#{pane_width} #{pane_height}')
 
-  placeholder=$(tmux new-session -d -s "$session" -c "$dir" -x "$width" -y "$height" \
+  local env=()
+  mapfile -t env < <(cluster_env "$(tmux display-message -p -t "$pane" '#{session_name}')")
+  placeholder=$(tmux new-session -d -s "$session" -c "$dir" -x "$width" -y "$height" "${env[@]}" \
     -P -F '#{pane_id}' "sleep 86400") || die "could not make $session"
   tmux set-option -t "$(in_session "$session")" status-position bottom
   tmux set-option -t "$(in_session "$session")" status-left ""

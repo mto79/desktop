@@ -126,6 +126,8 @@ check "a window that is already there is left alone" \
 
 rm -rf "$sandbox/work.worktrees/fix-runner"
 tm kill-server
+# Gone, not going: a server still on its way out answers a restore with nothing.
+settle "! tm list-sessions"
 "$RESTORE" restore >/dev/null
 settle "tm has-session -t =work"
 check "a tab whose worktree has gone comes back as an ordinary tab, not a broken one" \
@@ -139,5 +141,33 @@ for hook in window-linked window-unlinked session-created session-closed window-
     grep -q "^set-hook -g $hook\[[0-9]*\] 'run-shell -b \"desktop-tmux-restore save --settle\"'" "$conf"
 done
 check "the login script restores" grep -q '^desktop-tmux-restore restore' "$ROOT/bin/desktop-workspace-start"
+
+# --- a cluster's session, made by ocl
+# Restored as a plain one it came back with its name and without its cluster: an agent
+# started in it would have reached whatever ~/.kube/config pointed at.
+mkdir -p "$sandbox/config/desktop" "$sandbox/state/desktop/clusters"
+echo 'lab rke2 kubeconfig=/dev/null' >"$sandbox/config/desktop/clusters.conf"
+echo fake >"$sandbox/state/desktop/clusters/lab.kubeconfig"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$stubs/kubectl"
+chmod +x "$stubs/kubectl"
+tm start-server 2>/dev/null
+desktop-cluster --detached lab >/dev/null 2>&1
+settle "tm has-session -t =k8s-lab"
+tm new-window -d -t =k8s-lab: -n logs
+"$RESTORE" save >/dev/null 2>&1
+tm kill-server
+# Gone, not going: a server still on its way out answers a restore with nothing.
+settle "! tm list-sessions"
+"$RESTORE" restore >/dev/null 2>&1
+settle "tm has-session -t =k8s-lab"
+check "a cluster's session comes back as one" test "$(tm show-options -v -t =k8s-lab: @cluster)" = lab
+check "with its cluster in its environment" \
+  test "$(tm show-environment -t =k8s-lab DESKTOP_CLUSTER)" = DESKTOP_CLUSTER=lab
+check "made by ocl, its shell window marked as ocl marks it" \
+  grep -qx 'shell shell' <<<"$(tm list-windows -t =k8s-lab: -F '#W #{@cluster_action}')"
+check "and a window of your own in it is back too, on the same cluster" \
+  grep -qx 'logs' <<<"$(tm list-windows -t =k8s-lab: -F '#W')"
+"$RESTORE" restore >/dev/null 2>&1
+check "restored twice, nothing is doubled" test "$(tm list-windows -t =k8s-lab: | wc -l)" = 2
 
 finish
