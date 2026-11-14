@@ -10,6 +10,7 @@
 #   ocl -t NAME [NODE...]   the Talos dashboard (talos clusters only)
 #   ocl -x NAME CMD...      one command against NAME, then back
 #   ocl -e NAME             the environment for NAME, for this shell:  ocl -e NAME | source
+#   ocl session [NAME]      a tmux session on NAME, a shell and k9s; prefix + K picks one
 #   ocl login NAME          sign in again, or fetch the kubeconfig again
 #   ocl logout NAME         forget NAME's credentials
 #   ocl list                every cluster: name, kind, where it is
@@ -52,7 +53,7 @@ set -uo pipefail
 CONF="${DESKTOP_CLUSTERS:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/clusters.conf}"
 STORE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/clusters"
 ME=${0##*/}
-RESERVED=" list status names login logout edit help "
+RESERVED=" list status names login logout edit help session "
 
 die() {
   echo "$ME: $*" >&2
@@ -61,7 +62,7 @@ die() {
   exit 1
 }
 
-usage() { sed -n '3,19s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '3,20s/^# \{0,1\}//p' "$0"; }
 
 # ------------------------------------------------------------------------------ the file
 
@@ -229,10 +230,17 @@ title() { printf '\e]0;%s\a' "$1"; }
 
 # One cluster, as one line of JSON: what the dashboard and `ocl status` show.
 status_json() {
-  local state version="" nodes="null" updating=false cv
+  local state version="" nodes='{"nodes":0,"ready":0}' updating=false cv
   state=$(reach)
   if [[ $state == ok ]]; then
-    nodes=$(kc --request-timeout=6s get nodes -o json 2>/dev/null) || nodes=null
+    # Counted as they come, not handed to jq whole: a real cluster's nodes are hundreds of
+    # kilobytes of JSON, past what one argument may be, and the cluster was then shown as
+    # misconfigured -- ocp202, the moment it was signed in to.
+    nodes=$(kc --request-timeout=6s get nodes -o json 2>/dev/null | jq -c '
+      def ready: [.status.conditions[]? | select(.type == "Ready" and .status == "True")] | length > 0;
+      {nodes: (.items // [] | length), ready: ([.items[]? | select(ready)] | length)}' 2>/dev/null) ||
+      nodes='{"nodes":0,"ready":0}'
+    [[ -n $nodes ]] || nodes='{"nodes":0,"ready":0}'
     if [[ $KIND == openshift ]]; then
       cv=$(kc --request-timeout=6s get clusterversion version -o json 2>/dev/null) || cv=null
       version=$(jq -r '.status.desired.version // ""' <<<"${cv:-null}" 2>/dev/null)
@@ -243,11 +251,9 @@ status_json() {
     fi
   fi
   jq -cn --arg name "$NAME" --arg kind "$KIND" --arg reach "$state" --arg version "$version" \
-    --argjson nodes "${nodes:-null}" --argjson updating "$updating" '
-    def ready: [.status.conditions[]? | select(.type == "Ready" and .status == "True")] | length > 0;
+    --argjson count "$nodes" --argjson updating "$updating" '
     {name: $name, kind: $kind, version: $version, updating: $updating,
-     nodes: ($nodes.items // [] | length),
-     ready: ([$nodes.items[]? | select(ready)] | length)}
+     nodes: $count.nodes, ready: $count.ready}
     | .state = (if $reach == "signed-out" then "signed-out"
                 elif $reach == "unreachable" then "unreachable"
                 elif .nodes == 0 then "unknown"
@@ -329,6 +335,7 @@ logout)
   rm -f "$FILE" && echo "Signed out of $NAME"
   exit
   ;;
+session) action=session; shift ;;
 -k) action=k9s; shift ;;
 -a) action=argo; shift ;;
 -c) action=console; shift ;;
@@ -346,6 +353,22 @@ shift 2>/dev/null || true
 load "$name"
 
 case "$action" in
+session)
+  # What prefix + f is for a repository, for a cluster: a tmux session of its own, named
+  # after it, with a shell and k9s on it. Signed in to here, first, so the two windows do
+  # not each open a browser to sign in; and only made once, after that it is gone to.
+  ensure
+  self=$(readlink -f "$0")
+  if ! tmux has-session -t "=$NAME" 2>/dev/null; then
+    tmux new-session -d -s "$NAME" -n shell -c "$HOME" "$self $(printf %q "$NAME")"
+    tmux new-window -d -t "=$NAME:" -n k9s -c "$HOME" "$self -k $(printf %q "$NAME")"
+  fi
+  if [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "=$NAME"
+  else
+    tmux attach-session -t "=$NAME"
+  fi
+  ;;
 shell)
   ensure
   environment

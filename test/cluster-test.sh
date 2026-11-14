@@ -56,7 +56,16 @@ config\ set-context*) put namespace "\$5" ;;
 "get --raw /apis") authed ;;
 "get nodes -o json")
   authed || exit 1
-  if [[ \$(val nodes) == half ]]; then
+  if [[ \$(val nodes) == big ]]; then
+    # A real cluster's worth: 200 nodes of a kilobyte each, past what one argument may hold.
+    pad=\$(printf '%01024d' 0)
+    printf '{"items":['
+    for i in \$(seq 200); do
+      ((i > 1)) && printf ','
+      printf '{"metadata":{"annotations":{"x":"%s"}},"status":{"conditions":[{"type":"Ready","status":"True"}]}}' "\$pad"
+    done
+    printf ']}\n'
+  elif [[ \$(val nodes) == half ]]; then
     echo '{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}},{"status":{"conditions":[{"type":"Ready","status":"False"}]}}]}'
   else
     echo '{"items":[{"status":{"conditions":[{"type":"Ready","status":"True"}]}}]}'
@@ -197,6 +206,13 @@ check "a node not ready is degraded" test "$(state ocp202)" = degraded
 check "OpenShift says its version from the cluster version" \
   test "$(jq -r '.[] | select(.name == "ocp202") | .version' <<<"$answer")" = 4.22.16
 check "never signed in to is signed out" test "$(state ocp203)" = signed-out
+
+# A cluster the size of a real one: its nodes, as JSON, are past what one argument may hold,
+# and handed to jq whole that made it "misconfigured" the moment it was signed in to.
+printf 'context=ocp202\ncluster=x\ntoken=good\nnodes=big\n' >"$store/ocp202.kubeconfig"
+big=$(run status --json ocp202)
+check "a cluster with hundreds of kilobytes of nodes is counted, not called misconfigured" \
+  test "$(jq -r '.state + " " + (.nodes|tostring)' <<<"$big")" = "healthy 200"
 check "Kubernetes says the API server's version" \
   test "$(jq -r '.[] | select(.name == "lab") | .version' <<<"$answer")" = v1.31.4+rke2r1
 check "one that does not answer is unreachable, not signed out" test "$(state kind)" = unreachable
@@ -210,6 +226,28 @@ check "and no other" test -e "$store/lab.kubeconfig"
 
 check "a command's name cannot be taken for a cluster" \
   bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run -k list 2>&1 | grep -q 'is a command'"
+
+# --- a tmux session on a cluster (prefix + K)
+# tmux stubbed: the session is not there yet, then it is, and every call is written down.
+cat >"$stubs/tmux" <<STUB
+#!/usr/bin/env bash
+echo "tmux \$*" >>"$sandbox/tmux-calls"
+[[ \$1 == has-session ]] && { [[ -e "$sandbox/has-session" ]]; exit; }
+exit 0
+STUB
+chmod +x "$stubs/tmux"
+printf 'context=ocp202\ncluster=x\ntoken=good\n' >"$store/ocp202.kubeconfig"
+TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
+check "a session named after the cluster is made, with a shell on it" \
+  grep -q "^tmux new-session -d -s ocp202 -n shell .*desktop-cluster ocp202\$" "$sandbox/tmux-calls"
+check "and k9s beside it" grep -q "^tmux new-window -d -t =ocp202: -n k9s .*desktop-cluster -k ocp202\$" "$sandbox/tmux-calls"
+check "and gone to" grep -q '^tmux switch-client -t =ocp202$' "$sandbox/tmux-calls"
+: >"$sandbox/tmux-calls"
+touch "$sandbox/has-session"
+TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
+check "a second time it is only gone to" test "$(grep -c 'new-' "$sandbox/tmux-calls")-$(grep -c switch-client "$sandbox/tmux-calls")" = "0-1"
+check "prefix + K opens it" grep -q "^bind-key K run-shell \"tmux neww -n cluster 'desktop-cluster session'\"" "$ROOT/config/tmux/tmux.conf"
+rm -f "$stubs/tmux"
 
 # --- the migration from the old ocl
 MIGRATION="$ROOT/migrations/1794593713.sh"
