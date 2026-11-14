@@ -126,6 +126,8 @@ check "a window that is already there is left alone" \
 
 rm -rf "$sandbox/work.worktrees/fix-runner"
 tm kill-server
+# Gone, not going: a server still on its way out answers a restore with nothing.
+settle "! tm list-sessions"
 "$RESTORE" restore >/dev/null
 settle "tm has-session -t =work"
 check "a tab whose worktree has gone comes back as an ordinary tab, not a broken one" \
@@ -154,6 +156,8 @@ settle "tm has-session -t =k8s-lab"
 tm new-window -d -t =k8s-lab: -n logs
 "$RESTORE" save >/dev/null 2>&1
 tm kill-server
+# Gone, not going: a server still on its way out answers a restore with nothing.
+settle "! tm list-sessions"
 "$RESTORE" restore >/dev/null 2>&1
 settle "tm has-session -t =k8s-lab"
 check "a cluster's session comes back as one" test "$(tm show-options -v -t =k8s-lab: @cluster)" = lab

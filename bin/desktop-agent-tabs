@@ -142,9 +142,13 @@ ensure_session() { # session group dir model [width height]
   if tmux has-session -t "$(exact "$session")" 2>/dev/null; then
     return 0
   fi
-  # The session whose window holds the column, for the cluster it may be on.
+  # The session whose window holds the column, for the cluster it may be on. By the pane that
+  # is marked with the group -- or, when desktop-agent-layout asks before that pane exists,
+  # by the window the group is named after: group-for ends it with the window's id.
   local owner env=()
   owner=$(tmux list-panes -a -F '#{session_name}	#{@ai_column}' 2>/dev/null | awk -F'\t' -v g="$group" '$2 == g { print $1; exit }')
+  [[ -n $owner || ! ${group##*-} =~ ^[0-9]+$ ]] ||
+    owner=$(tmux display-message -p -t "@${group##*-}" '#{session_name}' 2>/dev/null)
   mapfile -t env < <(cluster_env "$owner")
   tmux new-session -d -s "$session" -c "$dir" -n "$model" -x "$width" -y "$height" "${env[@]}" || return 1
   tmux set-option -t "$(in_session "$session")" status-position bottom
