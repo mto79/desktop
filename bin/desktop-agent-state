@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 
-# desktop-agent-state: record what a Claude Code session is doing, from its hooks, and say
-# so wherever you happen to be looking.
+# desktop-agent-state: record what a coding agent is doing, from its hooks, and say so
+# wherever you happen to be looking.
+#
+# Claude Code and codex call it as a hook, with the same JSON: codex's hooks.json takes
+# Claude's format, and its events carry the same fields. opencode has no hooks; its plugin,
+# config/opencode/plugin/desktop-agent-state.js, sends the same JSON from opencode's events.
+# Which agent it is comes from DESKTOP_AGENT_KIND, set by that plugin, or from the process
+# the hook was started by.
 #
 # Wired to every hook event that changes the answer to "which of my agents needs me":
 #
@@ -11,6 +17,8 @@
 #   Notification         waiting     a permission prompt, or a question it cannot pass
 #                        done        the idle reminder: the turn ended a while ago
 #   Stop                 done        the turn is finished and the result is yours to read
+#   PermissionRequest    waiting     codex's: an approval it is asking you for
+#   Interrupt            ready       codex's: a turn you stopped, which is not a result
 #   SessionEnd           (removed)
 #
 # One small JSON file per session under $XDG_RUNTIME_DIR/desktop/agents, holding the state,
@@ -50,10 +58,10 @@ NOTIFY_AFTER="${DESKTOP_AGENT_NOTIFY_AFTER:-60}"
 # What a click on the notification runs to get to the pane.
 JUMP="${DESKTOP_AGENT_JUMP:-$(dirname "$(readlink -f "$0")")/desktop-menu-agents}"
 
-# --notify <urgency> <title> <body> <pane> <socket>: show a notification and wait for it to
+# --notify <urgency> <title> <body> <pane> <socket> [app]: show a notification and wait for it to
 # be clicked. Only ever run detached, from below.
 if [[ ${1:-} == --notify ]]; then
-  choice=$(timeout 3600 notify-send --app-name="Claude Code" --urgency="$2" \
+  choice=$(timeout 3600 notify-send --app-name="${7:-Claude Code}" --urgency="$2" \
     --icon=dialog-information --action=default=Open --wait "$3" "$4" 2>/dev/null)
   if [[ $choice == default && -n ${5:-} ]]; then
     # Resolved at click time, not when the notification was sent: windows may have been
@@ -100,9 +108,10 @@ nudge_bar() {
 }
 
 case "$event" in
-SessionStart) state=ready ;;
+SessionStart | Interrupt) state=ready ;;
 UserPromptSubmit | PostToolUse) state=working ;;
 Stop) state=done ;;
+PermissionRequest) state=waiting ;;
 Notification)
   case "$type" in
   idle_prompt) state=done ;;
@@ -160,24 +169,32 @@ elif [[ -n $current ]]; then
   asked=$(jq -r '.asked // ""' <<<"$current" 2>/dev/null) || asked=""
 fi
 
-# The claude process this hook belongs to. Its parent directly when the command is run as a
-# path, a shell in between when the command needs expanding -- "$HOME/..." does.
-agent_pid() {
-  [[ -n ${DESKTOP_AGENT_PID:-} ]] && { echo "$DESKTOP_AGENT_PID"; return; }
-  local pid=$PPID i
+# The agent's process this hook belongs to, and which agent it is: "pid agent". Its parent
+# directly when the command is run as a path, a shell in between when the command needs
+# expanding -- "$HOME/..." does. opencode's plugin says both itself.
+agent_process() {
+  if [[ -n ${DESKTOP_AGENT_PID:-} ]]; then
+    echo "$DESKTOP_AGENT_PID ${DESKTOP_AGENT_KIND:-claude}"
+    return
+  fi
+  local pid=$PPID i comm
   for ((i = 0; i < 4; i++)); do
-    [[ -n $pid && $pid != 1 ]] || return
-    if [[ $(cat "/proc/$pid/comm" 2>/dev/null) == claude ]]; then
-      echo "$pid"
+    [[ -n $pid && $pid != 1 ]] || break
+    comm=$(cat "/proc/$pid/comm" 2>/dev/null)
+    if [[ $comm =~ ^(claude|codex|opencode)$ ]]; then
+      echo "$pid $comm"
       return
     fi
     pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
   done
+  echo " ${DESKTOP_AGENT_KIND:-claude}"
 }
+read -r agent_pid agent_kind < <(agent_process)
+[[ -n $agent_kind ]] || { agent_kind=$agent_pid; agent_pid=""; }
 
 tmp="$file.$$"
 jq -cn \
-  --arg agent claude \
+  --arg agent "$agent_kind" \
   --arg session "$session" \
   --arg state "$state" \
   --argjson since "$now" \
@@ -185,7 +202,7 @@ jq -cn \
   --arg cwd "$cwd" \
   --arg pane "$pane" \
   --arg socket "$socket" \
-  --arg pid "$(agent_pid)" \
+  --arg pid "$agent_pid" \
   --arg asked "$asked" \
   '{agent: $agent, session: $session, state: $state, since: $since, turn: $turn, cwd: $cwd,
     pane: $pane, socket: $socket, pid: ($pid | tonumber? // null), asked: $asked}' >"$tmp" 2>/dev/null &&
@@ -230,7 +247,7 @@ fi
 nudge_bar
 
 notify() { # <urgency> <title> <body>
-  setsid -f "$0" --notify "$1" "$2" "$3" "$pane" "$socket" </dev/null >/dev/null 2>&1
+  setsid -f "$0" --notify "$1" "$2" "$3" "$pane" "$socket" "$app" </dev/null >/dev/null 2>&1
 }
 
 duration() {
@@ -256,7 +273,10 @@ fi
 # "desktop - claude - agent 2". The number is the tab it has in its AI column -- the one on
 # the bar there -- and an agent in a plain pane, which has no tabs, goes without. @ai_group
 # is the session's, which a pane's format falls through to.
-who="${project:-Claude Code} - claude"
+case "$agent_kind" in
+codex) app="Codex" ;; opencode) app="opencode" ;; *) app="Claude Code" ;;
+esac
+who="${project:-$app} - $agent_kind"
 tab=$(tmx display-message -p -t "$pane" '#{?@ai_group,#{window_index},}')
 [[ -n $tab ]] && who+=" - agent $tab"
 
@@ -277,7 +297,7 @@ subject_of() {
   subject=$(tmx display-message -p -t "$pane" '#{pane_title}' 2>/dev/null |
     sed -E 's/^[^[:alnum:]]+[[:space:]]*//') || subject=""
   case "$subject" in
-  "" | "Claude Code" | "$(hostname 2>/dev/null)") subject="" ;;
+  "" | "Claude Code" | [Cc]odex | [Oo]pen[Cc]ode | "$(hostname 2>/dev/null)") subject="" ;;
   esac
   printf '%s' "$subject"
 }

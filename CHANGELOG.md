@@ -12,6 +12,13 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- codex and opencode show what they are doing, as Claude Code does: working, waiting on you,
+  done, in the sidebar, on their tab, on the bar and as a notification when you are needed.
+  codex through its hooks, which it asks you to trust once when it next starts; opencode
+  through a plugin.
+- codex and opencode ask before touching a cluster too, each through its own rules: codex
+  shows its approval prompt for kubectl, helm, talosctl and the rest, and opencode its
+  permission prompt, after any rule of your own that would otherwise let them through.
 - Views: a tmux session laid out once and kept in `~/.config/desktop/views/NAME.toml` -- agent
   windows with a prompt typed in, k9s and Argo CD on a cluster, panes running commands --
   built again by `desktop-view open NAME`. A view can name a cluster, and everything in it,

@@ -105,8 +105,9 @@ def main():
         state = session.get("state", "")
         states[state if state in ("working", "waiting", "done") else "open"] += 1
 
-    # "7 claude, 2 opencode, 5 codex": the count of every agent that is running, which is
-    # more than the sessions above -- opencode and codex report no state to be listed by.
+    # "7 claude, 2 opencode, 5 codex": the count of every agent that is running, which can be
+    # more than the sessions above -- an agent started before its hooks were wired, or a codex
+    # whose hooks are not trusted yet, reports no state to be listed by.
     kinds = [{"key": name, "count": int(count)}
              for count, name in re.findall(r"(\d+) (\w+)", running.get("tooltip", ""))]
 

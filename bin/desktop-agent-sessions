@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
-"""The Claude Code sessions on this machine and what each is doing, newest need first.
+"""The coding agents on this machine -- Claude Code, codex, opencode -- and what each is
+doing, newest need first.
 
     desktop-agent-sessions                # a line per session
     desktop-agent-sessions --json         # what the bar and the AI panel read
@@ -8,7 +9,8 @@
     desktop-agent-sessions --pick         # choose one in fzf and jump to its pane
     desktop-agent-sessions --next <client> # prefix + N: go to the one needing you most
 
-Read from the records desktop-agent-state writes from Claude Code's hooks, one per session.
+Read from the records desktop-agent-state writes from the agents' hooks (opencode's plugin),
+one per session.
 Those are only ever removed by a SessionEnd hook, and a session that crashes, is killed, or
 dies with its terminal fires none. So a record whose claude process is gone is deleted here
 rather than shown: an agent listed as "working" that no longer exists is worse than no list.
@@ -42,9 +44,11 @@ def state_dir():
     return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desktop" / "agents"
 
 
-def alive(pid):
+# The agents that report their state: Claude Code and codex through their hooks, opencode
+# through its plugin. A record's pid is its agent's, and counts only while it still is.
+def alive(pid, agent="claude"):
     try:
-        return Path(f"/proc/{int(pid)}/comm").read_text().strip() == "claude"
+        return Path(f"/proc/{int(pid)}/comm").read_text().strip() == agent
     except (OSError, ValueError, TypeError):
         return False
 
@@ -146,7 +150,7 @@ def sessions(now=None, targets=True):
 
         pid = record.get("pid")
         since = record.get("since") if isinstance(record.get("since"), (int, float)) else now
-        gone = not alive(pid) if pid is not None else now - since > UNVERIFIABLE_SECONDS
+        gone = not alive(pid, record.get("agent") or "claude") if pid is not None else now - since > UNVERIFIABLE_SECONDS
         if gone:
             try:
                 path.unlink()

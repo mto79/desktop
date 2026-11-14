@@ -20,9 +20,9 @@ message of several lines is one message, and then presses Enter.
 The message is headed with who sent it and the command to answer with, when it is sent
 from an agent's pane: the agent at the other end has no other way to know.
 
-It cannot tell whether opencode or codex is in the middle of a turn -- they report nothing
--- so what happens to a message typed into a busy one is up to that agent. A Claude Code
-agent that is working gets it queued, as typed input is.
+It does not wait for an agent to finish its turn: what happens to a message typed into a
+busy one is up to that agent. A Claude Code agent that is working gets it queued, as typed
+input is.
 """
 
 import importlib.machinery

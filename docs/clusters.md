@@ -61,8 +61,8 @@ A cluster's session is listed with the repositories, with the cluster as its sec
 where a repository has its branch: `⎈ ocp204`. And an agent that can reach a cluster says
 which, after its state: `blocked ⎈ ocp204 · fix-runner`. That is read from the agent's own
 process -- `DESKTOP_CLUSTER`, or a `KUBECONFIG` in ocl's store -- so it is the cluster a
-`kubectl` it runs would reach, not a guess; opencode and codex, which report no process,
-are found under their pane. A process's environment cannot change, so each is read once.
+`kubectl` it runs would reach, not a guess; an agent whose record names no process is found
+under its pane. A process's environment cannot change, so each is read once.
 
 `prod=true` in clusters.conf draws the cluster in red, in the sidebar and in the shell's
 first line. An agent with production in reach should be seen to have it.
@@ -83,7 +83,27 @@ one. A command that only mentions one (`grep oc`, `echo kubectl`) is let through
 is anything the guard cannot read: it must never be what breaks an agent. It takes about
 fifteen milliseconds a call.
 
-Only Claude Code sends hooks: opencode and codex are not covered.
+Each agent is told in its own words, from the one list (`desktop-agent-cluster-guard --tools`),
+all written by `desktop-agent-hooks`:
+
+| Agent | How it asks | Where |
+|---|---|---|
+| Claude Code | the guard, as a `PreToolUse` hook answering "ask" | `~/.claude/settings.json` |
+| codex | its own rules, `prefix_rule(pattern=["kubectl"], decision="prompt")`: codex shows "Would you like to run the following command?" with the reason "reaches a Kubernetes cluster" | `~/.codex/rules/desktop-clusters.rules` |
+| opencode | its own permissions, `"kubectl *": "ask"` and the rest | `~/.config/opencode/opencode.json` |
+
+Why not the guard for all three: codex (0.169) lists "ask" in its hook schema but calls it
+unsupported when a hook answers it -- and then runs the command. Its rules ask properly. Under
+codex's `on-request` approval policy you are asked; under a stricter one codex refuses the
+command outright. Either way it does not run unasked.
+
+opencode checks its rules against every command of a line, after `&&` and `|` too, and takes
+the **last** rule that matches. So the cluster rules are kept after any rules of your own,
+including a catch-all `"*": "allow"`, which would otherwise undo them. A value of your own
+for one of the same patterns (`"helm *": "allow"`) is kept: that is your decision.
+
+Neither codex nor opencode looks inside a file the way the guard does: reading a kubeconfig
+with their own file tools is not asked about.
 
 ## One kubeconfig per cluster
 

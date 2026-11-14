@@ -21,7 +21,10 @@
 #   - reading or writing such a file with any other tool: it holds the credentials.
 #
 # It must never be what breaks an agent: input it cannot read is let through, and it
-# always exits 0. Only Claude Code sends hooks; opencode and codex are not covered.
+# always exits 0. It is Claude Code's. codex's hooks cannot answer "ask" -- it calls that
+# unsupported and runs the command -- and opencode has no hooks; both are told the same list
+# of tools in their own words instead (desktop-agent-hooks): codex as rules that need your
+# approval, opencode as commands it asks about.
 
 set -uo pipefail
 
@@ -34,6 +37,13 @@ TOOLS='kubectl|oc|helm|helmfile|k9s|talosctl|argocd|argo9s|argo|flux|kubie|kubec
 COMMAND="(^|[;&|(\`"$'\n'"]|\\\$\\(|\\b(sudo|env|time|exec|xargs|watch|nohup|command)([[:space:]]+-[^[:space:]]+([[:space:]]+[0-9][^[:space:]]*)?)*([[:space:]]+[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*)*[[:space:]]+)[[:space:]]*([^[:space:];&|]*/)?($TOOLS)([[:space:]]|$|[;&|)])"
 # Files that are a cluster's credentials, or a variable pointing at one.
 FILES='KUBECONFIG|TALOSCONFIG|\.kube/|kubeconfig|talosconfig|\.talos/|/desktop/clusters/|/etc/rancher/rke2/|/var/run/secrets/kubernetes\.io'
+
+# --tools: the list above, one a line, for the agents that are told it another way --
+# codex's rules and opencode's permissions, written by desktop-agent-hooks.
+if [[ ${1:-} == --tools ]]; then
+  tr '|' '\n' <<<"$TOOLS"
+  exit 0
+fi
 
 input=$(cat) || exit 0
 # One per line, each encoded: a command can hold newlines and tabs of its own.
