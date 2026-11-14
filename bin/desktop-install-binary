@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+
+# desktop-install-binary <file> <target>: put a downloaded program in place, as 0755.
+#
+# Shared by the updaters that keep a binary in /usr/local/bin (oc, kubectl, openbao, the
+# HashiCorp tools). Three cases, because that directory is root's while what is in it is
+# sometimes the user's -- an oc or a kubectl copied there by hand, owned by whoever did it:
+#
+#   - the directory is writable: installed beside the old one and renamed over it, so
+#     nothing running it ever sees half a file;
+#   - only the file is: written over in place. `install` cannot do that -- it removes the
+#     old file first, which needs the directory, and failed with "cannot remove";
+#   - neither: sudo install.
+#
+# A file in use cannot be written over in place ("Text file busy"), so that case falls
+# back to sudo as well.
+
+set -uo pipefail
+
+src=${1:?usage: desktop-install-binary <file> <target>}
+target=${2:?usage: desktop-install-binary <file> <target>}
+dir=$(dirname "$target")
+
+if [[ -w $dir ]]; then
+  install -m 0755 "$src" "$target.new.$$" && mv -f "$target.new.$$" "$target" && exit 0
+  rm -f "$target.new.$$"
+elif [[ -e $target && -w $target ]]; then
+  cp -f "$src" "$target" 2>/dev/null && chmod 0755 "$target" && exit 0
+fi
+sudo install -m 0755 "$src" "$target"

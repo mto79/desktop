@@ -80,6 +80,49 @@ run >/dev/null 2>&1 && status=0 || status=$?
 check "dl.k8s.io out of reach does not fail the update" test "$status" = 0
 check "and leaves kubectl as it was" test "$(version)" = v1.35.11
 
+# --- putting it in place ------------------------------------------------------------------
+
+# /usr/local/bin is root's, while a kubectl copied there by hand is the user's. `install`
+# removes the old file first, which needs the directory, so it failed with "cannot remove"
+# where writing over the file itself would have done. Never sudo here: a stub refuses.
+INSTALL="$ROOT/bin/desktop-install-binary"
+cat >"$sandbox/sudo-refuses" <<'STUB'
+#!/usr/bin/env bash
+echo "sudo $*" >>"$SUDO_LOG"
+exit 1
+STUB
+mkdir -p "$sandbox/nosudo" && mv "$sandbox/sudo-refuses" "$sandbox/nosudo/sudo" && chmod +x "$sandbox/nosudo/sudo"
+place() { PATH="$sandbox/nosudo:$PATH" SUDO_LOG="$sandbox/sudo.log" bash "$INSTALL" "$@"; }
+printf 'new\n' >"$sandbox/new-binary"
+
+mkdir -p "$sandbox/rootdir"
+printf 'old\n' >"$sandbox/rootdir/kubectl"
+chmod 0755 "$sandbox/rootdir/kubectl"
+chmod 0555 "$sandbox/rootdir"
+place "$sandbox/new-binary" "$sandbox/rootdir/kubectl"
+check "a kubectl of the user's own in a directory that is not is written over in place" \
+  test "$(cat "$sandbox/rootdir/kubectl")" = new
+check "  without asking for sudo" test ! -e "$sandbox/sudo.log"
+check "  and stays runnable" test -x "$sandbox/rootdir/kubectl"
+chmod 0755 "$sandbox/rootdir"
+
+mkdir -p "$sandbox/owndir"
+place "$sandbox/new-binary" "$sandbox/owndir/kubectl"
+check "into a directory of the user's, it is simply put there" test "$(cat "$sandbox/owndir/kubectl")" = new
+check "  leaving no half-written file beside it" test -z "$(ls "$sandbox/owndir" | grep -v '^kubectl$')"
+
+mkdir -p "$sandbox/lockeddir"
+printf 'old\n' >"$sandbox/lockeddir/kubectl"
+chmod 0555 "$sandbox/lockeddir/kubectl" "$sandbox/lockeddir"
+place "$sandbox/new-binary" "$sandbox/lockeddir/kubectl" 2>/dev/null
+check "where neither is writable, it is sudo's" grep -q '^sudo install -m 0755 ' "$sandbox/sudo.log"
+chmod 0755 "$sandbox/lockeddir"
+
+for updater in kubectl oc openbao hashicorp; do
+  check "desktop-update-$updater puts its binary in place the same way" \
+    grep -q 'desktop-install-binary' "$ROOT/bin/desktop-update-$updater"
+done
+
 check "desktop-update keeps it current" grep -qx 'desktop-update-kubectl' "$ROOT/bin/desktop-update"
 check "and a clean install uses the same script" grep -q 'desktop-update-kubectl' "$ROOT/install/packaging/kubectl.sh"
 

@@ -119,12 +119,8 @@ got=$(version_of "$work/bao")
 }
 
 # Without sudo where that is enough: a bao put there by hand may be the user's own file.
-if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
-  install -m 0755 "$work/bao" "$TARGET.new" 2>/dev/null && mv -f "$TARGET.new" "$TARGET" ||
-    cp -f "$work/bao" "$TARGET"
-else
-  sudo install -m 0755 "$work/bao" "$TARGET"
-fi
+# Without sudo where that is enough: one put there by hand may be the user's own file.
+"$(dirname "$(readlink -f "$0")")/desktop-install-binary" "$work/bao" "$TARGET"
 
 now=$(installed)
 echo "bao $now installed"

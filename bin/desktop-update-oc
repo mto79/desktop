@@ -83,13 +83,8 @@ got=$("$work/oc" version --client | sed -n 's/^Client Version: //p')
   exit 1
 }
 
-# Without sudo where that is enough: an oc put there by hand may be the user's own file.
-if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
-  install -m 0755 "$work/oc" "$TARGET.new" 2>/dev/null && mv -f "$TARGET.new" "$TARGET" ||
-    cp -f "$work/oc" "$TARGET"
-else
-  sudo install -m 0755 "$work/oc" "$TARGET"
-fi
+# Without sudo where that is enough: one put there by hand may be the user's own file.
+"$(dirname "$(readlink -f "$0")")/desktop-install-binary" "$work/oc" "$TARGET"
 
 now=$("$TARGET" version --client | sed -n 's/^Client Version: //p')
 echo "oc $now installed"

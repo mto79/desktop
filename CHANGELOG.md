@@ -138,6 +138,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- `desktop-update` updates a kubectl that was copied into /usr/local/bin by hand, instead of
+  failing with "cannot remove '/usr/local/bin/kubectl'". oc, OpenBao and the HashiCorp tools
+  put their binaries in place the same way, and fall back to sudo when one is in use.
 - On the laptop screen alone the bar's CPU widget shows its percentage again. Short of
   room, the bar dropped its whole label, number and all; it now drops the graph first.
 - The agent columns' bar figures no longer start a process each time tmux asks for them

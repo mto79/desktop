@@ -80,11 +80,8 @@ got=$("$work/kubectl" version --client 2>/dev/null | sed -n 's/^Client Version: 
   exit 1
 }
 
-if [[ -w $TARGET || (! -e $TARGET && -w $(dirname "$TARGET")) ]]; then
-  install -m 0755 "$work/kubectl" "$TARGET"
-else
-  sudo install -m 0755 "$work/kubectl" "$TARGET"
-fi
+# Without sudo where that is enough: one put there by hand may be the user's own file.
+"$(dirname "$(readlink -f "$0")")/desktop-install-binary" "$work/kubectl" "$TARGET"
 
 now=$(installed)
 echo "kubectl $now installed"
