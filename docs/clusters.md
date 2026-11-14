@@ -9,10 +9,16 @@ OpenShift, RKE2, Talos and any other Kubernetes cluster, reached the same way:
     ocl -c NAME             web console    ocl -t NAME     Talos dashboard
     ocl -x NAME CMD...      one command    ocl -e NAME     exports for this shell
     ocl status              every cluster asked at once: signed in, nodes, version
+    ocl session [NAME]      a tmux session on it: a shell and k9s
     ocl login NAME | logout NAME | list | names | edit
 
 The same is in the menu (`Go → Clusters`), on the dashboard's Infrastructure tab, and in
 voice commands: "k9s on lab", "argo on ocp302", "talos dashboard on edge".
+
+In tmux, `prefix + K` is to clusters what `prefix + f` is to repositories: pick one, sign in
+if it needs it, and go to a session named after it, with a `shell` window and a `k9s` window
+on its kubeconfig. Signing in comes first, so the two windows do not each open a browser;
+a session already there is gone to rather than made again.
 
 ## One kubeconfig per cluster
 

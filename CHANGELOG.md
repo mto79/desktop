@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `prefix + K` in tmux picks a cluster, signs in if it needs it, and goes to a session named
+  after it with a shell and k9s on it -- what `prefix + f` is for repositories. Also
+  `ocl session NAME`.
 - `ocl` reaches RKE2, Talos and any Kubernetes cluster as well as OpenShift, from a list in
   `~/.config/desktop/clusters.conf` rather than one written into the script. Each cluster has
   a kubeconfig of its own, so a terminal stays on the cluster it was opened on whatever
@@ -138,6 +141,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A cluster with many nodes is shown healthy once signed in to, in `ocl status` and on the
+  dashboard, instead of "misconfigured": its node list was too long to hand over whole.
 - `prefix + ?` lists every key tmux.conf adds: fourteen were missing, among them the splits,
   resizing, joining panes and new sessions. It shows in two columns where the terminal is wide
   enough, and the popup is sized to the screen, so the end of the list is no longer cut off.

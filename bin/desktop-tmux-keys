@@ -57,6 +57,7 @@ C-Space	Ctrl+Space	the session you were in before
 `	`	the session of the marked pane
 C-a	Ctrl+a	a Ctrl+a for the program in the pane
 f	f	sessionizer: a repository or a task, laid out
+K	K	a cluster: signed in, with a shell and k9s on it
 e	e	sidebar: a row per session and its agents, on or off
 Space	Space	the window you were in before
 r	r	reload tmux.conf
