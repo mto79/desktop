@@ -6,13 +6,25 @@ source "$(dirname "$0")/lib.sh"
 CONF="$ROOT/config/tmux/tmux.conf"
 KEYS="$ROOT/bin/desktop-tmux-keys"
 
-# Compared as text, not as a pattern: half of these keys are regex characters.
-bound() {
-  awk -v key="$1" '
-    BEGIN { n = split("bind-key |bind-key -r |bind |bind -r |bind -n ", lead, "|") }
-    { for (i = 1; i <= n; i++) if (index($0, lead[i] key " ") == 1) found = 1 }
-    END { exit !found }' "$CONF"
+# Every key tmux.conf binds on the prefix, as tmux reads it: "-" and "|" are quoted there,
+# "\\" and \` escaped. Compared as text, not as a pattern: half of these keys are regex
+# characters.
+conf_keys() {
+  python3 - "$CONF" <<'PY'
+import re, sys
+for line in open(sys.argv[1]):
+    m = re.match(r'\s*(?:bind-key|bind)\s+((?:-\w\s+)*)(\S+)', line)
+    if not m or re.search(r'-[nT]\b', m.group(1)):
+        continue
+    key = m.group(2)
+    if len(key) >= 2 and key[0] == key[-1] and key[0] in "\"'":
+        key = key[1:-1].encode().decode("unicode_escape")
+    elif len(key) == 2 and key[0] == "\\":
+        key = key[1]
+    print(key)
+PY
 }
+bound() { grep -qxF -- "$1" <<<"$(conf_keys)"; }
 
 count=0
 while IFS=$'\t' read -r key shown what; do
@@ -21,6 +33,14 @@ while IFS=$'\t' read -r key shown what; do
   check "prefix + $shown says what it does" test -n "$what"
 done < <("$KEYS" --list)
 check "the list is not empty" test "$count" -gt 10
+
+# And the other way: a key bound in tmux.conf and missing from the list is one nobody finds.
+# Fourteen were, before this check: the splits, the resizing, joining panes, new sessions.
+# A key listed once for a pair (C-h for Ctrl+h j k l, < for < >) stands for the others.
+listed=$("$KEYS" --list | cut -f1)
+for key in $(conf_keys | grep -vxF -e C-j -e C-k -e C-l -e '>' | sort -u); do
+  check "prefix + $key, bound in tmux.conf, is on the list" grep -qxF -- "$key" <<<"$listed"
+done
 
 # The keys that came with agents, tabs and tasks are the reason the list exists.
 for key in t T Tab x a A S g D Z; do

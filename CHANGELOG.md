@@ -138,6 +138,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- `prefix + ?` lists every key tmux.conf adds: fourteen were missing, among them the splits,
+  resizing, joining panes and new sessions. It shows in two columns where the terminal is wide
+  enough, and the popup is sized to the screen, so the end of the list is no longer cut off.
 - `desktop-update` updates a kubectl that was copied into /usr/local/bin by hand, instead of
   failing with "cannot remove '/usr/local/bin/kubectl'". oc, OpenBao and the HashiCorp tools
   put their binaries in place the same way, and fall back to sudo when one is in use.

@@ -2,7 +2,7 @@
 
 # desktop-tmux-keys: the tmux keys this desktop adds, on one screen.
 #
-#   desktop-tmux-keys          # prefix + ?, in a popup: the list, then any key to close
+#   desktop-tmux-keys          # prefix + ?, in a popup: two columns, then any key to close
 #   desktop-tmux-keys --list     # "key<TAB>shown as<TAB>what it does", for the test
 #   desktop-tmux-keys --sidebar  # the sidebar's own keys, the same way
 #
@@ -17,11 +17,12 @@ set -uo pipefail
 
 keys() {
   cat <<'KEYS'
-# Tabs -- a terminal's from a terminal, the AI column's from anywhere else
+# Tabs -- a terminal's in a terminal, the AI column's elsewhere
 t	t	another tab: a terminal, or an agent on the same files
 Tab	Tab	next tab
 BTab	Shift+Tab	previous tab
 [	[	scroll back in the tab on top
+PPage	PgUp	the same, a page up at once
 # Agents
 a	a	next model: claude, opencode, codex
 A	A	pick a model from a menu
@@ -33,6 +34,17 @@ T	T	new task: a branch name, and a tab whose agent works there
 D	D	finish the task on show: push, open the review, remove it
 # Terminal
 Z	Z	the window's terminal full size, and back
+# Panes and windows
+|	|	split beside this pane, in its directory
+-	-	split below this pane
+\	\	split beside the whole window
+_	_	split below the whole window
+C-h	Ctrl+h j k l	make the pane bigger that way; hold for more
+j	j	pick a window, and take its pane in beside this one
+J	J	the same, taken in below
+c	c	new window, in this pane's directory
+<	< >	move the window left or right; hold for more
+h	h	your notes beside this pane
 # Closing
 x	x	the tab on top, or a plain pane
 w	w	the window
@@ -40,6 +52,10 @@ q	q	the session
 Q	Q	every session: the tmux server itself
 # Getting around
 s	s	the sessions you work in
+n	n	new session, by name
+C-Space	Ctrl+Space	the session you were in before
+`	`	the session of the marked pane
+C-a	Ctrl+a	a Ctrl+a for the program in the pane
 f	f	sessionizer: a repository or a task, laid out
 e	e	sidebar: a row per session and its agents, on or off
 Space	Space	the window you were in before
@@ -71,20 +87,55 @@ if [[ ${1:-} == --sidebar ]]; then
 fi
 
 bold=$(tput bold 2>/dev/null) dim=$(tput dim 2>/dev/null) plain=$(tput sgr0 2>/dev/null)
-echo
-while IFS=$'\t' read -r bound shown what; do
-  if [[ $bound == '#'* ]]; then
-    printf '\n %s%s%s\n' "$dim" "${bound#\# }" "$plain"
-  else
-    printf '   %sprefix %-10s%s %s\n' "$bold" "$shown" "$plain" "$what"
+
+# The lines of one part of the list. Sections are split between two columns, at "# Panes",
+# because sixty lines do not fit a popup on a laptop's screen; side by side they do.
+render() { # first|second
+  local part=$1 half=first bound shown what
+  while IFS=$'\t' read -r bound shown what; do
+    [[ $bound == '# Panes'* ]] && half=second
+    [[ $half == "$part" ]] || continue
+    if [[ $bound == '#'* ]]; then
+      printf '\n %s%s%s\n' "$dim" "${bound#\# }" "$plain"
+    else
+      printf '   %sprefix %-12s%s %s\n' "$bold" "$shown" "$plain" "$what"
+    fi
+  done < <(keys)
+  if [[ $part == second ]]; then
+    printf '\n %sIn the sidebar (prefix e)%s\n' "$dim" "$plain"
+    printf ' %s● red blocked  yellow working  green done  ○ idle%s\n' "$dim" "$plain"
+    while IFS=$'\t' read -r _ shown what; do
+      printf '   %s%-19s%s %s\n' "$bold" "$shown" "$plain" "$what"
+    done < <(sidebar_keys)
   fi
-done < <(keys)
+}
 
-printf '\n %sIn the sidebar (prefix e) -- ● red blocked  yellow working  green done  ○ idle%s\n' "$dim" "$plain"
-while IFS=$'\t' read -r _ shown what; do
-  printf '   %s%-17s%s %s\n' "$bold" "$shown" "$plain" "$what"
-done < <(sidebar_keys)
+# Visible width: the bold and dim codes take no room on screen.
+visible() {
+  local s=$1
+  [[ -n $bold ]] && s=${s//"$bold"/}
+  [[ -n $dim ]] && s=${s//"$dim"/}
+  [[ -n $plain ]] && s=${s//"$plain"/}
+  echo "${#s}"
+}
 
-# In the popup the list would be gone the moment it was drawn.
-[[ -t 1 ]] && read -r -n 1 -s
+COLUMN=82
+mapfile -t left < <(render first)
+mapfile -t right < <(render second)
+cols=$(tput cols 2>/dev/null || echo 80)
+
+if ((cols >= COLUMN * 2 + 2)); then
+  rows=$((${#left[@]} > ${#right[@]} ? ${#left[@]} : ${#right[@]}))
+  for ((i = 0; i < rows; i++)); do
+    line=${left[i]:-}
+    printf '%s%*s%s\n' "$line" $((COLUMN - $(visible "$line"))) "" "${right[i]:-}"
+  done
+  # In the popup the list would be gone the moment it was drawn.
+  [[ -t 1 ]] && read -r -n 1 -s
+elif [[ -t 1 ]]; then
+  # Too narrow for two: one column, scrolled with the arrows; q closes.
+  printf '%s\n' "${left[@]}" "${right[@]}" | less -R -X -P ' q closes, arrows scroll '
+else
+  printf '%s\n' "${left[@]}" "${right[@]}"
+fi
 exit 0
