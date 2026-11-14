@@ -42,7 +42,8 @@ An agent that can reach a cluster says which, after its state: "blocked ⎈ ocp2
 read from the agent's own environment -- KUBECONFIG and DESKTOP_CLUSTER, set by ocl -- so it
 is the cluster a kubectl the agent runs would land on, not a guess. A cluster marked
 prod=true in clusters.conf is drawn in red. A cluster's own session (k8s-NAME, made by ocl)
-has the cluster as its second line where a repository has its branch.
+has the cluster as its second line where a repository has its branch, and a view's session
+(view-NAME, made by desktop-view) says "◆ view", with its cluster after it if it has one.
 
     click, Enter, l   go to the session, or straight to the agent
     j k, ↑ ↓, wheel   move; the agents shown follow the session under the cursor
@@ -212,6 +213,7 @@ CLUSTERS_CONF = os.environ.get("DESKTOP_CLUSTERS") or os.path.join(
 # A cluster's own tmux session, as desktop-cluster names it.
 CLUSTER_SESSION = "k8s-"
 CLUSTER_MARK = "⎈"  # the helm; one cell wide, where a ⛵ takes two and shifts the row
+VIEW_MARK = "◆"     # a desktop-view session, built from a file
 
 
 def tmux(*args):
@@ -469,11 +471,11 @@ def collect():
     listing = tmux("list-windows", "-a", "-F",
                    "#{session_name}\t#{window_index}\t#{@agent_state}\t#{@ai_group}"
                    "\t#{@term_group}\t#{session_path}\t#{@ai_model}\t#{b:@worktree}"
-                   "\t#{window_name}\t#{window_id}\t#{pane_pid}\t#{@cluster}")
+                   "\t#{window_name}\t#{window_id}\t#{pane_pid}\t#{@cluster}\t#{@view}")
     sessions = {}
     for line in listing.splitlines():
-        parts = (line.split("\t") + [""] * 12)[:12]
-        name, index, mark, group, tabs, path, model, task, window, window_id, pane_pid, cluster = parts
+        parts = (line.split("\t") + [""] * 13)[:13]
+        name, index, mark, group, tabs, path, model, task, window, window_id, pane_pid, cluster, view = parts
         if group or tabs:
             owner, where = belong.get(group or tabs) or (None, "")
             if not owner:
@@ -484,6 +486,9 @@ def collect():
             # ocl's own sessions are marked with the cluster they are for.
             if cluster:
                 sessions[owner]["cluster"] = cluster
+            # And desktop-view's with the view they were built from.
+            if view:
+                sessions[owner]["view"] = view
         session = sessions.setdefault(owner, {"path": "", "agents": []})
         record = records.get(f"{name}:{index}", {})
         state = state_of(record, mark)
@@ -574,6 +579,9 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
         # A cluster's session has no branch worth the line: the cluster is what it is for.
         if found.get("cluster"):
             parts = [cluster_part(found["cluster"])]
+        # A view says so, and keeps its cluster after it: "◆ view ⎈ ocp204".
+        if found.get("view"):
+            parts = [(f"{VIEW_MARK} view", "accent")] + (parts if found.get("cluster") else [])
         if not detailed:
             parts = parts[:next((i for i, part in enumerate(parts) if part[1] == "blue"), len(parts))]
         if parts:

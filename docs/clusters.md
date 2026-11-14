@@ -26,6 +26,9 @@ The state is the dashboard's last look (`?` when it has none): the list opens at
 than wait seconds for every cluster to answer. Outside tmux it is the same list in the
 terminal, and with no terminal at all -- started from a key -- the desktop's own menu.
 
+Clusters are also in the session picker on `prefix + s`, with repositories and views
+([views.md](views.md)); a view can name a cluster, and is then on it as a whole.
+
 The same is in the menu (`Go → Clusters`), on the dashboard's Infrastructure tab, and in
 voice commands: "k9s on lab", "argo on ocp302", "talos dashboard on edge".
 

@@ -11,6 +11,7 @@ and stays there; these pages are the map between them.
 | [hyprland.md](hyprland.md) | Bindings, window rules, monitors, workspaces, and the move from `.conf` to Lua. |
 | [shell.md](shell.md) | The Quickshell shell: bar, panels, launcher, notifications, dashboard, and how to drive it from a terminal. |
 | [agents-and-tmux.md](agents-and-tmux.md) | Coding agents, their state on the bar, tmux sessions, and tasks in worktrees. |
+| [views.md](views.md) | Views: sessions laid out once and kept in a file; the session picker on `prefix + s` for repositories, clusters and views. |
 | [clusters.md](clusters.md) | OpenShift, RKE2, Talos and Kubernetes clusters through `ocl`: one kubeconfig each, the dashboard, menu and voice. |
 | [system.md](system.md) | Backups, the security check, network, storage, audio and Bluetooth. |
 | [voice.md](voice.md) | Dictation, voice commands, speech, and meeting capture. |

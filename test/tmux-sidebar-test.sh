@@ -42,6 +42,8 @@ case "$args" in
   printf 'ai-alpha-2-opencode\t1\t\talpha-2\t\t/w/alpha\topencode\t\topencode\t@24\t5002\n'
   # With clusters (\$SANDBOX/with-clusters): ocl's session for the lab cluster, marked so.
   [[ -e $SANDBOX/with-clusters ]] && printf 'k8s-lab\t1\t\t\t\t/home/u\t\t\tshell\t@40\t5001\tlab\n'
+  # And a view's session, built by desktop-view with the lab cluster.
+  [[ -e $SANDBOX/with-clusters ]] && printf 'view-upgrade\t1\t\t\t\t/home/u\t\t\tide\t@41\t5001\tlab\tupgrade\n'
   # A terminal's tabs in alpha, and a column whose window has gone.
   printf 'term-alpha-3\t1\t\t\talpha-3\t/w/alpha\t\t\tfish\n'
   printf 'ai-gone-9-claude\t1\twaiting\tgone-9\t\t/w\tclaude\t\tclaude\n'
@@ -454,14 +456,18 @@ pid=5001 process 5001 1 DESKTOP_CLUSTER=lab
 printf 'lab   rke2  ssh=admin@lab.example prod=true\nedge  talos talosconfig=/t\n' >"$sandbox/clusters.conf"
 touch "$sandbox/with-clusters"
 clustered=$(drive rows)
+# second_line <session>: the line drawn under a session's row.
+second_line() { grep -A1 -x " · $1" <<<"$clustered" | sed -n 2p; }
 check "a cluster's own session has the cluster as its second line" \
-  grep -A1 -x ' · k8s-lab' <<<"$clustered" | grep -qx '   ⎈ lab'
+  test "$(second_line k8s-lab)" = '   ⎈ lab'
 check "an agent says which cluster it can reach, after its state" \
   grep -qx '   blocked ⎈ lab' <<<"$(drive select-beta)"
 check "found under the pane when its own process is not the one on it" \
   grep -qx '   idle ⎈ edge' <<<"$clustered"
 check "and from a kubeconfig of ocl's when nothing else says" \
   test "$(grep -c '⎈ edge' <<<"$clustered")" = 1
+check "a view's session says so, with its cluster after it" \
+  test "$(second_line view-upgrade)" = '   ◆ view ⎈ lab'
 check "a production cluster is red, any other blue" test "$(drive cluster-colours)" = "red blue"
 rm -rf "$sandbox/with-clusters" "$sandbox/proc"
 check "an agent on no cluster says nothing of one" lacks '⎈' <<<"$(drive rows)"

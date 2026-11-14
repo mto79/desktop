@@ -1,0 +1,545 @@
+#!/usr/bin/env python3
+
+"""Views: a tmux session you lay out once, keep in a file, and open again by name.
+
+    desktop-view open NAME [--detached]   # build it, or go to it if it is open
+    desktop-view save NAME [--force]      # the session you are in, written down as NAME
+    desktop-view edit NAME                # the file in $EDITOR; a new one starts from an example
+    desktop-view show NAME                # what open would build, without building it
+    desktop-view list                     # every view: open or not, its cluster, what it is for
+    desktop-view rm NAME                  # delete the file (an open session is left alone)
+
+A repository has its session and a cluster has its own; some work belongs to neither. An
+upgrade of GitLab is a repository of charts, an agent reading the release notes, k9s on the
+cluster it runs on and a pane tailing its logs. A view is that, written down: built the same
+way every time, by name, from the session picker (prefix + s) or from here.
+
+A view is a file in ~/.config/desktop/views/NAME.toml, written in what each window *is* --
+an agent's layout, k9s on the view's cluster, a few shells running commands -- not in pane
+sizes. The same words desktop-tmux-restore saves sessions in, and the same code builds them:
+an agent window is made by desktop-agent-layout, as any is, and k9s by desktop-cluster.
+
+    description = "GitLab upgrade on ocp204"
+    dir = "~/Repositories/gitlab-helm"     # where every window starts unless it says otherwise
+    cluster = "ocp204"                     # optional: the whole session is on this cluster
+
+    [[window]]
+    name = "ide"
+    kind = "agent"                         # editor, terminal and an agent column
+    model = "claude"
+    prompt = "Read UPGRADE.md and plan the move to 18.x"   # typed in, not sent
+
+    [[window]]
+    name = "k9s"
+    kind = "k9s"                           # or "argo", "talos": on the view's cluster
+
+    [[window]]
+    name = "watch"                         # kind = "shell", the default
+    layout = "even-horizontal"
+    panes = ["watch kubectl -n gitlab get pods", "kubectl -n gitlab logs -f deploy/webservice"]
+
+The session is called view-NAME and marked @view, which is how the sidebar shows it (◆) and
+how desktop-tmux-restore knows to build it from its file again after a reboot. With a
+cluster, the cluster is in the session's environment, so every window and every agent in it
+is on that cluster -- and an agent still asks before it touches it.
+
+A prompt is typed into the agent and left there for you to read and send, as a voice
+command's message is: a view opened by habit should not start work by itself. A pane's
+command is typed into its shell and run, so that when it ends the shell is still there.
+"""
+
+import importlib.machinery
+import importlib.util
+import os
+import re
+import shlex
+import subprocess
+import sys
+import time
+import tomllib
+from pathlib import Path
+
+PREFIX = "view-"
+KINDS = ("agent", "shell", "k9s", "argo", "talos")
+CLUSTER_FLAGS = {"k9s": "-k", "argo": "-a", "talos": "-t"}
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
+
+EXAMPLE = '''# A view: built by `desktop-view open {name}`, or from the session picker (prefix + s).
+# See `desktop-view --help` and docs/views.md.
+
+description = ""
+dir = "~"
+# cluster = "ocp204"        # every window and agent in the view on this cluster
+
+[[window]]
+name = "ide"
+kind = "agent"
+model = "claude"
+# prompt = "What to start on"     # typed into the agent, not sent
+
+[[window]]
+name = "shell"
+panes = [""]
+'''
+
+
+def views_dir():
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "desktop" / "views"
+
+
+def path_of(name):
+    return views_dir() / f"{name}.toml"
+
+
+def die(message):
+    print(f"desktop-view: {message}", file=sys.stderr)
+    sys.exit(1)
+
+
+def restore_module():
+    """desktop-tmux-restore, loaded rather than run: it already knows how to build every kind
+    of window, and a view built by other code would drift from a restored one."""
+    path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "desktop-tmux-restore")
+    loader = importlib.machinery.SourceFileLoader("tmux_restore", path)
+    spec = importlib.util.spec_from_loader("tmux_restore", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+R = restore_module()
+tmux = R.tmux
+rows = R.rows
+
+
+def expand(path, base=""):
+    path = os.path.expanduser(os.path.expandvars(path or ""))
+    if path and base and not os.path.isabs(path):
+        path = os.path.join(base, path)
+    return path
+
+
+# --- reading a view ------------------------------------------------------------------------
+
+
+def load(name):
+    """A view's file, checked: every mistake in it said at once, with where it is."""
+    if not NAME.match(name or ""):
+        die(f"'{name}' is not a view name: letters, digits, - and _")
+    path = path_of(name)
+    try:
+        view = tomllib.loads(path.read_text())
+    except FileNotFoundError:
+        names = " ".join(sorted(p.stem for p in views_dir().glob("*.toml"))) or "none yet"
+        die(f"no view called {name} (there are: {names}); desktop-view edit {name} makes one")
+    except tomllib.TOMLDecodeError as error:
+        die(f"{path}: {error}")
+    problems = []
+    view["dir"] = expand(view.get("dir") or "~")
+    if not os.path.isdir(view["dir"]):
+        problems.append(f"dir {view['dir']} is not a directory")
+    windows = view.get("window") or []
+    if not windows:
+        problems.append("it has no [[window]]")
+    seen = set()
+    for i, window in enumerate(windows, 1):
+        where = f"window {i} ({window.get('name') or 'no name'})"
+        kind = window.setdefault("kind", "shell")
+        if kind not in KINDS:
+            problems.append(f"{where}: kind is one of {', '.join(KINDS)}, not {kind}")
+        if not window.get("name"):
+            window["name"] = kind
+        if window["name"] in seen:
+            problems.append(f"{where}: two windows called {window['name']}")
+        seen.add(window["name"])
+        window["dir"] = expand(window.get("dir") or "", view["dir"]) or view["dir"]
+        if kind in CLUSTER_FLAGS and not view.get("cluster"):
+            problems.append(f"{where}: {kind} needs cluster = \"...\" at the top of the view")
+        if kind == "agent":
+            tabs = window.get("tabs", 1)
+            if not (isinstance(tabs, int) or (isinstance(tabs, dict) and all(isinstance(v, int) for v in tabs.values()))):
+                problems.append(f"{where}: tabs is a number, or a table like {{ claude = 2, opencode = 1 }}")
+    if problems:
+        die(f"{path}:\n  " + "\n  ".join(problems))
+    return view
+
+
+def tabs_of(window):
+    """An agent window's tabs, as desktop-tmux-restore records them: per model, a list."""
+    model = window.get("model") or "claude"
+    tabs = window.get("tabs", 1)
+    counts = tabs if isinstance(tabs, dict) else {model: tabs}
+    if model not in counts:
+        counts = {model: 1, **counts}
+    return {m: [{"dir": window["dir"], "worktree": ""} for _ in range(max(1, n))] for m, n in counts.items()}
+
+
+# --- building it ---------------------------------------------------------------------------
+
+
+def cluster_environment(cluster):
+    """The cluster's KUBECONFIG and the rest, as desktop-cluster -e gives them."""
+    try:
+        out = subprocess.run(["desktop-cluster", "-e", cluster], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        die(f"desktop-cluster could not be asked about {cluster}")
+    if out.returncode != 0:
+        die(out.stderr.strip() or f"no cluster called {cluster}")
+    pairs = []
+    for line in out.stdout.splitlines():
+        if line.startswith("export "):
+            pairs.append(shlex.split(line[len("export "):])[0])
+    kind = subprocess.run(["desktop-cluster", "list"], capture_output=True, text=True).stdout
+    for line in kind.splitlines():
+        parts = line.split()
+        if parts and parts[0] == cluster and len(parts) > 1:
+            pairs.append(f"DESKTOP_CLUSTER_KIND={parts[1]}")
+    return pairs
+
+
+def build_shell(session, window):
+    panes = window.get("panes") or [""]
+    made = None
+    for pane in panes:
+        command, directory = (pane, window["dir"]) if isinstance(pane, str) else (
+            pane.get("command") or "", expand(pane.get("dir") or "", window["dir"]) or window["dir"])
+        place = ["-c", directory] if os.path.isdir(directory) else []
+        if made is None:
+            made = tmux("new-window", "-d", "-t", f"={session}:", "-n", window["name"], *place,
+                        "-P", "-F", "#{window_id}", check=True)
+            if not made:
+                return False
+            target = made
+        else:
+            target = tmux("split-window", "-d", "-t", made, *place, "-P", "-F", "#{pane_id}")
+            # Evened out as they go, or a third split has no room to be made in.
+            tmux("select-layout", "-t", made, "tiled")
+        if command and target:
+            # Typed into the shell rather than run as the pane's command: when it ends, or is
+            # stopped, the pane is still a shell where it was.
+            tmux("send-keys", "-t", target, "-l", command)
+            tmux("send-keys", "-t", target, "Enter")
+    tmux("select-layout", "-t", made, window.get("layout") or ("tiled" if len(panes) > 2 else "even-horizontal"))
+    return True
+
+
+def build_cluster_window(session, view, window):
+    flag = CLUSTER_FLAGS[window["kind"]]
+    command = shlex.join(["desktop-cluster", "--here", flag, view["cluster"]])
+    made = tmux("new-window", "-d", "-t", f"={session}:", "-n", window["name"], "-c", window["dir"],
+                "-P", "-F", "#{window_id}", command, check=True)
+    if made:
+        tmux("set-option", "-w", "-t", made, "@cluster_action", window["kind"])
+    return bool(made)
+
+
+def agent_pane(session, name):
+    """The pane of an agent window's first tab: the column's session behind it."""
+    column = R.column_of(f"={session}:{name}")[1]
+    if not column:
+        return None
+    # Its first tab: the lowest window, whatever base-index this tmux counts from.
+    tabs = sorted((int(index), pane) for pane, owner, index in
+                  rows(tmux("list-panes", "-a", "-F", "#{pane_id}\t#{session_name}\t#{window_index}"))
+                  if owner.startswith(f"ai-{column}-"))
+    return tabs[0][1] if tabs else None
+
+
+def type_later(pane, text):
+    """The prompt typed into the agent once it is up, in the background: Claude Code takes a
+    few seconds to start, and keys sent before it is ready are lost. Never sent."""
+    subprocess.Popen([sys.executable, os.path.realpath(__file__), "_type", pane, text],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def type_into(pane, text):
+    agents = ("claude", "opencode", "codex", "node")
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if (tmux("display-message", "-p", "-t", pane, "#{pane_current_command}") or "").strip() in agents:
+            break
+        time.sleep(0.5)
+    else:
+        return 1
+    time.sleep(2)  # its prompt drawn, not only its process started
+    buffer = f"desktop-view-{os.getpid()}"
+    subprocess.run(["tmux", "load-buffer", "-b", buffer, "-"], input=text, text=True)
+    subprocess.run(["tmux", "paste-buffer", "-p", "-d", "-b", buffer, "-t", pane])
+    return 0
+
+
+def session_of(name):
+    return f"{PREFIX}{name}"
+
+
+def is_open(name):
+    return tmux("has-session", "-t", f"={session_of(name)}") is not None
+
+
+def build(name, view):
+    session = session_of(name)
+    environment = []
+    if view.get("cluster"):
+        for pair in cluster_environment(view["cluster"]):
+            environment += ["-e", pair]
+    # A session cannot be made without a window. This one holds it open while the real ones
+    # are built, and goes when they have been.
+    placeholder = tmux("new-session", "-d", "-s", session, "-n", "opening", "-c", view["dir"], *environment,
+                       "-P", "-F", "#{window_id}", check=True)
+    if not placeholder:
+        die(f"tmux could not make the session {session}")
+    tmux("set-option", "-t", f"={session}:", "@view", name)
+    if view.get("cluster"):
+        tmux("set-option", "-t", f"={session}:", "@cluster", view["cluster"])
+    failed = []
+    for window in view["window"]:
+        kind = window["kind"]
+        if kind == "agent":
+            ok = R.build_agent(session, {"name": window["name"], "kind": "agent", "dir": window["dir"],
+                                         "model": window.get("model") or "claude", "tabs": tabs_of(window),
+                                         "terminals": window.get("terminals", 1)})
+            if ok and window.get("prompt"):
+                pane = agent_pane(session, window["name"])
+                if pane:
+                    type_later(pane, window["prompt"])
+        elif kind in CLUSTER_FLAGS:
+            ok = build_cluster_window(session, view, window)
+        else:
+            ok = build_shell(session, window)
+        if not ok:
+            failed.append(window["name"])
+    tmux("kill-window", "-t", placeholder)
+    tmux("select-window", "-t", f"={session}:{view['window'][0]['name']}")
+    if failed:
+        print(f"desktop-view: could not build {', '.join(failed)} in {name}", file=sys.stderr)
+
+
+def go(session):
+    """To the session: the client that asked, by name when it was handed one."""
+    client = os.environ.get("DESKTOP_VIEW_CLIENT") or ""
+    if client:
+        tmux("switch-client", "-c", client, "-t", f"={session}")
+    elif os.environ.get("TMUX"):
+        tmux("switch-client", "-t", f"={session}")
+    else:
+        os.execvp("tmux", ["tmux", "attach-session", "-t", f"={session}"])
+
+
+def cmd_open(args):
+    detached = "--detached" in args
+    names = [a for a in args if not a.startswith("--")]
+    if not names:
+        die("usage: desktop-view open NAME [--detached]")
+    name = names[0]
+    view = load(name)
+    if not is_open(name):
+        build(name, view)
+    if not detached:
+        go(session_of(name))
+    return 0
+
+
+# --- writing one down ----------------------------------------------------------------------
+
+
+def foreground(pane_pid):
+    """What a pane's shell is running now, as it was typed: the command line of its child."""
+    try:
+        children = Path(f"/proc/{pane_pid}/task/{pane_pid}/children").read_text().split()
+        if not children:
+            return ""
+        words = Path(f"/proc/{children[0]}/cmdline").read_bytes().split(b"\0")
+        return shlex.join(w.decode(errors="replace") for w in words if w)
+    except (OSError, ValueError):
+        return ""
+
+
+def toml_string(text):
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+
+def tilde(path):
+    home = str(Path.home())
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+
+
+def describe(session):
+    """A session as a view: each window by what it is, in the file's words."""
+    found = rows(tmux("display-message", "-p", "-t", f"={session}:",
+                      "#{session_path}\t#{@cluster}\t#{@view}"))
+    if not found:
+        die(f"no session called {session}")
+    path, cluster, _ = (found[0] + ["", "", ""])[:3]
+    windows = []
+    for index, name, worktree, layout, action in rows(tmux(
+            "list-windows", "-t", f"={session}", "-F",
+            "#{window_index}\t#{window_name}\t#{@worktree}\t#{window_layout}\t#{@cluster_action}")):
+        if name == "opening":
+            continue
+        record = R.window_record(session, index, name, worktree, layout)
+        if action in CLUSTER_FLAGS:
+            windows.append({"name": name, "kind": action})
+        elif record["kind"] in ("agent", "task"):
+            tabs = {m: len(t) for m, t in (record.get("tabs") or {}).items()}
+            model = record.get("model") or next(iter(tabs), "claude")
+            window = {"name": name, "kind": "agent", "model": model,
+                      "dir": record.get("dir") or record.get("path") or path}
+            if tabs and (len(tabs) > 1 or tabs.get(model, 1) > 1):
+                window["tabs"] = tabs if len(tabs) > 1 else tabs[model]
+            windows.append(window)
+        elif action == "shell":
+            windows.append({"name": name, "kind": "shell", "panes": [""]})
+        else:
+            # The commands running now, not the ones the panes started with: a pane opened
+            # as a shell and given `watch kubectl get pods` is that command.
+            panes = []
+            listing = rows(tmux("list-panes", "-t", f"={session}:{index}", "-f", "#{!=:#{@sidebar},1}",
+                                "-F", "#{pane_current_path}\t#{pane_pid}"))
+            for directory, pid in listing:
+                command = foreground(pid)
+                panes.append({"dir": directory, "command": command} if directory != path else command)
+            windows.append({"name": name, "kind": "shell", "panes": panes or [""],
+                            **({"layout": layout} if len(panes) > 1 else {})})
+    return path, cluster, windows
+
+
+def render(name, path, cluster, windows):
+    out = [f"# {name}: written by `desktop-view save` from what was open; edit freely.",
+           "# See `desktop-view --help` and docs/views.md.", "",
+           'description = ""', f"dir = {toml_string(tilde(path))}"]
+    if cluster:
+        out.append(f"cluster = {toml_string(cluster)}")
+    for window in windows:
+        out += ["", "[[window]]", f"name = {toml_string(window['name'])}"]
+        if window["kind"] != "shell":
+            out.append(f"kind = {toml_string(window['kind'])}")
+        if window.get("model"):
+            out.append(f"model = {toml_string(window['model'])}")
+        if "tabs" in window:
+            tabs = window["tabs"]
+            out.append(f"tabs = {tabs}" if isinstance(tabs, int) else
+                       "tabs = { " + ", ".join(f"{m} = {n}" for m, n in tabs.items()) + " }")
+        if window.get("dir") and window["dir"] != path:
+            out.append(f"dir = {toml_string(tilde(window['dir']))}")
+        if window["kind"] == "agent":
+            out.append('# prompt = ""')
+        if window.get("layout"):
+            out.append(f"layout = {toml_string(window['layout'])}")
+        if "panes" in window:
+            items = [toml_string(p) if isinstance(p, str) else
+                     "{ dir = " + toml_string(tilde(p["dir"])) + ", command = " + toml_string(p["command"]) + " }"
+                     for p in window["panes"]]
+            out.append("panes = [" + ", ".join(items) + "]")
+    return "\n".join(out) + "\n"
+
+
+def cmd_save(args):
+    force = "--force" in args
+    names = [a for a in args if not a.startswith("--")]
+    if not names or not NAME.match(names[0]):
+        die("usage: desktop-view save NAME [--force]   (letters, digits, - and _)")
+    name = names[0]
+    path = path_of(name)
+    if path.exists() and not force:
+        die(f"{path} is there already; --force to write over it, or desktop-view edit {name}")
+    session = os.environ.get("DESKTOP_VIEW_SESSION") or tmux("display-message", "-p", "#{session_name}")
+    if not session:
+        die("save is run from inside the tmux session to keep")
+    text = render(name, *describe(session))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    # Checked as it would be opened, so a view that cannot be is said now, not then.
+    load(name)
+    print(f"{session} saved as the view {name}: {path}")
+    return 0
+
+
+# --- the rest ------------------------------------------------------------------------------
+
+
+def cmd_edit(args):
+    if not args or not NAME.match(args[0]):
+        die("usage: desktop-view edit NAME   (letters, digits, - and _)")
+    path = path_of(args[0])
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(EXAMPLE.format(name=args[0]))
+    editor = os.environ.get("EDITOR") or "nvim"
+    os.execvp(editor, [editor, str(path)])
+
+
+def views():
+    """Every view, as the picker and `list` show it."""
+    found = []
+    for path in sorted(views_dir().glob("*.toml")):
+        try:
+            view = tomllib.loads(path.read_text())
+            problem = ""
+        except tomllib.TOMLDecodeError as error:
+            view, problem = {}, str(error)
+        found.append({"name": path.stem, "description": view.get("description") or "",
+                      "cluster": view.get("cluster") or "", "windows": len(view.get("window") or []),
+                      "problem": problem})
+    return found
+
+
+def cmd_list(args):
+    for view in views():
+        state = "open" if is_open(view["name"]) else ""
+        about = view["problem"] and f"cannot be read: {view['problem']}" or view["description"]
+        print("\t".join([view["name"], state, view["cluster"] and f"⎈ {view['cluster']}", about]))
+    return 0
+
+
+def cmd_show(args):
+    if not args:
+        die("usage: desktop-view show NAME")
+    view = load(args[0])
+    print(f"{session_of(args[0])}  in {tilde(view['dir'])}" + (f"  on ⎈ {view['cluster']}" if view.get("cluster") else ""))
+    for window in view["window"]:
+        kind = window["kind"]
+        if kind == "agent":
+            tabs = ", ".join(f"{m} x{len(t)}" for m, t in tabs_of(window).items())
+            what = f"agent column: {tabs}" + (" · prompt typed in" if window.get("prompt") else "")
+        elif kind in CLUSTER_FLAGS:
+            what = f"{kind} on {view['cluster']}"
+        else:
+            panes = window.get("panes") or [""]
+            what = f"{len(panes)} pane(s)" + "".join(
+                f"\n      {p if isinstance(p, str) else p.get('command', '')}" for p in panes
+                if (p if isinstance(p, str) else p.get("command")))
+        print(f"  {window['name']:<12} {what}")
+    return 0
+
+
+def cmd_rm(args):
+    if not args:
+        die("usage: desktop-view rm NAME")
+    path = path_of(args[0])
+    if not path.exists():
+        die(f"no view called {args[0]}")
+    path.unlink()
+    print(f"removed {path}" + ("; its session is still open" if is_open(args[0]) else ""))
+    return 0
+
+
+def main():
+    args = sys.argv[1:]
+    command = args[0] if args else ""
+    handlers = {"open": cmd_open, "save": cmd_save, "edit": cmd_edit, "list": cmd_list,
+                "show": cmd_show, "rm": cmd_rm}
+    if command == "_type":
+        return type_into(args[1], args[2])
+    if command in handlers:
+        return handlers[command](args[1:])
+    usage = __doc__.split("\n\n")[1]
+    if command in ("-h", "--help", "help"):
+        print(__doc__.strip())
+        return 0
+    print(f"usage:\n{usage}", file=sys.stderr)
+    return 1
+
+if __name__ == "__main__":
+    sys.exit(main())

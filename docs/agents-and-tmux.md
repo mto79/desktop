@@ -34,7 +34,8 @@ holds tabs too, through `desktop-terminal-tabs`.
 | `N` | Go to the agent needing you most; press again for the next |
 | `g` | Every agent on this machine in a list, needing you first |
 | `K` | Every cluster in a list; Enter goes to its session ([clusters.md](clusters.md)) |
-| `s`, `S` | Pick a session, pick a tab |
+| `s` | Every place to work: open sessions, views, clusters, repositories; Enter goes there or opens it ([views.md](views.md)) |
+| `S` | Pick a tab |
 | `D` | Finish the task this window is on |
 | `?` | Every key this desktop adds (`desktop-tmux-keys`) |
 

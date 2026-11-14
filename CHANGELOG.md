@@ -12,6 +12,13 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Views: a tmux session laid out once and kept in `~/.config/desktop/views/NAME.toml` -- agent
+  windows with a prompt typed in, k9s and Argo CD on a cluster, panes running commands --
+  built again by `desktop-view open NAME`. A view can name a cluster, and everything in it,
+  agents included, is then on that cluster. `^n` in the picker saves the session you are in
+  as one. They come back after a reboot from their file.
+- `prefix + s` lists every place to work in one popup: open sessions, views, clusters and
+  repositories, the open ones first. Enter goes there, or opens what is not open yet.
 - Claude Code asks you before an agent touches a cluster, every time, a read included:
   a kubectl, oc, helm, talosctl or kubeconfig opened stops at a permission prompt
   that names the cluster, and says when it is production.

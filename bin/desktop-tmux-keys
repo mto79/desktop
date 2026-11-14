@@ -41,7 +41,7 @@ w	w	the window
 q	q	the session
 Q	Q	every session: the tmux server itself
 # Getting around
-s	s	the sessions you work in
+s	s	every place to work: sessions, views, clusters, repositories; ^n saves this one as a view
 f	f	sessionizer: a repository or a task, laid out
 e	e	sidebar: a row per session and its agents, on or off
 Space	Space	the window you were in before

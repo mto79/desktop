@@ -1,0 +1,259 @@
+#!/usr/bin/env python3
+
+"""Every place to work, in one list: open sessions, views, clusters and repositories.
+
+    desktop-pick                   # the list, in a popup inside tmux (prefix + s)
+    desktop-pick --client CLIENT   # in a popup on that client: what the tmux key runs
+    desktop-pick --list            # the rows, without fzf: what the test reads
+
+A session is a repository, a cluster (ocl) or a view (desktop-view), and each had a way of
+its own to be reached: prefix + s for what was open, prefix + f for a repository, prefix + K
+for a cluster, a command for a view. This is the one list of all of them, drawn as the agents'
+list on prefix + g is -- reversed, coloured, the keys in the header:
+
+     session>
+     ▌  desktop            repo      open   ~/Repositories/desktop
+        gitops             repo      open   ~/Repositories/gitops
+     ⎈  k8s-ocp204         cluster   open   ocp204
+     ◆  view-gitlab        view      open   GitLab upgrade on ocp204
+     ◆  release            view             The monthly release, three repositories
+     ⎈  lab                cluster          rke2
+        terraform          repo             ~/Repositories/terraform
+        terraform · fix-x  task             ~/Repositories/terraform.worktrees/fix-x
+       Enter goes there · ^e edit the view · ^n save this session as a view · Esc closes
+
+What is open comes first, the one you are in on a bar; then the views, clusters and
+repositories that are not, so that one list both switches and opens. Enter on something
+closed opens it the way its own command does -- desktop-view, desktop-cluster,
+desktop-repo-session, desktop-worktree -- so it is the same session however it was reached.
+
+The sessions behind an agent column or a terminal's tabs are not places of their own and are
+not listed, as the sidebar leaves them out. Repositories are the sessionizer's: the
+directories under the roots listed in $TMUX_SESSIONIZER_CONFIG_FILE, with their tasks.
+"""
+
+import os
+import shlex
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+MARKS = {"cluster": "⎈", "view": "◆"}
+DIM, BOLD, RESET = "\033[2m", "\033[1m", "\033[0m"
+COLOURS = {"cluster": "\033[34m", "view": "\033[36m", "repo": "", "task": "", "session": ""}
+
+
+def tmux(*args):
+    try:
+        done = subprocess.run(["tmux", *args], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.rstrip("\n") if done.returncode == 0 else ""
+
+
+def output(*command):
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def tilde(path):
+    home = str(Path.home())
+    return "~" + path[len(home):] if path == home or path.startswith(home + "/") else path
+
+
+def session_name(directory):
+    """As desktop-repo-session names a repository's session: tmux allows no . or :."""
+    return os.path.basename(directory.rstrip("/")).replace(".", "_").replace(":", "_")
+
+
+# --- what there is --------------------------------------------------------------------------
+
+
+def open_sessions(client):
+    here = tmux("display-message", "-p", *(["-c", client] if client else []), "#{session_name}")
+    found = []
+    for line in tmux("list-sessions", "-F",
+                     "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{@cluster}\t#{@view}\t#{session_path}").splitlines():
+        name, ai, term, cluster, view, path = (line.split("\t") + [""] * 6)[:6]
+        if ai or term:
+            continue  # an agent column's or a terminal's tabs: they belong to another session
+        kind = "view" if view else "cluster" if cluster else "repo" if os.path.isdir(os.path.join(path, ".git")) else "session"
+        detail = describe_view(view) if view else cluster if cluster else tilde(path)
+        found.append({"key": f"session:{name}", "name": name, "kind": kind, "open": True,
+                      "here": name == here, "detail": detail})
+    return found
+
+
+def describe_view(name):
+    try:
+        view = tomllib.loads((views_dir() / f"{name}.toml").read_text())
+    except (OSError, tomllib.TOMLDecodeError):
+        return ""
+    return view.get("description") or (f"on {view['cluster']}" if view.get("cluster") else "")
+
+
+def views_dir():
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "desktop" / "views"
+
+
+def closed_views(opened):
+    return [{"key": f"view:{path.stem}", "name": path.stem, "kind": "view", "open": False,
+             "here": False, "detail": describe_view(path.stem)}
+            for path in sorted(views_dir().glob("*.toml")) if f"view-{path.stem}" not in opened]
+
+
+def closed_clusters(opened):
+    found = []
+    for line in output("desktop-cluster", "list").splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and "k8s-" + parts[0].replace(".", "_").replace(":", "_") not in opened:
+            found.append({"key": f"cluster:{parts[0]}", "name": parts[0], "kind": "cluster", "open": False,
+                          "here": False, "detail": parts[1]})
+    return found
+
+
+def repositories(opened):
+    config = os.environ.get("TMUX_SESSIONIZER_CONFIG_FILE") or str(Path.home() / ".config/tmux/configs/tmux-sessionizer")
+    try:
+        roots = shlex.split(Path(config).read_text())
+    except (OSError, ValueError):
+        return []
+    found = []
+    for root in roots:
+        root = Path(os.path.expanduser(os.path.expandvars(root)))
+        try:
+            entries = sorted(p for p in root.iterdir() if p.is_dir())
+        except OSError:
+            continue
+        for path in entries:
+            if path.name.endswith(".worktrees"):
+                # A task: a worktree desktop-worktree keeps beside its repository.
+                for task in sorted(p for p in path.iterdir() if p.is_dir()):
+                    found.append({"key": f"task:{task}", "name": f"{path.name[:-len('.worktrees')]} · {task.name}",
+                                  "kind": "task", "open": False, "here": False, "detail": tilde(str(task))})
+            elif session_name(str(path)) not in opened:
+                found.append({"key": f"repo:{path}", "name": path.name, "kind": "repo", "open": False,
+                              "here": False, "detail": tilde(str(path))})
+    return found
+
+
+def everything(client):
+    sessions = open_sessions(client)
+    opened = {row["name"] for row in sessions}
+    return sessions + closed_views(opened) + closed_clusters(opened) + repositories(opened)
+
+
+def line_of(row):
+    colour = COLOURS.get(row["kind"], "")
+    mark = MARKS.get(row["kind"], " ")
+    bar = "▌" if row["here"] else " "
+    state = "open" if row["open"] else ""
+    text = (f"{bar}{colour}{mark}{RESET}  {BOLD if row['open'] else ''}{row['name']:<22}{RESET} "
+            f"{colour}{row['kind']:<8}{RESET} {state:<5} {DIM}{row['detail']}{RESET}")
+    return f"{row['key']}\t{text}"
+
+
+# --- going there ----------------------------------------------------------------------------
+
+
+def switch(client, session):
+    if client:
+        tmux("switch-client", "-c", client, "-t", f"={session}")
+    elif os.environ.get("TMUX"):
+        tmux("switch-client", "-t", f"={session}")
+    else:
+        os.execvp("tmux", ["tmux", "attach-session", "-t", f"={session}"])
+
+
+def go(key, client):
+    kind, _, value = key.partition(":")
+    # Each opens it as its own command does, and is told which client to move.
+    env = {**os.environ, "DESKTOP_VIEW_CLIENT": client, "DESKTOP_CLUSTER_CLIENT": client,
+           "DESKTOP_WORKTREE_CLIENT": client}
+    if kind == "session":
+        switch(client, value)
+    elif kind == "view":
+        subprocess.run(["desktop-view", "open", value], env=env)
+    elif kind == "cluster":
+        subprocess.run(["desktop-cluster", value], env=env)
+    elif kind == "repo":
+        name = output("desktop-repo-session", value).strip()
+        if name:
+            switch(client, name)
+    elif kind == "task":
+        subprocess.run(["desktop-worktree", "open", value], env=env)
+
+
+def save_here(client):
+    """^n: the session the popup was opened from, written down as a view."""
+    session = tmux("display-message", "-p", *(["-c", client] if client else []), "#{session_name}")
+    try:
+        name = input(f"Save {session} as the view: ").strip()
+    except EOFError:
+        return
+    if name:
+        done = subprocess.run(["desktop-view", "save", name], env={**os.environ, "DESKTOP_VIEW_SESSION": session})
+        if done.returncode == 0:
+            input("Saved. desktop-view edit " + name + " to change it. Press Enter. ")
+        else:
+            input("Press Enter. ")
+
+
+def main():
+    args = sys.argv[1:]
+    client = ""
+    if args[:1] == ["--client"] and len(args) > 1:
+        client = args[1]
+    if args[:1] in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    if args[:1] == ["--list"]:
+        for row in everything(client):
+            print(line_of(row).split("\t", 1)[1].replace(RESET, "").replace(DIM, "").replace(BOLD, "")
+                  .replace("\033[34m", "").replace("\033[36m", ""))
+        return 0
+    if not client and os.environ.get("TMUX"):
+        client = tmux("display-message", "-p", "#{client_name}")
+    if client and not os.environ.get("DESKTOP_PICK_POPUP"):
+        # The list in a popup on the client, as the agents' and the clusters' are.
+        command = f"DESKTOP_PICK_POPUP=1 {shlex.quote(os.path.realpath(__file__))} --client {shlex.quote(client)}"
+        os.execvp("tmux", ["tmux", "display-popup", "-c", client, "-E", "-w", "90%", "-h", "60%",
+                           "-T", " Sessions ", command])
+    rows = everything(client)
+    try:
+        done = subprocess.run(
+            ["fzf", "--ansi", "--no-sort", "--layout=reverse", "--delimiter=\t", "--with-nth=2",
+             "--prompt=session> ", "--info=hidden", "--expect=ctrl-e,ctrl-n",
+             "--header=Enter goes there · ^e edit the view · ^n save this session as a view · Esc closes"],
+            input="\n".join(line_of(row) for row in rows), capture_output=True, text=True)
+    except OSError:
+        print("fzf is not installed.")
+        input("Press Enter. ")
+        return 1
+    lines = done.stdout.splitlines()
+    key = lines[0] if lines else ""
+    if key == "ctrl-n":
+        save_here(client)
+        return 0
+    if len(lines) < 2:
+        return 0
+    chosen = lines[1].split("\t", 1)[0]
+    if key == "ctrl-e":
+        kind, _, value = chosen.partition(":")
+        if kind == "session":
+            value = tmux("show-options", "-v", "-t", f"={value}:", "@view")
+            kind = "view" if value else kind
+        if kind != "view":
+            input("Only a view has a file to edit. Press Enter. ")
+            return 0
+        os.execvp("desktop-view", ["desktop-view", "edit", value])
+    go(chosen, client)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

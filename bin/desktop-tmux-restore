@@ -123,11 +123,11 @@ def window_record(session, index, name, worktree, layout):
 def snapshot():
     """Every session worth going back to, or None if tmux could not be asked."""
     listing = tmux("list-sessions", "-F",
-                   "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{session_path}\t#{@cluster}")
+                   "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{session_path}\t#{@cluster}\t#{@view}")
     if listing is None:
         return None
     sessions = []
-    for name, ai_group, term_group, path, cluster in (row + [""] * (5 - len(row)) for row in rows(listing)):
+    for name, ai_group, term_group, path, cluster, view in (row + [""] * (6 - len(row)) for row in rows(listing)):
         # The sessions behind a column or a terminal are not places of their own: they come
         # back with the window they belong to.
         if ai_group or term_group:
@@ -141,7 +141,10 @@ def snapshot():
             if is_active == "1":
                 active = window
         session = {"name": name, "dir": path, "active": active, "windows": windows}
-        if cluster:
+        if view:
+            # One of desktop-view's: built again from its file, cluster and prompt and all.
+            session["view"] = view
+        elif cluster:
             # One of ocl's: it is rebuilt by ocl, which puts the cluster in its environment.
             session["cluster"] = cluster
         sessions.append(session)
@@ -320,6 +323,12 @@ def restore():
         for session in data.get("sessions", []):
             name = session["name"]
             placeholder = None
+            if session.get("view") and tmux("has-session", "-t", f"={name}") is None:
+                # From its file, as it is opened by hand; a window added since is put back
+                # below, as any window is, and is on the view's cluster with the rest.
+                if subprocess.run(["desktop-view", "open", "--detached", session["view"]],
+                                  capture_output=True).returncode == 0:
+                    built += 1
             if session.get("cluster") and tmux("has-session", "-t", f"={name}") is None:
                 built += build_cluster(session)
             if tmux("has-session", "-t", f"={name}") is None:
