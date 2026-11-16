@@ -215,7 +215,8 @@
               "path": "/"
             },
             {
-              "id": "memory"
+              "id": "memory",
+              "keepText": true
             },
             {
               "id": "cpu"

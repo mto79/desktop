@@ -100,6 +100,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- On a bar short of room the memory widget keeps its number, as the CPU keeps its percentage;
+  the disk gives way first instead.
 - The tmux sidebar is in sections that fold -- repositories, clusters, agents -- under a
   NEEDS YOU strip of the agents blocked or finished and the clusters degraded. Sections
   open as far as the column's height allows and fold the rest, the repositories to the
