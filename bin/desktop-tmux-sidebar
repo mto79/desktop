@@ -57,6 +57,7 @@ any client could give it room, gets it the first time it is looked at. They all 
 A column that is not being looked at asks tmux nothing: only the ones on screen refresh.
 """
 
+import concurrent.futures
 import curses
 import fcntl
 import importlib.machinery
@@ -221,6 +222,11 @@ def branch_status_module():
 
 
 BRANCHES = {}
+# In the running column, asked in the background: git in two dozen checkouts is a third of a
+# second, and asked while drawing, a click that came when they were due waited for all of
+# them. The column draws with what it has and picks the answers up at its next refresh. Off
+# until sidebar() starts the pool, so that a test gets its answer at once.
+BACKGROUND = {"pool": None, "pending": set()}
 
 
 def branch(cwd, module, now=None):
@@ -231,12 +237,23 @@ def branch(cwd, module, now=None):
     kept = BRANCHES.get(cwd)
     if kept and now - kept[0] < BRANCH_SECONDS:
         return kept[1]
-    try:
-        found = module.status(cwd, now)
-    except Exception:  # A sidebar that dies on one odd checkout is worse than a blank row.
-        found = {}
-    BRANCHES[cwd] = (now, found)
-    return found
+
+    def ask():
+        try:
+            found = module.status(cwd, time.time())
+        except Exception:  # A sidebar that dies on one odd checkout is worse than a blank row.
+            found = {}
+        BRANCHES[cwd] = (time.time(), found)
+        BACKGROUND["pending"].discard(cwd)
+        return found
+
+    pool = BACKGROUND["pool"]
+    if pool is None:
+        return ask()
+    if cwd not in BACKGROUND["pending"]:
+        BACKGROUND["pending"].add(cwd)
+        pool.submit(ask)
+    return kept[1] if kept else {}
 
 
 def detail_of(found, named=True):
@@ -636,30 +653,45 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
                        "right": "", "current": False})
         out.append({"kind": "gap", "section": "needs", "session": "", "current": False})
 
-    def section(key, rows, count, dot, alert, keep=()):
-        state = chosen.get(key) or ("open" if alert else "closed")
-        folded = state == "closed"
-        out.append({"kind": "section", "section": key, "session": "", "text": TITLES[key],
-                    "folded": folded, "count": count, "dot": dot, "current": False})
-        shown = [r for r in rows if not folded or r.get("session") in keep and r["kind"] in ("session",)]
-        for row in shown:
-            row.setdefault("section", key)
-            out.append(row)
-
-    # Folded unless opened by hand: what in it needs you is already at the top, and the
-    # session you are in stays in sight folded. Opened by itself whenever an agent anywhere
-    # had finished, it was open nearly always.
+    # Each section: its rows open, what it keeps folded, its count and worst state, and
+    # whether it has something to report that opens it whatever the room.
+    parts = []
     repo_states = [r["state"] for r in repo_rows if r["kind"] == "session"]
-    section("repos", repo_rows, len(repos), worst(repo_states), False, keep=(here_session,))
+    parts.append(("repos", repo_rows, [r for r in repo_rows if r["kind"] == "session" and r["session"] == here_session],
+                  len(repos), worst(repo_states), False))
     if found_clusters:
         crow = [cluster_row(c, here_session, "clusters") for c in sorted(found_clusters, key=lambda c: c["name"])]
-        cstates = [c.get("state", "unknown") for c in found_clusters]
-        bad = [s for s in cstates if s in ("degraded", "misconfigured")]
-        section("clusters", crow, len(found_clusters), "degraded" if bad else "",
-                bool(bad) or here_session in names)
+        bad = [c for c in found_clusters if c.get("state") in ("degraded", "misconfigured")]
+        parts.append(("clusters", crow, [], len(found_clusters), "degraded" if bad else "",
+                      bool(bad) or here_session in names))
     agent_states = [r["state"] for r in agent_rows if r["kind"] == "agent"]
-    section("agents", agent_rows, sum(1 for r in agent_rows if r["kind"] == "agent"),
-            worst(agent_states), any(r["kind"] == "agent" for r in agent_rows))
+    parts.append(("agents", agent_rows, [], sum(1 for r in agent_rows if r["kind"] == "agent"),
+                  worst(agent_states), False))
+
+    # Open or folded. By hand, as chosen. Otherwise by the room the column has: what has
+    # something to report opens first, then the agents, the clusters and the repositories in
+    # that order, each as long as it still fits; a tall column shows everything open, a
+    # short one folds what does not fit. Without a height -- a test -- everything fits.
+    used = len(out) + len(parts) + sum(len(kept) for _, _, kept, _, _, _ in parts)
+    state = {key: chosen[key] for key, *_ in parts if key in chosen}
+    sizes = {key: len(rows) - len(kept) for key, rows, kept, *_ in parts}
+    for key, rows, kept, count, dot, alert in parts:
+        if key not in state and alert:
+            state[key] = "open"
+            used += sizes[key]
+    for key in ("agents", "clusters", "repos"):
+        if key in sizes and key not in state:
+            fits = room is None or used + sizes[key] <= room
+            state[key] = "open" if fits and sizes[key] else "closed"
+            used += sizes[key] if state[key] == "open" else 0
+
+    for key, rows, kept, count, dot, alert in parts:
+        folded = state[key] == "closed"
+        out.append({"kind": "section", "section": key, "session": "", "text": TITLES[key],
+                    "folded": folded, "count": count, "dot": dot, "current": False})
+        for row in (kept if folded else rows):
+            row.setdefault("section", key)
+            out.append(row)
     # The agents' header says whose they are.
     for row in out:
         if row["kind"] == "section" and row["section"] == "agents":
@@ -898,7 +930,12 @@ def sidebar(screen):
     curses.use_default_colors()
     colours = agent_colours()
     paint(colours)
-    curses.mousemask(curses.BUTTON1_CLICKED | curses.BUTTON4_PRESSED | curses.BUTTON5_PRESSED)
+    # The press, at once. Asked for the click, curses held every press for its click
+    # interval -- a sixth of a second -- to tell a click from a press, and every click on
+    # the column felt slow by that much.
+    curses.mouseinterval(0)
+    curses.mousemask(curses.BUTTON1_PRESSED | curses.BUTTON4_PRESSED | curses.BUTTON5_PRESSED)
+    BACKGROUND["pool"] = concurrent.futures.ThreadPoolExecutor(max_workers=2)
     screen.timeout(200)
 
     pane = os.environ.get("TMUX_PANE", "")
@@ -993,6 +1030,12 @@ def sidebar(screen):
         elif key in (ord("1"), ord("2"), ord("3")):
             fold(SECTIONS[key - ord("1")], "open")
             dirty = True
+        elif key == ord("a"):
+            # Every section back to folding by the room there is.
+            chosen = {}
+            set_folds(chosen)
+            listed, dirty = build(), True
+            cursor = min(cursor, max(0, len(listed) - 1))
         elif key == ord("z"):
             # Everything folded but the section the cursor is in.
             if listed:

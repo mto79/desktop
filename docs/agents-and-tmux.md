@@ -77,11 +77,19 @@ every cluster `ocl` knows, with its nodes or why it has none:
 
 Folding is what keeps two dozen repositories, six clusters and their agents in one column.
 A section is folded or opened by hand with `Space` (or `⏎` or a click on its header), `z`
-folds all but the one the cursor is in, and `1` `2` `3` open repositories, clusters or
-agents and go there. What is chosen by hand is remembered, for every column, in
-`@sidebar_folds`. Left alone, REPOS stays folded -- what in it needs you is at the top
-already -- CLUSTERS opens when one is degraded or you are in a cluster's session, and AGENTS
-is open whenever there are agents.
+folds all but the one the cursor is in, `a` puts them all back on automatic, and `1` `2`
+`3` open repositories, clusters or agents and go there. What is chosen by hand is
+remembered, for every column, in `@sidebar_folds`.
+
+Left alone, a section folds by the room there is: a section with something to report opens
+first (CLUSTERS, when one is degraded or you are in a cluster's session), then AGENTS,
+CLUSTERS and REPOS in that order, each as long as it still fits the column's height. On a
+tall monitor everything is open; on the laptop's screen the repositories fold to the one
+you are in, and on a short pane the clusters fold too.
+
+A click is taken as the press. Asked for the click, curses held every press for a sixth
+of a second to tell a click from a press, and the branches of two dozen checkouts are asked
+in a thread of their own, so a click never waits for git.
 
 The clusters' state comes from `ocl status --json`, which asks every cluster over the
 network: so it is never asked while drawing. A column on screen starts it in the background

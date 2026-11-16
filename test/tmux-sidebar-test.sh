@@ -207,9 +207,11 @@ elif what.startswith("compose"):
     # Two clusters: delta, which is also a tmux session, healthy; and zeta, degraded.
     found = [{"name": "delta", "state": "healthy", "nodes": 3, "ready": 3},
              {"name": "zeta", "state": "degraded", "nodes": 4, "ready": 3}]
-    chosen = {"compose": {}, "compose-open": {"repos": "open"},
+    chosen = {"compose": {}, "compose-tall": {}, "compose-open": {"repos": "open"},
               "compose-closed": {"clusters": "closed", "agents": "closed"}}[what]
-    for found_row in sidebar.compose(sidebar.collect(), found, "alpha:2", False, None, None, 100, chosen):
+    # A short column, where not everything fits; a tall one, where it does.
+    room = 100 if what == "compose-tall" else 12
+    for found_row in sidebar.compose(sidebar.collect(), found, "alpha:2", False, None, None, room, chosen):
         print(sidebar.line_of(found_row, 30)[0].rstrip())
 elif what in ("go-cluster", "go-cluster-new"):
     name = "delta" if what == "go-cluster" else "zeta"
@@ -236,9 +238,12 @@ check "what needs you comes first: blocked, stuck and finished agents from every
   test "$(grep -c '^ [●✗] ' <<<"$needs")" -ge 3
 check "  and a degraded cluster" grep -q '^ ● zeta  *3/4$' <<<"$needs"
 check "  but not one that is fine" lacks '^ ● delta' <<<"$needs"
-check "repositories fold by themselves, keeping the one you are in" \
+check "in a short column, repositories fold by themselves, keeping the one you are in" \
   test "$(sed -n '/▸ REPOS/,/CLUSTERS/p' <<<"$composed" | grep -c '^[▌ ][●○·] ')" = 1
 check "  and say how many there are, with the worst state" grep -q '^ ▸ REPOS  *4 ●$' <<<"$composed"
+tall=$(drive compose-tall)
+check "in a tall column every section is open, the repositories too" \
+  test "$(grep -c '^ ▾ ' <<<"$tall")-$(sed -n '/▾ REPOS/,/CLUSTERS/p' <<<"$tall" | grep -c '^[▌ ][●○·] ')" = "3-4"
 check "a cluster with its own tmux session is not counted among the repositories" \
   lacks '^ [●○·] delta$' <<<"$(sed -n '/REPOS/,/CLUSTERS/p' <<<"$(drive compose-open)")"
 check "clusters open by themselves when one is degraded, each with its nodes" \
@@ -256,7 +261,9 @@ check "a cluster with a session is gone to" grep -q 'switch-client -c /dev/pts/9
 drive go-cluster-new >/dev/null
 check "one without is made, as prefix + K makes it" grep -q 'new-window -t alpha: -n cluster desktop-cluster session zeta' "$sandbox/did"
 check "the keys to fold are listed with the sidebar's" \
-  test "$("$ROOT/bin/desktop-tmux-keys" --sidebar | cut -f1 | grep -cxE 'Space|1|z')" = 3
+  test "$("$ROOT/bin/desktop-tmux-keys" --sidebar | cut -f1 | grep -cxE 'Space|1|z|a')" = 4
+check "a click is taken as the press, not held back to tell it from one" \
+  grep -q 'curses.mouseinterval(0)' "$ROOT/bin/desktop-tmux-sidebar"
 
 # Claude Code's records of its running sessions, with the name each answers to: one in
 # alpha's third tab, alive -- this test's own shell stands in for it. One in the first whose

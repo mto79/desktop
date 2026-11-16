@@ -101,10 +101,11 @@ Add a line under the current month in the same commit as the change it describes
 ### Changed
 
 - The tmux sidebar is in sections that fold -- repositories, clusters, agents -- under a
-  NEEDS YOU strip of the agents blocked or finished and the clusters degraded. Repositories
-  stay folded to the session you are in until opened; clusters show their nodes or why
-  they have none, and Enter on one opens its session. Space folds, 1 2 3 jump, z folds
-  the rest.
+  NEEDS YOU strip of the agents blocked or finished and the clusters degraded. Sections
+  open as far as the column's height allows and fold the rest, the repositories to the
+  session you are in; clusters show their nodes or why they have none, and Enter on one
+  opens its session. Space folds by hand, 1 2 3 jump, z folds the rest, a goes back to
+  automatic. A click in the column acts at once, instead of a sixth of a second later.
 - After a reboot every claude tab comes back to its own conversation, not only the first tab
   of each repository: four agents in one repository used to come back as one and three
   that remembered nothing.

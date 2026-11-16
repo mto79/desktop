@@ -74,6 +74,7 @@ j	j k, wheel	move; the agents shown follow the session
 Space	Space, ⏎ on a header	fold or open the section the cursor is in
 1	1 2 3	repositories, clusters, agents: open it and go there
 z	z	fold every section but this one
+a	a	every section back to folding by the room there is
 p	p	peek at the agent, and answer it there
 v	v	reviews and checkouts, and each agent's last prompt
 r	r	read everything again now
