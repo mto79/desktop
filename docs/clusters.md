@@ -16,9 +16,10 @@ The same is in the menu (`Go → Clusters`), on the dashboard's Infrastructure t
 voice commands: "k9s on lab", "argo on ocp302", "talos dashboard on edge".
 
 In tmux, `prefix + K` is to clusters what `prefix + f` is to repositories: pick one, sign in
-if it needs it, and go to a session named after it, with a `shell` window and a `k9s` window
-on its kubeconfig. Signing in comes first, so the two windows do not each open a browser;
-a session already there is gone to rather than made again.
+if it needs it, and go to a session named after it, with a `shell` window, a `k9s` window
+and an `argo` window (argo9s, when it is installed) on its kubeconfig. Signing in comes
+first, so the windows do not each open a browser; a session already there is gone to rather
+than made again.
 
 ## One kubeconfig per cluster
 
@@ -36,6 +37,11 @@ given none) moves that shell alone; `kubens` would write the namespace into the 
 file, which every other window on it reads, k9s in `ocl session` included. kubie starts the
 shell it finds as its parent, so it is run from `$SHELL -c` rather than exec'd: started from
 the menu or the dashboard, its parent would be the terminal and it would fail.
+
+At the prompt, `kubectl` and `oc` are fish functions that run them through kubecolor
+(`config/fish/conf.d/kubecolor.fish`), which colours what they print. Only in an interactive
+shell; desktop-cluster and every script call the command itself. kubecolor runs oc rather
+than kubectl when `KUBECTL_COMMAND=oc`, which the `oc` function sets.
 
 `ocl login` and `ocl logout` delete the dashboard's cached cluster status, which it otherwise
 keeps for two minutes, and age the tmux sidebar's (`$XDG_RUNTIME_DIR/desktop/clusters.json`,
@@ -91,7 +97,7 @@ sign in again for a network that is down.
 | Menu | `show_clusters_menu` in `bin/desktop-menu` |
 | Voice | `cluster_said` in `bin/desktop-voice`: any name in clusters.conf, as a word of its own |
 | Completions | `config/fish/completions/desktop-cluster.fish`, `ocl.fish` |
-| Clients | `oc` and `kubectl` (pinned, `desktop-update-oc`, `desktop-update-kubectl`); `talosctl` and kubie (`desktop-update-releases`); k9s; argo9s |
+| Clients | `oc` and `kubectl` (pinned, `desktop-update-oc`, `desktop-update-kubectl`); `talosctl`, kubie and kubecolor (`desktop-update-releases`); k9s; argo9s |
 
 `ocl` used to be a script of its own with the list of clusters written into it
 (`OCL_NAMES`) and every login in `~/.kube/config`. Migration `1794593713` carried both

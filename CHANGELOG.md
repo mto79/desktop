@@ -12,6 +12,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A cluster's tmux session (`prefix + K`, `ocl session`, Enter in the sidebar) has a third
+  window, `argo`, with Argo CD's applications in argo9s, beside the shell and k9s.
+- kubectl and oc typed at the prompt are coloured by kubecolor, which is installed and kept
+  current with the other upstream tools. Pipes and scripts get kubectl's own output.
 - `prefix + K` in tmux picks a cluster, signs in if it needs it, and goes to a session named
   after it with a shell and k9s on it -- what `prefix + f` is for repositories. Also
   `ocl session NAME`.

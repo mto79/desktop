@@ -248,6 +248,7 @@ TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
 check "a session named after the cluster is made, with a shell on it" \
   grep -q "^tmux new-session -d -s ocp202 -n shell .*desktop-cluster ocp202\$" "$sandbox/tmux-calls"
 check "and k9s beside it" grep -q "^tmux new-window -d -t =ocp202: -n k9s .*desktop-cluster -k ocp202\$" "$sandbox/tmux-calls"
+check "and Argo CD's applications" grep -q "^tmux new-window -d -t =ocp202: -n argo .*desktop-cluster -a ocp202\$" "$sandbox/tmux-calls"
 check "and gone to" grep -q '^tmux switch-client -t =ocp202$' "$sandbox/tmux-calls"
 : >"$sandbox/tmux-calls"
 touch "$sandbox/has-session"

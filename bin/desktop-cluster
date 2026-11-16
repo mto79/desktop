@@ -454,13 +454,17 @@ load "$name"
 case "$action" in
 session)
   # What prefix + f is for a repository, for a cluster: a tmux session of its own, named
-  # after it, with a shell and k9s on it. Signed in to here, first, so the two windows do
-  # not each open a browser to sign in; and only made once, after that it is gone to.
+  # after it, with a shell, k9s and Argo CD's applications (argo9s) on it. Signed in to
+  # here, first, so the windows do not each open a browser to sign in; and only made once,
+  # after that it is gone to.
   ensure
   self=$(readlink -f "$0")
   if ! tmux has-session -t "=$NAME" 2>/dev/null; then
     tmux new-session -d -s "$NAME" -n shell -c "$HOME" "$self $(printf %q "$NAME")"
     tmux new-window -d -t "=$NAME:" -n k9s -c "$HOME" "$self -k $(printf %q "$NAME")"
+    if command -v argo9s >/dev/null 2>&1; then
+      tmux new-window -d -t "=$NAME:" -n argo -c "$HOME" "$self -a $(printf %q "$NAME")"
+    fi
   fi
   if [[ -n ${TMUX:-} ]]; then
     tmux switch-client -t "=$NAME"

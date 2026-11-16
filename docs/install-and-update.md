@@ -60,7 +60,7 @@ which only reports.
 | `desktop-update-hashicorp packer` | `packer`, the newest patch of 1.16 |
 | `desktop-update-hashicorp vault` | `vault`, the client, the newest patch of 2.2. Both from releases.hashicorp.com, their checksum list verified against HashiCorp's signing key by fingerprint |
 | `desktop-update-openbao` | `bao`, the newest patch of 2.7, from OpenBao's releases rather than Fedora's package a minor behind; verified against OpenBao's key the same way |
-| `desktop-update-releases` | helm, lazygit, kubie and talosctl at upstream's newest release; the aws cli through AWS's signed installer. Updates only what is installed; `desktop-update-releases kubie` installs it |
+| `desktop-update-releases` | helm, lazygit, kubie, talosctl and kubecolor at upstream's newest release; the aws cli through AWS's signed installer. Updates only what is installed; `desktop-update-releases kubie` installs it |
 | `desktop-update-npm` | what `npm i -g` put in `~/.local` (codex, opencode), at `@latest` across majors |
 | `desktop-update-pinned` | nothing: it names argo9s, kubeseal, tea, tflint, conftest, geteduroam and voxtype when there is a newer release than the version pinned in their install script, so a bump is a decision |
 

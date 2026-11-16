@@ -11,7 +11,8 @@
 # had an install script that fetched "latest" once and nothing ever fetched again: a year
 # on, all three were several releases behind, and kubie's was installed without anything
 # checked at all. The aws cli is the same, through its own installer. talosctl, for the
-# Talos clusters desktop-cluster reaches, came later and is installed the same way.
+# Talos clusters desktop-cluster reaches, came later and is installed the same way, and
+# kubecolor after it.
 #
 # These follow upstream's newest release, not a pinned one -- unlike oc and kubectl, none of
 # them has to match a server. Every download is checked against a checksum published apart
@@ -25,7 +26,7 @@ set -uo pipefail
 
 DESKTOP_PATH=${DESKTOP_PATH:-$HOME/.local/share/desktop}
 BIN=${DESKTOP_RELEASES_BIN:-/usr/local/bin}
-TOOLS=(helm lazygit kubie talosctl aws)
+TOOLS=(helm lazygit kubie talosctl kubecolor aws)
 
 case "$(uname -m)" in
 x86_64) arch=amd64 longarch=x86_64 ;;
@@ -84,6 +85,17 @@ latest_talosctl() {
   want=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
   line=$(asset "$json" "^talosctl-linux-${arch}$")
   url=${line%%$'\t'*} sum=${line#*$'\t'} member=""
+}
+
+# kubecolor colours what kubectl and oc print; the fish functions in conf.d/kubecolor.fish
+# put it in front of both.
+have_kubecolor() { kubecolor --kubecolor-version 2>/dev/null | sed 's/^v//' | head -1; }
+latest_kubecolor() {
+  local json line
+  json=$(github kubecolor/kubecolor) && [[ -n $json ]] || return 1
+  want=$(jq -r '.tag_name // empty' <<<"$json" | sed 's/^v//')
+  line=$(asset "$json" "_linux_${arch}\\.tar\\.gz$")
+  url=${line%%$'\t'*} sum=${line#*$'\t'} member=kubecolor
 }
 
 have_aws() { aws --version 2>/dev/null | sed -n 's|^aws-cli/\([^ ]*\).*|\1|p'; }

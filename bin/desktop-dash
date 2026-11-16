@@ -85,6 +85,7 @@ default_watch() {
 OpenShift 4.22|ocp:stable-4.22|oc version --client | sed -n 's/^Client Version: //p'
 k9s|github:derailed/k9s|k9s version -s | awk '/^Version/ { print $2 }'
 kubie|github:sbstp/kubie|kubie --version | awk '{ print $2 }'
+kubecolor|github:kubecolor/kubecolor|kubecolor --kubecolor-version | sed 's/^v//'
 argo9s|github:vvrnv/argo9s|argo9s --version | awk '{ print $2 }'
 Hyprland|github:hyprwm/Hyprland|hyprctl version | awk 'NR == 1 { print $2 }'
 voxtype|github:peteonrails/voxtype|voxtype --version | awk '{ print $2 }'

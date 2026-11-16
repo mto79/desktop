@@ -43,6 +43,7 @@ tool() {
   lazygit) printf '#!/usr/bin/env bash\necho "commit=, build date=, version=%s, os=linux"\n' "$2" ;;
   kubie) printf '#!/usr/bin/env bash\necho "kubie %s"\n' "$2" ;;
   talosctl) printf '#!/usr/bin/env bash\nprintf "Client:\\n\\tTag:         v%s\\n\\tSHA:         abc\\n"\n' "$2" ;;
+  kubecolor) printf '#!/usr/bin/env bash\necho v%s\n' "$2" ;;
   aws) printf '#!/usr/bin/env bash\necho "aws-cli/%s Python/3 Linux/7 exe/x86_64"\n' "$2" ;;
   esac >"$3"
   chmod +x "$3"
@@ -82,6 +83,13 @@ talosctl_release() {
   tool talosctl "$1" "$sandbox/talosctl-build"
   github_release siderolabs/talos "v$1" "talosctl-linux-$arch" "$sandbox/talosctl-build" "${2:-}"
 }
+kubecolor_release() {
+  local work="$sandbox/build"
+  rm -rf "$work" && mkdir -p "$work"
+  tool kubecolor "$1" "$work/kubecolor"
+  tar -czf "$work/archive.tar.gz" -C "$work" kubecolor
+  github_release kubecolor/kubecolor "v$1" "kubecolor_$1_linux_$arch.tar.gz" "$work/archive.tar.gz" "${2:-}"
+}
 aws_release() {
   mkdir -p "$site/raw.githubusercontent.com/aws/aws-cli/v2"
   printf 'CHANGELOG\n=========\n\n%s\n=======\n' "$1" >"$site/raw.githubusercontent.com/aws/aws-cli/v2/CHANGELOG.rst"
@@ -97,6 +105,7 @@ helm_release 4.3.1
 lazygit_release 0.66.2
 kubie_release 0.28.0
 talosctl_release 1.11.5
+kubecolor_release 0.8.0
 aws_release 2.39.6
 
 run >/dev/null 2>&1
@@ -127,6 +136,11 @@ run kubie >/dev/null 2>&1
 check "a tool named is installed" test "$(version kubie)" = 0.28.0
 run talosctl >/dev/null 2>&1
 check "talosctl, for Talos clusters, from siderolabs' release" test "$(version talosctl)" = 1.11.5
+run kubecolor >/dev/null 2>&1
+check "kubecolor, from its release archive" test "$(version kubecolor)" = 0.8.0
+kubecolor_release 0.8.1
+run >/dev/null 2>&1
+check "and kept current once it is there" test "$(version kubecolor)" = 0.8.1
 
 # The digest GitHub gives and the file disagreeing: the case the check is for.
 lazygit_release 0.67.0 0000000000000000000000000000000000000000000000000000000000000000
