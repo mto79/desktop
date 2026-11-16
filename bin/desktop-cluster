@@ -133,6 +133,36 @@ talos_args() {
   return 0
 }
 
+# oc login --web opens the sign-in page with xdg-open, as a tab in whatever browser window
+# was last used, and leaves it there -- on the callback page -- when it is done. On the
+# desktop it is given a web-app window of its own instead, through an xdg-open found first
+# on PATH, and that window is closed once oc returns: signed in or not, nothing is left to
+# close by hand. Off the desktop (ssh, no Hyprland) oc opens what it always did.
+web_window() {
+  [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]] && command -v desktop-launch-webapp >/dev/null 2>&1 || return 0
+  mkdir -p "$1"
+  cat >"$1/xdg-open" <<STUB
+#!/usr/bin/env bash
+printf '%s\n' "\$1" >'$1/url'
+desktop-launch-webapp "\$1" >/dev/null 2>&1
+STUB
+  chmod +x "$1/xdg-open"
+}
+
+# A Chromium web-app window is classed after the page it opened, as
+# brave-HOST__PATH-Default, so the sign-in window is told from every other by its host.
+close_web_window() {
+  local url host
+  url=$(cat "$1/url" 2>/dev/null) || return 0
+  host=${url#*://} host=${host%%[/?#]*} host=${host%%:*}
+  [[ -n $host ]] || return 0
+  hyprctl clients -j 2>/dev/null |
+    jq -r --arg h "-${host}__" '.[] | select(.initialClass | contains($h)) | .address' |
+    while read -r addr; do
+      hyprctl dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" >/dev/null
+    done
+}
+
 # The new kubeconfig is written beside the old and moved over it only once it is whole:
 # a sign-in that fails, or is cancelled at its password prompt, leaves the old one.
 login() {
@@ -142,7 +172,7 @@ login() {
   chmod 600 "$tmp"
   # EXIT, not RETURN: die leaves by exit, and a RETURN trap does not see that.
   # shellcheck disable=SC2064
-  trap "rm -f '$tmp' '$tmp.raw'" EXIT
+  trap "rm -rf '$tmp' '$tmp.raw' '$tmp.web'" EXIT
   case "$KIND" in
   openshift)
     command -v oc >/dev/null 2>&1 || die "oc is not installed (desktop-update-oc)"
@@ -151,7 +181,10 @@ login() {
     [[ -n $opt_ca ]] && args+=(--certificate-authority "$opt_ca")
     case "${opt_login:-password}" in
     password) echo "Signing in to $NAME ($opt_server)" ;;
-    web) args+=(--web) ;;
+    web)
+      args+=(--web)
+      web_window "$tmp.web"
+      ;;
     token)
       local token
       read -rsp "Token for $NAME (from the console, Copy login command): " token && echo
@@ -160,7 +193,10 @@ login() {
       ;;
     *) die "$NAME: login= is password, web or token" ;;
     esac
-    oc login "${args[@]}" || die "signing in to $NAME failed"
+    local ok=true
+    PATH="$tmp.web:$PATH" oc login "${args[@]}" || ok=false
+    close_web_window "$tmp.web"
+    $ok || die "signing in to $NAME failed"
     ;;
   rke2 | kubernetes)
     if [[ -n $opt_ssh ]]; then

@@ -56,6 +56,11 @@ Any kind also takes `namespace=` (to start in), `console=` (for `-c`; OpenShift 
 own), `argocd=` (Argo CD's namespace: `openshift-gitops` on OpenShift, `argocd` elsewhere),
 `insecure=true` and `ca=`.
 
+`login=web` gives the sign-in page a web-app window of its own rather than a tab in the
+browser, and closes it once `oc login` returns, whether the sign-in worked or not. oc opens
+the page with `xdg-open`; during the sign-in an `xdg-open` of desktop-cluster's own comes
+first on `PATH`. Over ssh, with no Hyprland, oc opens the page the way it always has.
+
 A client certificate (RKE2, Talos) runs out eventually; the cluster then answers
 "Unauthorized", the state becomes `signed-out`, and opening it fetches a new kubeconfig.
 A cluster that does not answer at all is `unreachable`, not signed out: it is not asked to

@@ -110,6 +110,9 @@ Add a line under the current month in the same commit as the change it describes
   automatic. A click in the column acts at once, instead of a sixth of a second later.
   Sections are a line apart, each header ruled across to its count, NEEDS YOU in the
   attention colour.
+- Signing in to an OpenShift cluster with `login=web` opens the sign-in page in a window of
+  its own, which closes once the sign-in is done or has failed, rather than leaving a tab
+  behind in the browser.
 - After a reboot every claude tab comes back to its own conversation, not only the first tab
   of each repository: four agents in one repository used to come back as one and three
   that remembered nothing.

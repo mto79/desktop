@@ -82,9 +82,10 @@ source "$stubs/kc-lib"
 echo "oc \$* @\$file" >>"$log"
 case "\$1" in
 login)
+  [[ " \$* " == *" --web "* ]] && xdg-open "https://oauth-openshift.apps.web.example/oauth/authorize?client_id=x"
   [[ -e "$sandbox/refuse" ]] && exit 1
   printf 'context=default/api-x:6443/u\ncluster=api-x:6443\ntoken=good\n' >"\$file"
-  for a in "\$@"; do [[ \$a == --server ]] && grab=1 && continue; [[ \${grab:-} ]] && put server "\$a" && grab=""; done ;;
+  for a in "\$@"; do [[ \$a == --server ]] && grab=1 && continue; [[ \${grab:-} ]] && put server "\$a" && grab=""; done; true ;;
 whoami) [[ \${2:-} == --show-console ]] && { echo https://console.ocp202.example; exit; }; authed ;;
 logout) ;;
 esac
@@ -287,6 +288,41 @@ check "talosctl is installed for the Talos clusters" grep -q talosctl-installed 
 echo "# mine" >>"$mconf"
 migrate
 check "run again, a clusters.conf that is there is left alone" grep -qx '# mine' "$mconf"
+
+# --- login=web: the sign-in page has a window of its own, closed once oc is done
+echo "web       openshift   server=https://api.web.example:6443 login=web" >>"$sandbox/config/desktop/clusters.conf"
+cat >"$stubs/desktop-launch-webapp" <<STUB
+#!/usr/bin/env bash
+echo "webapp \$*" >>"$log"
+STUB
+cat >"$stubs/hyprctl" <<STUB
+#!/usr/bin/env bash
+case "\$1" in
+clients) echo '[{"address":"0xa1","initialClass":"brave-oauth-openshift.apps.web.example__oauth_authorize-Default"},
+                {"address":"0xb2","initialClass":"brave-browser"},
+                {"address":"0xc3","initialClass":"brave-teams.example__-Default"}]' ;;
+dispatch) echo "hyprctl \$2" >>"$log" ;;
+esac
+STUB
+chmod +x "$stubs/desktop-launch-webapp" "$stubs/hyprctl"
+: >"$log"
+HYPRLAND_INSTANCE_SIGNATURE=x run login web >/dev/null 2>&1
+check "login=web opens the sign-in page as a web app" called "webapp https://oauth-openshift.apps.web.example/oauth/authorize"
+check "and not in the browser's last window" bash -c "! grep -q '^xdg-open' '$log'"
+check "that window is closed once oc is done" called 'hyprctl hl.dsp.window.close({ window = "address:0xa1" })'
+check "and no other" test "$(grep -c window.close "$log")" = 1
+check "signed in all the same" grep -q token=good "$store/web.kubeconfig"
+touch "$sandbox/refuse"; : >"$log"
+HYPRLAND_INSTANCE_SIGNATURE=x run login web >/dev/null 2>&1
+rm -f "$sandbox/refuse"
+check "a sign-in that fails closes it too" called 'address:0xa1'
+: >"$log"
+run logout web >/dev/null 2>&1
+HYPRLAND_INSTANCE_SIGNATURE= run login web >/dev/null 2>&1
+check "off the desktop, oc opens it as it always did" called "xdg-open https://oauth-openshift.apps.web.example"
+check "and nothing is closed" bash -c "! grep -q window.close '$log'"
+sed -i '/^web /d' "$sandbox/config/desktop/clusters.conf"
+rm -f "$stubs/desktop-launch-webapp" "$stubs/hyprctl" "$store/web.kubeconfig"
 
 # --- the old kubectx snippet goes
 SNIPPET_MIGRATION="$ROOT/migrations/1794831715.sh"
