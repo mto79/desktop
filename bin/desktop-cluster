@@ -234,6 +234,7 @@ login() {
   # they were given, and it holds a token.
   chmod 600 "$tmp" && mv -f "$tmp" "$FILE"
   rm -f "$tmp.raw"
+  status_stale
   echo "Signed in to $NAME"
 }
 
@@ -259,6 +260,23 @@ environment() {
 # Columns without column(1): util-linux's, which is not on every machine this runs from.
 table() { awk -F'\t' '{ for (i = 1; i <= NF; i++) { cell[NR, i] = $i; if (length($i) > w[i]) w[i] = length($i) } n[NR] = NF }
   END { for (r = 1; r <= NR; r++) { line = ""; for (i = 1; i <= n[r]; i++) line = line sprintf(i < n[r] ? "%-" w[i] + 2 "s" : "%s", cell[r, i]); sub(/ +$/, "", line); print line } }'; }
+
+# The dashboard keeps what `status` said for two minutes and the tmux sidebar for one; a
+# sign-in or out here is a change they should show the next time they look, not after that.
+# The dashboard's is deleted. The sidebar's is shared by every column and drawn from while a
+# new one is asked for, so it is aged instead -- the next draw asks again -- and a sign-out
+# is written into it at once, rather than the cluster showing healthy until the answer.
+status_stale() { # [signed-out]
+  local side="${XDG_RUNTIME_DIR:-/tmp}/desktop/clusters.json"
+  rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/desktop/dashboard/infra.json"
+  [[ -f $side ]] || return 0
+  if [[ ${1:-} == signed-out ]]; then
+    jq -c --arg n "$NAME" 'map(if .name == $n then .state = "signed-out" | .nodes = 0 | .ready = 0 else . end)' \
+      "$side" >"$side.$$" 2>/dev/null && mv -f "$side.$$" "$side" || rm -f "$side.$$"
+  fi
+  touch -d @0 "$side" 2>/dev/null
+  return 0
+}
 
 title() { printf '\e]0;%s\a' "$1"; }
 
@@ -368,7 +386,7 @@ logout)
   [[ -n ${2:-} ]] || die "usage: $ME logout NAME"
   load "$2"
   if [[ $KIND == openshift && -s $FILE ]]; then oc --kubeconfig "$FILE" logout >/dev/null 2>&1 || true; fi
-  rm -f "$FILE" && echo "Signed out of $NAME"
+  rm -f "$FILE" && status_stale signed-out && echo "Signed out of $NAME"
   exit
   ;;
 session) action=session; shift ;;
@@ -409,6 +427,20 @@ shell)
   ensure
   environment
   title "$NAME · $KIND"
+  # kubie's shell when it is there, as the old ocl's was: it works on a copy of the
+  # cluster's kubeconfig, so `kubie ns` -- fzf over the namespaces when it is given none --
+  # moves this shell only. kubens would write the namespace into the file itself, which
+  # the k9s beside it in `ocl session` reads too.
+  if command -v kubie >/dev/null 2>&1; then
+    echo "$NAME ($KIND): a kubie shell; kubie ns for a namespace, exit to leave"
+    # kubie starts the shell it finds as its parent, and fails ("No such file or directory")
+    # when that is not a shell -- a terminal opened from the menu or the dashboard runs this
+    # directly. So it is started from $SHELL, which is then the one it gives you. The names
+    # go in the environment: "$X" reads the same in fish as in bash. "; true" because bash
+    # replaces itself with a -c command that is a single one, and kubie is orphaned again.
+    DESKTOP_KUBIE_FILE=$FILE DESKTOP_KUBIE_NAME=$NAME \
+      exec "${SHELL:-bash}" -c 'kubie ctx --kubeconfig "$DESKTOP_KUBIE_FILE" "$DESKTOP_KUBIE_NAME"; true'
+  fi
   echo "$NAME ($KIND): KUBECONFIG is its own; leave with exit"
   exec "${SHELL:-bash}"
   ;;

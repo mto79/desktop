@@ -30,6 +30,17 @@ file, `kubectx` in one terminal moves every other terminal to the same cluster, 
 is on one cluster for as long as it is open, and signing out of a cluster is deleting its
 file. Its context is named after the cluster, which is what the starship prompt shows.
 
+The shell `ocl NAME` opens is kubie's when kubie is installed, as the old `ocl`'s was. kubie
+works on a copy of the cluster's kubeconfig, so `kubie ns` (fzf over the namespaces when
+given none) moves that shell alone; `kubens` would write the namespace into the cluster's
+file, which every other window on it reads, k9s in `ocl session` included. kubie starts the
+shell it finds as its parent, so it is run from `$SHELL -c` rather than exec'd: started from
+the menu or the dashboard, its parent would be the terminal and it would fail.
+
+`ocl login` and `ocl logout` delete the dashboard's cached cluster status, which it otherwise
+keeps for two minutes, and age the tmux sidebar's (`$XDG_RUNTIME_DIR/desktop/clusters.json`,
+one minute) so that it asks again; a sign-out is written into the sidebar's at once.
+
 A sign-in is written beside the old file and moved over it only when it worked, so a
 cancelled password prompt leaves the previous kubeconfig as it was.
 

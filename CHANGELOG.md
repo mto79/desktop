@@ -110,6 +110,9 @@ Add a line under the current month in the same commit as the change it describes
   automatic. A click in the column acts at once, instead of a sixth of a second later.
   Sections are a line apart, each header ruled across to its count, NEEDS YOU in the
   attention colour.
+- A shell opened with `ocl` is a kubie shell again, as before `ocl` gave each cluster a
+  kubeconfig of its own: `kubie ns` picks a namespace with fzf, and changes it for that shell
+  only, not for the k9s beside it.
 - Signing in to an OpenShift cluster with `login=web` opens the sign-in page in a window of
   its own, which closes once the sign-in is done or has failed, rather than leaving a tab
   behind in the browser.
@@ -154,6 +157,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The dashboard and the tmux sidebar show a cluster signed in to or out of with `ocl` the
+  next time they look, instead of up to two minutes later; a sign-out shows in the sidebar
+  at once.
 - A new terminal no longer empties `~/.kube/config` or exports an empty `KUBECONFIG`: a
   leftover from before `ocl` gave each cluster a kubeconfig of its own did both every time
   fish started.

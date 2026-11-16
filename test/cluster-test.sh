@@ -82,6 +82,7 @@ source "$stubs/kc-lib"
 echo "oc \$* @\$file" >>"$log"
 case "\$1" in
 login)
+  [[ -e "$sandbox/slow" ]] && sleep 2
   [[ " \$* " == *" --web "* ]] && xdg-open "https://oauth-openshift.apps.web.example/oauth/authorize?client_id=x"
   [[ -e "$sandbox/refuse" ]] && exit 1
   printf 'context=default/api-x:6443/u\ncluster=api-x:6443\ntoken=good\n' >"\$file"
@@ -105,10 +106,12 @@ echo "ssh \$*" >>"$log"
 printf 'context=default\ncluster=default\nserver=https://127.0.0.1:6443\ntoken=good\n'
 STUB
 
-for cmd in k9s argo9s fish xdg-open notify-send; do
+for cmd in k9s argo9s fish kubie xdg-open notify-send; do
   cat >"$stubs/$cmd" <<STUB
 #!/usr/bin/env bash
 [[ \$1 == --help ]] && { echo "  -n, --namespace string"; exit; }
+# The shell is asked to start kubie, which then makes a shell of its own.
+[[ $cmd == fish && \$1 == -c ]] && exec bash -c "\$2"
 echo "$cmd \$* KUBECONFIG=\${KUBECONFIG:-} TALOSCONFIG=\${TALOSCONFIG:-} CLUSTER=\${DESKTOP_CLUSTER:-}" >>"$log"
 STUB
 done
@@ -126,7 +129,7 @@ broken    rke2
 CONF
 
 run() {
-  PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" \
+  PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" XDG_RUNTIME_DIR="$sandbox/run" \
     SHELL="$stubs/fish" bash "$CLUSTER" "$@" </dev/null
 }
 called() { grep -qF -- "$1" "$log"; }
@@ -150,7 +153,8 @@ check "a shell on an OpenShift cluster signs in first, into a kubeconfig of its 
 check "at the server in the file" called "--server https://api.ocp202.example:6443"
 check "the kubeconfig is named after the cluster" grep -qx 'context=ocp202' "$store/ocp202.kubeconfig"
 check "and only its owner can read it" test "$(stat -c %a "$store/ocp202.kubeconfig")" = 600
-check "the shell is handed that file and no other" called "fish  KUBECONFIG=$store/ocp202.kubeconfig TALOSCONFIG= CLUSTER=ocp202"
+check "the shell is kubie's, on that file and no other" called "kubie ctx --kubeconfig $store/ocp202.kubeconfig ocp202 KUBECONFIG=$store/ocp202.kubeconfig TALOSCONFIG= CLUSTER=ocp202"
+check "and not a plain shell instead" bash -c "! grep -q '^fish ' '$log'"
 : >"$log"
 run ocp202 >/dev/null 2>&1
 check "signed in already, it does not sign in again" lacks "oc login" "$log"
@@ -288,6 +292,34 @@ check "talosctl is installed for the Talos clusters" grep -q talosctl-installed 
 echo "# mine" >>"$mconf"
 migrate
 check "run again, a clusters.conf that is there is left alone" grep -qx '# mine' "$mconf"
+
+# --- what the dashboard shows
+dash="$sandbox/cache/desktop/dashboard/infra.json"
+mkdir -p "${dash%/*}"
+echo '{"signed_in":1}' >"$dash"
+run logout ocp202 >/dev/null 2>&1
+check "signing out tells the dashboard, rather than it showing the old state for two minutes" test ! -e "$dash"
+echo '{"signed_in":0}' >"$dash"
+run login ocp202 >/dev/null 2>&1
+check "and so does signing in" test ! -e "$dash"
+side="$sandbox/run/desktop/clusters.json"
+mkdir -p "${side%/*}"
+echo '[{"name":"ocp202","state":"healthy","nodes":3,"ready":3},{"name":"lab","state":"healthy","nodes":1,"ready":1}]' >"$side"
+run logout ocp202 >/dev/null 2>&1
+check "the tmux sidebar shows the sign-out at once" \
+  test "$(jq -r '.[] | "\(.name)=\(.state)"' "$side" | tr '\n' ' ')" = "ocp202=signed-out lab=healthy "
+check "and asks every cluster again on its next draw" test "$(stat -c %Y "$side")" -lt 1000
+touch "$side"
+run login ocp202 >/dev/null 2>&1
+check "after a sign-in too" test "$(stat -c %Y "$side")" -lt 1000
+
+# --- a sign-in cut short
+touch "$sandbox/slow"
+PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" XDG_RUNTIME_DIR="$sandbox/run" \
+  timeout -s TERM 1 bash "$CLUSTER" login ocp202 </dev/null >/dev/null 2>&1
+rm -f "$sandbox/slow"
+check "a sign-in killed halfway leaves no scratch file in the store" bash -c "! ls -A '$store' | grep -q '^\.'"
+check "and the kubeconfig there was is still there" grep -q token=good "$store/ocp202.kubeconfig"
 
 # --- login=web: the sign-in page has a window of its own, closed once oc is done
 echo "web       openshift   server=https://api.web.example:6443 login=web" >>"$sandbox/config/desktop/clusters.conf"
