@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+
+# desktop-view: a session that shows something, not a repository's work -- the merge
+# requests waiting for you, an update, btop -- opened from the sidebar's VIEWS.
+#
+#   desktop-view                  pick one with fzf, and open it
+#   desktop-view open <name>      its tmux session, made if it is not there, and gone to
+#   desktop-view start <name>     made if it is not there, and nothing else
+#   desktop-view names            the views, one per line: what the sidebar lists
+#   desktop-view run <name>       what the session runs: the view's command
+#   desktop-view watch <seconds> <command...>
+#                                 a command run again every so many seconds, or on r
+#
+# The views are in ~/.config/desktop/views.conf, one per line, a name and the command it
+# runs; the repository's own list until there is one:
+#
+#   reviews   desktop-view watch 300 desktop-reviews --list
+#   update    desktop-update
+#
+# The session is named after the view, so a view opened twice is gone to the second time
+# rather than run again. A command that ends leaves its output up until Enter, so that an
+# update that finished, or failed, can still be read.
+
+set -uo pipefail
+
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/desktop/views.conf"
+[[ -f $CONFIG ]] || CONFIG="${DESKTOP_PATH:-$HOME/.local/share/desktop}/config/desktop/views.conf"
+
+die() {
+  echo "desktop-view: $*" >&2
+  exit 1
+}
+
+# Every view as "name<TAB>command", the comments and the blank lines left out.
+views() {
+  [[ -f $CONFIG ]] || return 0
+  sed -E 's/^[[:space:]]+//; /^(#|$)/d; s/[[:space:]]+/\t/' "$CONFIG"
+}
+
+command_of() {
+  views | awk -F'\t' -v name="$1" '$1 == name { print $2; found = 1; exit } END { exit !found }'
+}
+
+# A view has an agent column on the right, as a repository's session has, to ask about
+# what the view shows -- in a folder of the view's own rather than the home directory.
+AGENT_HOME=${DESKTOP_VIEW_AGENT_HOME:-$HOME/views}
+
+start() {
+  local name=$1 dir
+  command_of "$name" >/dev/null || die "no view called '$name' (see $CONFIG)"
+  tmux has-session -t "=$name" 2>/dev/null && return 0
+  dir="$AGENT_HOME/$name"
+  mkdir -p "$dir"
+  tmux new-session -d -s "$name" -n "$name" -c "$dir" "$(readlink -f "$0") run $(printf %q "$name")"
+  # What desktop-tmux-restore leaves out: a view is made by this, from views.conf, and not
+  # rebuilt at login as a window laid out for an agent.
+  tmux set-option -t "=$name:" @view "$name"
+  if command -v desktop-agent-layout >/dev/null 2>&1; then
+    desktop-agent-layout --column "=$name:$name" claude >/dev/null 2>&1 || true
+  fi
+}
+
+case "${1:-}" in
+names)
+  views | cut -f1
+  ;;
+start)
+  start "${2:?usage: desktop-view start <name>}"
+  ;;
+open | "")
+  name=${2:-}
+  if [[ -z $name ]]; then
+    name=$(views | cut -f1 | fzf --prompt 'view> ' --height 40% --reverse) || exit 0
+  fi
+  start "$name"
+  if [[ -n ${TMUX:-} ]]; then
+    tmux switch-client -t "=$name"
+  else
+    tmux attach-session -t "=$name"
+  fi
+  ;;
+run)
+  name=${2:?usage: desktop-view run <name>}
+  command=$(command_of "$name") || die "no view called '$name' (see $CONFIG)"
+  printf '\033]2;%s\033\\' "$name"
+  bash -c "$command"
+  status=$?
+  printf '\n%s ended (%s); Enter closes it ' "$name" "$status"
+  read -r _
+  ;;
+watch)
+  seconds=${2:?usage: desktop-view watch <seconds> <command...>}
+  shift 2
+  (($#)) || die "usage: desktop-view watch <seconds> <command...>"
+  # Run first and the screen cleared after, so it is never blank while a slow command
+  # asks the network. A resize draws what was found again rather than asking again: the
+  # session is made detached, at a size it does not keep, and going to it resizes it.
+  resized=0
+  trap 'resized=1' WINCH
+  fresh=1
+  while :; do
+    if ((fresh)); then
+      out=$("$@" 2>&1)
+      at=$(date +%H:%M)
+    fi
+    clear
+    printf '%s\n' "$out"
+    printf '\n\033[2m%s · again in %ss · r now · q close\033[0m' "$at" "$seconds"
+    key=
+    read -rsn1 -t "$seconds" key
+    [[ $key == q ]] && exit 0
+    if ((resized)); then
+      resized=0 fresh=0
+    else
+      fresh=1
+    fi
+  done
+  ;;
+-h | --help)
+  sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'
+  ;;
+*)
+  die "unknown command '$1' (see desktop-view --help)"
+  ;;
+esac

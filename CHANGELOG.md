@@ -12,6 +12,12 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- The tmux sidebar has a VIEWS section: sessions that show something rather than hold a
+  repository -- the merge requests waiting for you, an update, btop, the journal. Enter
+  opens one, or goes to it when it is open; `desktop-view` does the same from a prompt,
+  and `~/.config/desktop/views.conf` says which there are. A view has an agent column on the
+  right, working in `~/views/<name>`, to ask about what it shows.
+
 - A cluster's tmux session (`prefix + K`, `ocl session`, Enter in the sidebar) has a third
   window, `argo`, with Argo CD's applications in argo9s, beside the shell and k9s.
 - kubectl and oc typed at the prompt are coloured by kubecolor, which is installed and kept

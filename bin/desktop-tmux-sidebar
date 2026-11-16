@@ -26,6 +26,9 @@ bar, and the keys along the bottom:
 
      ⏎ go  p peek  v more  q hide
 
+Under them, folding as room asks, CLUSTERS (ocl's), VIEWS (desktop-view's: sessions that
+show something, the reviews waiting or an update) and AGENTS.
+
 Windows are not listed -- a session's windows are on its own tab bar -- and neither are the
 sessions behind an agent column or a terminal's tabs (ai-desktop-12-claude, term-...):
 their agents belong to the session whose window holds the column. The agents shown are
@@ -549,8 +552,8 @@ def rows(here, detailed=False, module=None, selected=None, room=None):
 # @sidebar_folds. Folded, REPOS still shows the session you are in: where you are is not
 # something to fold away.
 
-SECTIONS = ("repos", "clusters", "agents")
-TITLES = {"repos": "REPOS", "clusters": "CLUSTERS", "agents": "AGENTS"}
+SECTIONS = ("repos", "clusters", "views", "agents")
+TITLES = {"repos": "REPOS", "clusters": "CLUSTERS", "views": "VIEWS", "agents": "AGENTS"}
 FOLDS = "@sidebar_folds"
 ALERTS = ("waiting", "failed", "stuck", "done")
 # A cluster's state as `desktop-cluster status --json` says it, drawn as a dot and a word.
@@ -603,6 +606,25 @@ def clusters(now=None):
     return [{"name": name, "state": "unknown"} for name in CLUSTER_NAMES["names"]]
 
 
+VIEW_NAMES = {"at": 0.0, "names": []}
+
+
+def views(now=None):
+    """The views desktop-view knows: sessions that show something, from views.conf.
+
+    Asked once a minute, which is how soon an edit of the file shows.
+    """
+    now = time.time() if now is None else now
+    if now - VIEW_NAMES["at"] > CLUSTER_SECONDS:
+        VIEW_NAMES["at"] = now
+        try:
+            out = subprocess.run(["desktop-view", "names"], capture_output=True, text=True, timeout=3)
+            VIEW_NAMES["names"] = out.stdout.split() if out.returncode == 0 else []
+        except (OSError, subprocess.SubprocessError):
+            VIEW_NAMES["names"] = []
+    return list(VIEW_NAMES["names"])
+
+
 def folds():
     """What was folded or opened by hand: {"clusters": "closed", ...}."""
     found = {}
@@ -623,10 +645,12 @@ def worst(states):
 
 
 def compose(sessions, found_clusters, here, detailed=False, module=None, selected=None,
-            room=None, chosen=None, open_sessions=None):
+            room=None, chosen=None, open_sessions=None, found_views=None):
     """The rows of the whole column, in sections: see the comment above."""
     chosen = chosen or {}
-    names = [c["name"] for c in found_clusters]
+    found_views = found_views or []
+    # A cluster's session and a view's are listed in their own sections, not as repositories.
+    names = [c["name"] for c in found_clusters] + list(found_views)
     here_session = here.split(":")[0]
     open_sessions = set(sessions) if open_sessions is None else set(open_sessions)
     repos = {name: found for name, found in sessions.items() if name not in names}
@@ -668,12 +692,17 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
         bad = [c for c in found_clusters if c.get("state") in ("degraded", "misconfigured")]
         parts.append(("clusters", crow, [], len(found_clusters), "degraded" if bad else "",
                       bool(bad) or here_session in names))
+    if found_views:
+        vrows = [{"kind": "view", "section": "views", "session": name, "text": name,
+                  "open": name in open_sessions, "state": "", "for": "", "pane": "",
+                  "current": name == here_session} for name in found_views]
+        parts.append(("views", vrows, [], len(found_views), "", here_session in found_views))
     agent_states = [r["state"] for r in agent_rows if r["kind"] == "agent"]
     parts.append(("agents", agent_rows, [], sum(1 for r in agent_rows if r["kind"] == "agent"),
                   worst(agent_states), False))
 
     # Open or folded. By hand, as chosen. Otherwise by the room the column has: what has
-    # something to report opens first, then the agents, the clusters and the repositories in
+    # something to report opens first, then the agents, the clusters, the views and the repositories in
     # that order, each as long as it still fits; a tall column shows everything open, a
     # short one folds what does not fit. Without a height -- a test -- everything fits.
     # A blank line between sections, so they read as separate things: counted in the room.
@@ -685,7 +714,7 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
         if key not in state and alert:
             state[key] = "open"
             used += sizes[key]
-    for key in ("agents", "clusters", "repos"):
+    for key in ("agents", "clusters", "views", "repos"):
         if key in sizes and key not in state:
             fits = room is None or used + sizes[key] <= room
             state[key] = "open" if fits and sizes[key] else "closed"
@@ -718,7 +747,7 @@ def cluster_row(cluster, here_session, section):
 
 # Where a row's text starts: the dot, then the name a space after it.
 DOT, NAME = 1, 3
-SELECTABLE = ("session", "agent", "section", "cluster")
+SELECTABLE = ("session", "agent", "section", "cluster", "view")
 
 
 def pieces(row, width):
@@ -756,6 +785,12 @@ def pieces(row, width):
         if right:
             out.append((width - 1 - len(right), right, colour if row["cluster"] != "healthy" else "dim"))
         return out
+    if kind == "view":
+        # Open, a green dot and the word; otherwise a ring, to be opened by going to it.
+        if row.get("open"):
+            return [(DOT, "●", "green"), (NAME, row["text"][:width - NAME - 6], "text"),
+                    (width - 5, "open", "dim")]
+        return [(DOT, "○", "dim"), (NAME, row["text"][:width - NAME - 1], "text")]
     if kind == "header" and row.get("section") == "needs":
         # In the colour of something wanting you, and ruled like the sections below it.
         out = [(1, "!", "peach"), (3, row["text"], "peach")]
@@ -829,7 +864,7 @@ def line_of(row, width):
         for i, char in enumerate(text):
             if 0 <= column + i < width:
                 line[column + i] = char
-    if row.get("current") and row["kind"] in ("session", "sub", "cluster"):
+    if row.get("current") and row["kind"] in ("session", "sub", "cluster", "view"):
         line[0] = "▌"
     return "".join(line), 0
 
@@ -841,13 +876,13 @@ def draw(screen, listed, cursor, offset, focused=True):
         # The session you are in sits on a bar, both its lines, as herdr's active row does;
         # the cursor on a brighter one, and only while the column has the keys.
         index = offset + line
-        bar = "surface" if row.get("current") and row["kind"] in ("session", "sub", "cluster") else None
+        bar = "surface" if row.get("current") and row["kind"] in ("session", "sub", "cluster", "view") else None
         if focused and index == cursor:
             bar = "overlay"
         try:
             if bar:
                 screen.addstr(line, 0, " " * (width - 1), ink("text", bar))
-            if row.get("current") and row["kind"] in ("session", "sub", "cluster"):
+            if row.get("current") and row["kind"] in ("session", "sub", "cluster", "view"):
                 screen.addstr(line, 0, "▌", ink("accent", bar))
             for column, text, colour in pieces(row, width):
                 attr = ink(colour, bar)
@@ -933,6 +968,14 @@ def go(row, here):
             tmux("new-window", "-t", f"{here.split(':')[0]}:", "-n", "cluster",
                  f"desktop-cluster session {shlex.quote(row['session'])}")
         return
+    if row["kind"] == "view":
+        # Made first if it is not open; desktop-view knows the command.
+        try:
+            subprocess.run(["desktop-view", "start", row["session"]], capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return
+        tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
+        return
     if row["kind"] != "session":
         return
     tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
@@ -970,13 +1013,15 @@ def sidebar(screen):
     here = tmux(*where)
     data = collect()
     found_clusters = clusters()
+    found_views = views()
     chosen = folds()
     selected = here.split(":")[0]
     def free():
         return max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
 
     def build():
-        return compose(data, found_clusters, here, detailed, module, selected, free(), chosen)
+        return compose(data, found_clusters, here, detailed, module, selected, free(), chosen,
+                       found_views=found_views)
 
     def section_of(index):
         """The section a row is in, and the index of that section's header."""
@@ -1048,7 +1093,7 @@ def sidebar(screen):
             if listed:
                 fold(section_of(cursor)[0])
                 dirty = True
-        elif key in (ord("1"), ord("2"), ord("3")):
+        elif key in (ord("1"), ord("2"), ord("3"), ord("4")):
             fold(SECTIONS[key - ord("1")], "open")
             dirty = True
         elif key == ord("a"):
@@ -1117,6 +1162,7 @@ def sidebar(screen):
             detailed = tmux("show-options", "-gqv", VIEW) == "detail"
             data = collect()
             found_clusters = clusters()
+            found_views = views()
             chosen = folds()
             fresh = build()
             # A theme switched meanwhile brings its own agent colours.

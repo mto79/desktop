@@ -109,7 +109,13 @@ cat >"$sandbox/path/desktop-agent-tabs" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >>"$SANDBOX/did"
 STUB
-chmod +x "$sandbox/path/tmux" "$sandbox/path/desktop-agent-sessions" "$sandbox/path/desktop-agent-tabs"
+# A view is started through desktop-view, which knows its command.
+cat >"$sandbox/path/desktop-view" <<'STUB'
+#!/usr/bin/env bash
+echo "desktop-view $*" >>"$SANDBOX/did"
+STUB
+chmod +x "$sandbox/path/tmux" "$sandbox/path/desktop-agent-sessions" "$sandbox/path/desktop-agent-tabs" \
+  "$sandbox/path/desktop-view"
 
 # The script is loaded rather than run: its drawing and its tmux commands are what is
 # being checked, and a curses screen needs a terminal no test has.
@@ -203,6 +209,11 @@ elif what == "names":
     for found in sidebar.rows("alpha:2"):
         if found["kind"] == "agent" and found["session"] == "alpha":
             print(sidebar.line_of(found, 40)[0].rstrip())
+elif what == "views":
+    # Two views: epsilon, whose session is open, and update, which is not.
+    for found_row in sidebar.compose(sidebar.collect(), [], "alpha:2", False, None, None, 100, {},
+                                     found_views=["epsilon", "update"]):
+        print(sidebar.line_of(found_row, 30)[0].rstrip())
 elif what.startswith("compose"):
     # Two clusters: delta, which is also a tmux session, healthy; and zeta, degraded.
     found = [{"name": "delta", "state": "healthy", "nodes": 3, "ready": 3},
@@ -213,6 +224,8 @@ elif what.startswith("compose"):
     room = 100 if what == "compose-tall" else 12
     for found_row in sidebar.compose(sidebar.collect(), found, "alpha:2", False, None, None, room, chosen):
         print(sidebar.line_of(found_row, 30)[0].rstrip())
+elif what == "go-view":
+    sidebar.go({"kind": "view", "session": "update"}, "alpha:2")
 elif what in ("go-cluster", "go-cluster-new"):
     name = "delta" if what == "go-cluster" else "zeta"
     sidebar.go({"kind": "cluster", "session": name}, "alpha:2")
@@ -260,6 +273,17 @@ check "a cluster with a session is gone to" grep -q 'switch-client -c /dev/pts/9
 : >"$sandbox/did"
 drive go-cluster-new >/dev/null
 check "one without is made, as prefix + K makes it" grep -q 'new-window -t alpha: -n cluster desktop-cluster session zeta' "$sandbox/did"
+viewed=$(drive views)
+check "views have a section of their own, an open one marked so" \
+  grep -qE '^ ● epsilon  *open$' <<<"$(sed -n '/▾ VIEWS/,/^$/p' <<<"$viewed")"
+check "  one not open yet a ring" grep -qx ' ○ update' <<<"$viewed"
+check "  and its session is not counted among the repositories" \
+  lacks 'epsilon' <<<"$(sed -n '/REPOS/,/VIEWS/p' <<<"$viewed" | sed '$d')"
+: >"$sandbox/did"
+drive go-view >/dev/null
+check "a view is started, then gone to" \
+  test "$(grep -oE 'desktop-view start update|switch-client -c /dev/pts/9 -t =update' "$sandbox/did" | tr '\n' ,)" \
+  = "desktop-view start update,switch-client -c /dev/pts/9 -t =update,"
 check "the keys to fold are listed with the sidebar's" \
   test "$("$ROOT/bin/desktop-tmux-keys" --sidebar | cut -f1 | grep -cxE 'Space|1|z|a')" = 4
 check "a click is taken as the press, not held back to tell it from one" \

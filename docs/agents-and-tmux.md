@@ -89,12 +89,12 @@ whatever in it needs you most, and NEEDS YOU is in the colour of something wanti
 Folding is what keeps two dozen repositories, six clusters and their agents in one column.
 A section is folded or opened by hand with `Space` (or `⏎` or a click on its header), `z`
 folds all but the one the cursor is in, `a` puts them all back on automatic, and `1` `2`
-`3` open repositories, clusters or agents and go there. What is chosen by hand is
+`3` `4` open repositories, clusters, views or agents and go there. What is chosen by hand is
 remembered, for every column, in `@sidebar_folds`.
 
 Left alone, a section folds by the room there is: a section with something to report opens
-first (CLUSTERS, when one is degraded or you are in a cluster's session), then AGENTS,
-CLUSTERS and REPOS in that order, each as long as it still fits the column's height. On a
+first (CLUSTERS, when one is degraded or you are in a cluster's session; VIEWS, when you
+are in a view), then AGENTS, CLUSTERS, VIEWS and REPOS in that order, each as long as it still fits the column's height. On a
 tall monitor everything is open; on the laptop's screen the repositories fold to the one
 you are in, and on a short pane the clusters fold too.
 
@@ -108,6 +108,15 @@ when the answer is a minute old, behind a lock so two columns do not ask twice, 
 `$XDG_RUNTIME_DIR/desktop/clusters.json`, which they all read. `⏎` on a cluster goes to its
 tmux session, or makes one as `prefix + K` does (`ocl session`), signing in first. A tmux
 session named after a cluster is listed under CLUSTERS, not REPOS.
+
+VIEWS are sessions that show something rather than hold a repository's work: the merge and
+pull requests waiting for you (`desktop-reviews --list`, again every five minutes), a
+`desktop-update`, btop, the journal's warnings. They are listed in
+`~/.config/desktop/views.conf`, a name and a command a line, and `desktop-view` opens one
+from a prompt too (fzf, without a name). `⏎` on a view goes to its session, named after it,
+or makes it first; an open one has a green dot. A command that ends keeps its output up
+until Enter, so a finished update can still be read. `desktop-view watch <seconds>
+<command>` is there for views that should refresh: `r` asks again at once, `q` closes it.
 
 It is drawn as herdr's sidebar is, as near as a terminal pane allows: sections, each
 entry on two lines, a coloured dot for the state, the active row on a bar, Catppuccin
