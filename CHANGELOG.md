@@ -12,6 +12,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- k9s is in the desktop theme's colours, on the terminal's own background, like the tmux
+  and argo9s around it in a cluster session. Each theme has a k9s skin, and switching
+  themes switches it for the next k9s.
+
 - The tmux sidebar has a VIEWS section: sessions that show something rather than hold a
   repository -- the merge requests waiting for you, an update, btop, the journal. Enter
   opens one, or goes to it when it is open; `desktop-view` does the same from a prompt,

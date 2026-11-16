@@ -13,7 +13,7 @@ ship: `catppuccin`, `nord`, `tokyo-night`.
 | `ghostty.conf`, `kitty.conf` | Terminals |
 | `tmux.conf` | The tmux status line |
 | `neovim.lua`, `vscode.json` | Editors |
-| `btop.theme`, `gdu.yaml`, `eza.yml` | TUIs |
+| `btop.theme`, `gdu.yaml`, `eza.yml`, `k9s.yaml` | TUIs |
 | `waybar.css`, `mako.ini`, `swayosd.css`, `walker.css` | The fallback bar, notifications, OSD, launcher |
 | `chromium.theme`, `icons.theme` | Browser and icon theme |
 | `backgrounds/` | Wallpapers |
@@ -65,6 +65,12 @@ includes its file through that path, so nothing has to be rewritten to switch.
 
 A program with no include mechanism gets a wrapper: `desktop-gdu` builds gdu's config from
 the theme each time it runs.
+
+k9s reads its skin through `~/.config/k9s/skins/desktop.yaml`, a link to the theme's
+`k9s.yaml`, named as `ui.skin` in k9s's own config. A running k9s keeps the skin it started
+with; the next one has the new theme. The skins are in the colours of the theme's
+`tmux.conf`, on the terminal's own background, so a cluster session's k9s window matches
+tmux and argo9s beside it (argo9s has fixed colours and no skins).
 
 ## Adding a theme
 

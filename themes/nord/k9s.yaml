@@ -1,0 +1,97 @@
+# k9s in the nord theme: the colours of its tmux.conf, on the terminal's own background
+# as argo9s draws, so the k9s and argo windows of a cluster session look like the tmux
+# around them. k9s paints its cursor bar in the row's own colour, whatever cursorBgColor
+# says, so rows are in the text colour and the cursor's text in the dark base: a light bar
+# with dark text, as tmux marks the current tab.
+# Linked as ~/.config/k9s/skins/desktop.yaml, which k9s's config names.
+k9s:
+  body:
+    fgColor: "#d8dee9"
+    bgColor: default
+    logoColor: "#81a1c1"
+  prompt:
+    fgColor: "#d8dee9"
+    bgColor: default
+    suggestColor: "#616e88"
+  info:
+    fgColor: "#d8dee9"
+    sectionColor: "#81a1c1"
+  dialog:
+    fgColor: "#d8dee9"
+    bgColor: default
+    buttonFgColor: "#d8dee9"
+    buttonBgColor: "#434c5e"
+    buttonFocusFgColor: "#2e3440"
+    buttonFocusBgColor: "#81a1c1"
+    labelFgColor: "#d08770"
+    fieldFgColor: "#d8dee9"
+  frame:
+    border:
+      fgColor: "#434c5e"
+      focusColor: "#81a1c1"
+    menu:
+      fgColor: "#616e88"
+      keyColor: "#81a1c1"
+      numKeyColor: "#d08770"
+    crumbs:
+      fgColor: "#2e3440"
+      bgColor: "#616e88"
+      activeColor: "#81a1c1"
+    status:
+      newColor: "#d8dee9"
+      modifyColor: "#b48ead"
+      addColor: "#a3be8c"
+      pendingColor: "#d08770"
+      errorColor: "#bf616a"
+      highlightColor: "#ebcb8b"
+      killColor: "#616e88"
+      completedColor: "#616e88"
+    title:
+      fgColor: "#d8dee9"
+      bgColor: default
+      highlightColor: "#81a1c1"
+      counterColor: "#d08770"
+      filterColor: "#b48ead"
+  views:
+    charts:
+      bgColor: default
+      defaultDialColors:
+        - "#81a1c1"
+        - "#bf616a"
+      defaultChartColors:
+        - "#81a1c1"
+        - "#bf616a"
+    table:
+      fgColor: "#d8dee9"
+      bgColor: default
+      cursorFgColor: "#2e3440"
+      cursorBgColor: default
+      markColor: "#ebcb8b"
+      header:
+        fgColor: "#616e88"
+        bgColor: default
+        sorterColor: "#81a1c1"
+    xray:
+      fgColor: "#d8dee9"
+      bgColor: default
+      cursorColor: "#434c5e"
+      cursorTextColor: "#d8dee9"
+      graphicColor: "#81a1c1"
+    yaml:
+      keyColor: "#81a1c1"
+      colonColor: "#616e88"
+      valueColor: "#d8dee9"
+    logs:
+      fgColor: "#d8dee9"
+      bgColor: default
+      indicator:
+        fgColor: "#d8dee9"
+        bgColor: default
+        toggleOnColor: "#a3be8c"
+        toggleOffColor: "#616e88"
+    help:
+      fgColor: "#d8dee9"
+      bgColor: default
+      sectionColor: "#81a1c1"
+      keyColor: "#81a1c1"
+      numKeyColor: "#d08770"

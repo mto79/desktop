@@ -28,5 +28,15 @@ ln -snf ~/.config/desktop/current/theme/btop.theme ~/.config/btop/themes/current
 mkdir -p ~/.config/mako
 ln -snf ~/.config/desktop/current/theme/mako.ini ~/.config/mako/config
 
+# k9s in the theme's colours, the skin named in its config. The config is k9s's own --
+# it writes it back itself -- so the skin is put in it, not the file copied over.
+mkdir -p ~/.config/k9s/skins
+ln -snf ~/.config/desktop/current/theme/k9s.yaml ~/.config/k9s/skins/desktop.yaml
+if [[ ! -s ~/.config/k9s/config.yaml ]]; then
+  printf 'k9s:\n  ui:\n    skin: desktop\n' >~/.config/k9s/config.yaml
+elif ! grep -qE '^    skin:' ~/.config/k9s/config.yaml; then
+  sed -i '0,/^  ui:$/s//  ui:\n    skin: desktop/' ~/.config/k9s/config.yaml
+fi
+
 # Screensaver
 pipx install terminaltexteffects==0.14.2 --force
