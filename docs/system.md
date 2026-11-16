@@ -173,6 +173,10 @@ low; `desktop-battery-details` supplies the facts UPower does not carry.
 
 ## Screen and camera
 
+The NVIDIA driver's `nvidia-settings-load` autostart is turned off by a `Hidden=true`
+entry in `config/autostart/`. It restores X server settings, and under Wayland there is no
+X server and nothing saved, so it only ever failed at login.
+
 | Command | Does |
 |---|---|
 | `desktop-cmd-screenshot [window\|output]` | Capture, then annotate in satty. Each press says how far it got: `journalctl --user -t desktop-screenshot` |

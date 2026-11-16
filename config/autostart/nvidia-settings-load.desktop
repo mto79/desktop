@@ -1,0 +1,7 @@
+# The NVIDIA driver autostarts nvidia-settings --load-config-only, which restores X server
+# settings. Under Wayland there is no X server to restore them to and no saved settings to
+# restore, so it failed at every login. Hidden=true is how XDG autostart turns an entry off.
+[Desktop Entry]
+Type=Application
+Name=NVIDIA X Server Settings
+Hidden=true
