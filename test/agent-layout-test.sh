@@ -228,6 +228,23 @@ check "a second agent is a second set of tabs, not a fourth pane" \
 check "and both models are ready to switch to" \
   test "$(tm has-session -t "=ai-$group2-claude" && tm has-session -t "=ai-$group2-opencode" && echo both)" = both
 
+# --- the column alone, beside a pane that keeps what it runs (a cluster's shell) ----------
+
+tm new-window -t work: -n plain -c "$sandbox/work" "sleep 300"
+desktop-agent-layout --column work:plain claude
+check "--column adds the column and nothing else" test "$(tm list-panes -t work:plain | wc -l)" = 2
+check "and the pane that was there keeps running what it ran" \
+  test "$(tm list-panes -t work:plain -F '#{pane_start_command}' | head -1)" = '"sleep 300"'
+plaincol=$(tm list-panes -t work:plain -F '#{pane_id} #{@ai_column}' | awk 'NF > 1 { print $1; exit }')
+check "the column on the right, the full height" \
+  test "$(geometry "$plaincol" '#{pane_height}')" = "$(geometry work:plain '#{window_height}')"
+check "and the focus left on the pane that was there" \
+  test -z "$(tm display-message -p -t work:plain '#{@ai_column}')"
+# Its column's session too, which the counts of columns further down are not expecting.
+plaingroup=$(tm display-message -p -t "$plaincol" '#{@ai_column}')
+tm kill-window -t work:plain
+tm kill-session -t "=ai-$plaingroup-claude"
+
 # --- claude's --continue, on the pane that now holds it ------------------------------------
 
 # First with only `claude -p` transcripts in the directory -- lazygit's commit messages

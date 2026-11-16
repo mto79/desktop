@@ -18,6 +18,14 @@ Add a line under the current month in the same commit as the change it describes
   and `~/.config/desktop/views.conf` says which there are. A view has an agent column on the
   right, working in `~/views/<name>`, to ask about what it shows.
 
+- A cluster's tmux session has an agent column on the right of its shell, as a repository's
+  has, working in `~/clusters/NAME`. The agent is kept off the cluster: claude runs its
+  commands in Claude Code's sandbox, which cannot read the kubeconfigs or reach any cluster's
+  hosts, with oc, kubectl, ocl, k9s and the other cluster tools denied besides; codex runs
+  in its own sandbox with no network; and opencode may only use the models named in
+  `~/.config/desktop/cluster-agents.conf` -- the organisation's own -- with the same tools
+  denied. Cluster sessions are no longer brought back after a reboot as shells on no
+  cluster; `prefix + K` makes them again.
 - A cluster's tmux session (`prefix + K`, `ocl session`, Enter in the sidebar) has a third
   window, `argo`, with Argo CD's applications in argo9s, beside the shell and k9s.
 - kubectl and oc typed at the prompt are coloured by kubecolor, which is installed and kept

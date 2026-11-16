@@ -21,6 +21,29 @@ and an `argo` window (argo9s, when it is installed) on its kubeconfig. Signing i
 first, so the windows do not each open a browser; a session already there is gone to rather
 than made again.
 
+### The agent column
+
+The `shell` window of a cluster's session has an agent column on its right, as a
+repository's `ide` window has (`desktop-agent-layout --column`: the column alone, no
+editor). The agent may read and write files but must not reach the cluster, so it works in a folder
+of the cluster's own, `~/clusters/NAME` (`DESKTOP_CLUSTER_AGENT_HOME` moves it), fenced for
+each of the three agents the column can hold. The fence is merged into whatever settings
+the folder already has, every time the session is made. The network is the fence that
+matters -- without it a kubeconfig is no use -- and keeping the kubeconfigs unread is what
+keeps a token out of what goes to the model's provider.
+
+| Agent | What keeps it off the cluster |
+|---|---|
+| claude | `.claude/settings.json`: Bash in Claude Code's sandbox (bubblewrap), `failIfUnavailable` and no unsandboxed retry; the sandbox cannot read `~/.local/state/desktop/clusters`, `~/.kube`, `~/.talos` or clusters.conf, and denies every `server=`, `console=` and `ssh=` host in clusters.conf. Deny rules for the cluster tools (oc, kubectl, kubecolor, ocl, desktop-cluster, k9s, argo9s, talosctl, kubie, kubens, kubectx, argocd) and for reading those files with its own Read tool, which the sandbox does not cover. `KUBECONFIG=/dev/null`, and bypass-permissions mode disabled. |
+| codex | `.codex/config.toml`: `workspace-write` sandbox with no network at all, `KUBECONFIG=/dev/null`. codex reads a project's config only in a trusted folder, so the folder is added to `~/.codex/config.toml` as trusted, once. |
+| opencode | `opencode.json`: `enabled_providers` is only what `opencode-providers=` in `~/.config/desktop/cluster-agents.conf` names -- the organisation's own models, kept out of this public repository -- and nothing when it names none. The same tools denied, and the same files. opencode has no sandbox: its own docs call these rules best effort. |
+
+The column's agents also run in tmux sessions of their own, which never had the cluster's
+`KUBECONFIG` in the first place.
+
+A cluster's session is marked `@cluster`, and `desktop-tmux-restore` does not save it: made
+again at login it would be a shell on no cluster. `prefix + K` makes it, signing in first.
+
 ## One kubeconfig per cluster
 
 Each cluster has a kubeconfig of its own in `~/.local/state/desktop/clusters/NAME.kubeconfig`

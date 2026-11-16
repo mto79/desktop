@@ -132,7 +132,7 @@ CONF
 
 run() {
   PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" XDG_RUNTIME_DIR="$sandbox/run" \
-    SHELL="$stubs/fish" bash "$CLUSTER" "$@" </dev/null
+    DESKTOP_CLUSTER_AGENT_HOME="$sandbox/clusters" CODEX_HOME="$sandbox/codex" SHELL="$stubs/fish" bash "$CLUSTER" "$@" </dev/null
 }
 called() { grep -qF -- "$1" "$log"; }
 store="$sandbox/state/desktop/clusters"
@@ -242,13 +242,53 @@ echo "tmux \$*" >>"$sandbox/tmux-calls"
 [[ \$1 == has-session ]] && { [[ -e "$sandbox/has-session" ]]; exit; }
 exit 0
 STUB
-chmod +x "$stubs/tmux"
+cat >"$stubs/desktop-agent-layout" <<STUB
+#!/usr/bin/env bash
+echo "desktop-agent-layout \$*" >>"$log"
+STUB
+chmod +x "$stubs/tmux" "$stubs/desktop-agent-layout"
 printf 'context=ocp202\ncluster=x\ntoken=good\n' >"$store/ocp202.kubeconfig"
 TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
 check "a session named after the cluster is made, with a shell on it" \
   grep -q "^tmux new-session -d -s ocp202 -n shell .*desktop-cluster ocp202\$" "$sandbox/tmux-calls"
 check "and k9s beside it" grep -q "^tmux new-window -d -t =ocp202: -n k9s .*desktop-cluster -k ocp202\$" "$sandbox/tmux-calls"
 check "and Argo CD's applications" grep -q "^tmux new-window -d -t =ocp202: -n argo .*desktop-cluster -a ocp202\$" "$sandbox/tmux-calls"
+check "every window in a folder of the cluster's own" \
+  test "$(grep -c -- "-c $sandbox/clusters/ocp202 " "$sandbox/tmux-calls")" = 3
+check "and an agent column beside the shell, the column alone" called "desktop-agent-layout --column =ocp202:shell claude"
+check "marked as a cluster's, so a restore leaves it to ocl session" \
+  grep -q "^tmux set-option -t =ocp202: @cluster ocp202\$" "$sandbox/tmux-calls"
+fence="$sandbox/clusters/ocp202/.claude/settings.json"
+check "the agent's folder keeps it off the cluster: no kubeconfig" test "$(jq -r .env.KUBECONFIG "$fence")" = /dev/null
+check "the cluster tools denied" \
+  test "$(jq -r '[.permissions.deny[] | select(. == "Bash(oc:*)" or . == "Bash(kubectl:*)" or . == "Bash(ocl:*)")] | length' "$fence")" = 3
+check "and the kubeconfigs unreadable" jq -e '.permissions.deny | index("Read(~/.local/state/desktop/clusters/**)")' "$fence"
+check "claude's Bash in its sandbox, which must start, with no way round it" \
+  test "$(jq -c '[.sandbox.enabled, .sandbox.failIfUnavailable, .sandbox.allowUnsandboxedCommands]' "$fence")" = '[true,true,false]'
+check "the sandbox cannot read the kubeconfigs" \
+  jq -e '.sandbox.filesystem.denyRead | index("~/.local/state/desktop/clusters") and index("~/.kube")' "$fence"
+check "nor reach a cluster: every server in clusters.conf is a denied host" \
+  jq -e '.sandbox.network.deniedDomains | index("api.ocp202.example") and index("api.ocp203.example")' "$fence"
+check "and bypass mode is not on offer there" test "$(jq -r .permissions.disableBypassPermissionsMode "$fence")" = disable
+cxconf="$sandbox/clusters/ocp202/.codex/config.toml"
+check "codex in its sandbox, writing only in the folder" grep -qx 'sandbox_mode = "workspace-write"' "$cxconf"
+check "with no network" grep -qx 'network_access = false' "$cxconf"
+check "and no kubeconfig" grep -q 'KUBECONFIG = "/dev/null"' "$cxconf"
+check "the folder trusted, or codex would not read that" \
+  grep -qxF "[projects.\"$sandbox/clusters/ocp202\"]" "$sandbox/codex/config.toml"
+ocjson="$sandbox/clusters/ocp202/opencode.json"
+check "opencode with no providers at all, when none are named" test "$(jq -c .enabled_providers "$ocjson")" = '[]'
+check "and the cluster tools denied it" test "$(jq -r '.permission.bash["kubectl *"]' "$ocjson")" = deny
+jq '.permissions.allow = ["Bash(ls:*)"] | .permissions.deny += ["Bash(rm:*)"] | .model = "opus"' "$fence" >"$fence.n" && mv "$fence.n" "$fence"
+rm -f "$sandbox/has-session"
+echo "opencode-providers=in-house" >"$sandbox/config/desktop/cluster-agents.conf"
+TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
+check "opencode only with the organisation's own models, named in cluster-agents.conf" \
+  test "$(jq -c .enabled_providers "$ocjson")" = '["in-house"]'
+check "the trust is added once, not again each time" \
+  test "$(grep -cF "[projects.\"$sandbox/clusters/ocp202\"]" "$sandbox/codex/config.toml")" = 1
+check "settings of the folder's own are kept when the fence is written again" \
+  test "$(jq -c '[.model, .permissions.allow, (.permissions.deny | index("Bash(rm:*)") != null), (.permissions.deny | length)]' "$fence")" = '["opus",["Bash(ls:*)"],true,17]'
 check "and gone to" grep -q '^tmux switch-client -t =ocp202$' "$sandbox/tmux-calls"
 : >"$sandbox/tmux-calls"
 touch "$sandbox/has-session"

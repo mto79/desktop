@@ -154,14 +154,19 @@ def window_record(session, index, name, worktree, layout):
 
 def snapshot():
     """Every session worth going back to, or None if tmux could not be asked."""
-    listing = tmux("list-sessions", "-F", "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{session_path}")
+    listing = tmux("list-sessions", "-F",
+                   "#{session_name}\t#{@ai_group}\t#{@term_group}\t#{@cluster}\t#{session_path}")
     if listing is None:
         return None
     sessions = []
-    for name, ai_group, term_group, path in rows(listing):
+    for name, ai_group, term_group, cluster, path in rows(listing):
         # The sessions behind a column or a terminal are not places of their own: they come
         # back with the window they belong to.
         if ai_group or term_group:
+            continue
+        # Nor is a cluster's: `ocl session` makes it, signing in first. Rebuilt at login it
+        # was a shell on no cluster, and with its agent column, an editor where none was.
+        if cluster:
             continue
         windows = []
         active = ""

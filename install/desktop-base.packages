@@ -7,6 +7,7 @@ bluez
 bolt
 brightnessctl
 btop
+bubblewrap
 cargo
 cascadia-code-nf-fonts
 cascadia-mono-nf-fonts
@@ -105,6 +106,7 @@ satty
 sddm
 setroubleshoot
 slurp
+socat
 spice-gtk
 starship
 sushi

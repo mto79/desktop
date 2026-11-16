@@ -88,7 +88,14 @@ done < <(tm list-windows -a -f "#{&&:#{==:#{@ai_group},$group},#{==:#{@ai_model}
   -F '#{window_index} #{session_name}:#{window_id} #{pane_id} #{pane_start_path}' | sort -n | cut -d' ' -f2-)
 check "the three claude tabs were given a conversation each" test "$n" = 3
 
+# A cluster's session, as `ocl session` marks it. Gone again before the shape is taken.
+tm new-session -d -s ocp9 -c "$sandbox"
+tm set-option -t =ocp9: @cluster ocp9
 "$RESTORE" save
+tm kill-session -t =ocp9
+check "a cluster's session is not written down, to be made again by ocl session" \
+  python3 -c 'import json, sys
+sys.exit(any(s["name"] == "ocp9" for s in json.load(open(sys.argv[1]))["sessions"]))' "$sandbox/state/desktop/tmux/last.json"
 saved=$(python3 -c 'import json, sys
 for s in json.load(open(sys.argv[1]))["sessions"]:
     for w in s["windows"]:

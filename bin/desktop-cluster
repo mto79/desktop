@@ -323,6 +323,112 @@ status_stale() { # [signed-out]
   return 0
 }
 
+# ------------------------------------------------------------------------------ the agent
+
+# A cluster's session has a coding agent beside its shell, as a repository's has -- one
+# that may read and write files but never reach the cluster. It works in a folder of the
+# cluster's own, for notes and manifests, and that folder carries settings for each of the
+# three agents the column can hold that keep it off the cluster (fence_* below; the table
+# in docs/clusters.md). The session's own tmux environment never had the cluster's
+# KUBECONFIG -- the column's agents run in sessions of their own -- so this is the second
+# fence, not the first.
+AGENT_HOME=${DESKTOP_CLUSTER_AGENT_HOME:-$HOME/clusters}
+AGENT_DENY='["Bash(oc:*)", "Bash(kubectl:*)", "Bash(kubecolor:*)", "Bash(ocl:*)",
+  "Bash(desktop-cluster:*)", "Bash(k9s:*)", "Bash(argo9s:*)", "Bash(talosctl:*)",
+  "Bash(kubie:*)", "Bash(kubens:*)", "Bash(kubectx:*)", "Bash(argocd:*)",
+  "Read(~/.local/state/desktop/clusters/**)", "Read(~/.kube/**)", "Read(~/.talos/**)",
+  "Read(~/.config/desktop/clusters.conf)"]'
+
+# The hosts that are the clusters: every server=, console= and ssh= in clusters.conf, by
+# name. A sandbox that cannot reach these cannot reach a cluster, whatever it has read.
+cluster_hosts() {
+  entries | cut -f3 | tr ' ' '\n' | sed -n 's/^\(server\|console\|ssh\)=//p' |
+    sed 's#^[a-z]*://##; s#^[^@]*@##; s#[:/].*##' | sort -u | grep -v '^$' || true
+}
+
+# Settings that name the organisation stay out of this public repository, in a file of
+# their own beside clusters.conf: which opencode providers a cluster's folder may use
+# (opencode-providers=, by the id in opencode's own config). None named, none allowed.
+AGENT_CONF=${XDG_CONFIG_HOME:-$HOME/.config}/desktop/cluster-agents.conf
+agent_setting() { sed -n "s/^$1=//p" "$AGENT_CONF" 2>/dev/null | tail -1; }
+
+# Each file merged with what is there, so settings of the folder's own are kept: the fence
+# is added to them, and written again every time the session is made.
+merge_json() { # file jq-filter [jq args...]
+  local file=$1 filter=$2 current='{}'
+  shift 2
+  mkdir -p "${file%/*}"
+  [[ -s $file ]] && current=$(cat "$file")
+  jq "$@" "$filter" <<<"$current" >"$file.$$" && mv -f "$file.$$" "$file" || { rm -f "$file.$$"; return 1; }
+}
+
+# claude: the deny rules, no kubeconfig, no bypass mode, and its sandbox -- Bash in
+# bubblewrap, with the kubeconfigs unreadable and no way out to a cluster's hosts. On, or
+# claude does not start (failIfUnavailable), and with no unsandboxed retry.
+fence_claude() { # dir
+  local hosts
+  hosts=$(cluster_hosts | jq -R . | jq -sc .)
+  merge_json "$1/.claude/settings.json" '
+    .permissions.deny = (((.permissions.deny // []) + $deny) | unique)
+    | .permissions.disableBypassPermissionsMode = "disable"
+    | .env.KUBECONFIG = "/dev/null"
+    | .sandbox.enabled = true
+    | .sandbox.failIfUnavailable = true
+    | .sandbox.allowUnsandboxedCommands = false
+    | .sandbox.filesystem.denyRead = (((.sandbox.filesystem.denyRead // []) + $paths) | unique)
+    | .sandbox.network.deniedDomains = (((.sandbox.network.deniedDomains // []) + $hosts) | unique)' \
+    --argjson deny "$AGENT_DENY" --argjson hosts "$hosts" \
+    --argjson paths '["~/.local/state/desktop/clusters", "~/.kube", "~/.talos", "~/.config/desktop/clusters.conf"]'
+}
+
+# codex: its own sandbox, which writes only in the folder and has no network at all, and
+# no kubeconfig. A project's .codex/config.toml is read only in a folder codex trusts, so
+# the folder is marked trusted in ~/.codex/config.toml -- added once, never rewritten.
+fence_codex() { # dir
+  local user="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  mkdir -p "$1/.codex"
+  if [[ ! -s $1/.codex/config.toml ]]; then
+    cat >"$1/.codex/config.toml" <<'TOML'
+# Written by desktop-cluster: an agent in a cluster's folder must not reach the cluster.
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false
+
+[shell_environment_policy]
+set = { KUBECONFIG = "/dev/null" }
+TOML
+  fi
+  command -v codex >/dev/null 2>&1 || [[ -e $user ]] || return 0
+  if ! grep -qF "[projects.\"$1\"]" "$user" 2>/dev/null; then
+    mkdir -p "${user%/*}"
+    printf '\n[projects."%s"]\ntrust_level = "trusted"\n' "$1" >>"$user"
+  fi
+}
+
+# opencode has no sandbox, only rules its own docs call best effort. So in a cluster's
+# folder it may use only the providers cluster-agents.conf names -- the organisation's own
+# models -- and is denied the cluster tools and the kubeconfigs on top.
+fence_opencode() { # dir
+  local providers
+  providers=$(agent_setting opencode-providers | tr ', ' '\n\n' | grep -v '^$' | jq -R . | jq -sc .)
+  merge_json "$1/opencode.json" '
+    .["$schema"] = "https://opencode.ai/config.json"
+    | .enabled_providers = $providers
+    | .permission.bash = ((.permission.bash // {"*": "allow"}) + $bash)
+    | .permission.read = ((.permission.read // {"*": "allow"}) + $read)' \
+    --argjson providers "$providers" \
+    --argjson bash '{"oc *": "deny", "kubectl *": "deny", "kubecolor *": "deny", "ocl *": "deny",
+      "desktop-cluster *": "deny", "k9s *": "deny", "argo9s *": "deny", "talosctl *": "deny",
+      "kubie *": "deny", "kubens *": "deny", "kubectx *": "deny", "argocd *": "deny"}' \
+    --argjson read '{"~/.local/state/desktop/clusters/*": "deny", "~/.kube/*": "deny",
+      "~/.talos/*": "deny", "~/.config/desktop/clusters.conf": "deny"}'
+}
+
+agent_fence() { # dir
+  fence_claude "$1" && fence_codex "$1" && fence_opencode "$1"
+}
+
 title() { printf '\e]0;%s\a' "$1"; }
 
 # ------------------------------------------------------------------------------ status
@@ -460,10 +566,19 @@ session)
   ensure
   self=$(readlink -f "$0")
   if ! tmux has-session -t "=$NAME" 2>/dev/null; then
-    tmux new-session -d -s "$NAME" -n shell -c "$HOME" "$self $(printf %q "$NAME")"
-    tmux new-window -d -t "=$NAME:" -n k9s -c "$HOME" "$self -k $(printf %q "$NAME")"
+    dir="$AGENT_HOME/$NAME"
+    mkdir -p "$dir"
+    agent_fence "$dir" || die "could not write the agent's settings in $dir"
+    tmux new-session -d -s "$NAME" -n shell -c "$dir" "$self $(printf %q "$NAME")"
+    # What desktop-tmux-restore leaves out: a cluster's session is made by this, signing in
+    # first, and not rebuilt at login as a shell that is on no cluster.
+    tmux set-option -t "=$NAME:" @cluster "$NAME"
+    tmux new-window -d -t "=$NAME:" -n k9s -c "$dir" "$self -k $(printf %q "$NAME")"
     if command -v argo9s >/dev/null 2>&1; then
-      tmux new-window -d -t "=$NAME:" -n argo -c "$HOME" "$self -a $(printf %q "$NAME")"
+      tmux new-window -d -t "=$NAME:" -n argo -c "$dir" "$self -a $(printf %q "$NAME")"
+    fi
+    if command -v desktop-agent-layout >/dev/null 2>&1; then
+      desktop-agent-layout --column "=$NAME:shell" claude >/dev/null 2>&1 || true
     fi
   fi
   if [[ -n ${TMUX:-} ]]; then

@@ -23,10 +23,22 @@
 #
 # The editor keeps its shell, so quitting the editor leaves you somewhere rather than
 # closing the pane.
+#
+#   desktop-agent-layout --column ocp202:shell claude
+#
+# --column adds the agent column and nothing else: the pane that is there keeps the left
+# of the window as it is, with no editor started in it and no shell split off it. A
+# cluster's session uses it, beside the shell on the cluster.
 
 set -euo pipefail
 
-usage="usage: desktop-agent-layout <target> <agent> [second-agent]"
+COLUMN_ONLY=false
+if [[ ${1:-} == --column ]]; then
+  COLUMN_ONLY=true
+  shift
+fi
+
+usage="usage: desktop-agent-layout [--column] <target> <agent> [second-agent]"
 TARGET="${1:?$usage}"
 AGENT="${2:?$usage}"
 SECOND="${3:-}"
@@ -71,6 +83,12 @@ tmux set-option -p -t "$agent_pane" @ai_column "$group"
 tmux set-option -p -t "$agent_pane" @ai_dir "$dir"
 tmux set-option -p -t "$agent_pane" @ai_model "$AGENT"
 tmux set-option -p -t "$agent_pane" remain-on-exit on
+
+if $COLUMN_ONLY; then
+  $resized && tmux set-option -wu -t "$TARGET" window-size
+  tmux select-pane -t "$editor"
+  exit 0
+fi
 # The shell is marked as the window's terminal, so prefix + t with the focus there means
 # another terminal even while something is running in it -- see desktop-terminal-tabs.
 shell_pane=$(tmux split-window -v -l 15% -t "$editor" -c "$dir" -P -F '#{pane_id}')
