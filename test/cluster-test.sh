@@ -130,8 +130,11 @@ kind      kubernetes  kubeconfig=$sandbox/lab.yaml insecure=true
 broken    rke2
 CONF
 
+# Away from any real tmux server as well, should a stub ever be missing: a TMUX, the one
+# running this included, only ever names a socket that is not there, and the socket
+# directory is the sandbox's own.
 run() {
-  PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" XDG_RUNTIME_DIR="$sandbox/run" \
+  TMUX=${TMUX:+/tmp/fake,1,0} TMUX_TMPDIR="$sandbox/tmux" PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" XDG_RUNTIME_DIR="$sandbox/run" \
     DESKTOP_CLUSTER_AGENT_HOME="$sandbox/clusters" CODEX_HOME="$sandbox/codex" SHELL="$stubs/fish" bash "$CLUSTER" "$@" </dev/null
 }
 called() { grep -qF -- "$1" "$log"; }
@@ -227,9 +230,26 @@ check "one written down wrong is said to be, and the rest are still asked" \
   test "$(state broken) $(state edge)" = "misconfigured healthy"
 
 # --- signing out
+# tmux stubbed, never the real one: a sign-out closes the cluster's session, and the one
+# running this test may well have a session called ocp202.
+cat >"$stubs/tmux" <<STUB
+#!/usr/bin/env bash
+echo "tmux \$*" >>"$sandbox/tmux-calls"
+[[ \$1 == has-session ]] && { [[ -e "$sandbox/has-session" ]]; exit; }
+exit 0
+STUB
+chmod +x "$stubs/tmux"
+touch "$sandbox/has-session"
+: >"$sandbox/tmux-calls"
 run logout ocp202 >/dev/null 2>&1
 check "signing out removes that cluster's kubeconfig" test ! -e "$store/ocp202.kubeconfig"
 check "and no other" test -e "$store/lab.kubeconfig"
+check "and closes the cluster's tmux session, where all of it had stopped working" \
+  grep -qx "tmux kill-session -t =ocp202" "$sandbox/tmux-calls"
+rm -f "$sandbox/has-session"
+: >"$sandbox/tmux-calls"
+run logout lab >/dev/null 2>&1
+check "  but closes nothing when it has none" lacks kill-session "$sandbox/tmux-calls"
 
 check "a command's name cannot be taken for a cluster" \
   bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run -k list 2>&1 | grep -q 'is a command'"
@@ -240,6 +260,7 @@ cat >"$stubs/tmux" <<STUB
 #!/usr/bin/env bash
 echo "tmux \$*" >>"$sandbox/tmux-calls"
 [[ \$1 == has-session ]] && { [[ -e "$sandbox/has-session" ]]; exit; }
+[[ \$1 == new-session && " \$* " == *" -P "* ]] && echo %41
 exit 0
 STUB
 cat >"$stubs/desktop-agent-layout" <<STUB
@@ -251,6 +272,10 @@ printf 'context=ocp202\ncluster=x\ntoken=good\n' >"$store/ocp202.kubeconfig"
 TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
 check "a session named after the cluster is made, with a shell on it" \
   grep -q "^tmux new-session -d -s ocp202 -n shell .*desktop-cluster ocp202\$" "$sandbox/tmux-calls"
+check "its shell is the window's terminal, for prefix + t to add tabs to" \
+  grep -qx "tmux set-option -p -t %41 @term_pane 1" "$sandbox/tmux-calls"
+check "  each tab another shell on the cluster" \
+  grep -qE "^tmux set-option -p -t %41 @term_command .*desktop-cluster ocp202$" "$sandbox/tmux-calls"
 check "and k9s beside it" grep -q "^tmux new-window -d -t =ocp202: -n k9s .*desktop-cluster -k ocp202\$" "$sandbox/tmux-calls"
 check "and Argo CD's applications" grep -q "^tmux new-window -d -t =ocp202: -n argo .*desktop-cluster -a ocp202\$" "$sandbox/tmux-calls"
 check "every window in a folder of the cluster's own" \
@@ -295,7 +320,9 @@ touch "$sandbox/has-session"
 TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
 check "a second time it is only gone to" test "$(grep -c 'new-' "$sandbox/tmux-calls")-$(grep -c switch-client "$sandbox/tmux-calls")" = "0-1"
 check "prefix + K opens it" grep -q "^bind-key K run-shell \"tmux neww -n cluster 'desktop-cluster session'\"" "$ROOT/config/tmux/tmux.conf"
-rm -f "$stubs/tmux"
+# The stub stays, with no session to be found: anything later that asks tmux must never
+# reach a real one. A sign-out further down once closed the real ocp202 of whoever ran this.
+rm -f "$sandbox/has-session"
 
 # --- the migration from the old ocl
 MIGRATION="$ROOT/migrations/1794593713.sh"

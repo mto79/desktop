@@ -177,6 +177,38 @@ plain=$(tm list-panes -t work:plain -F '#{pane_id}')
 check "a pane started as a shell is one, layout or not" \
   test "$(desktop-terminal-tabs kind "$plain")" = terminal
 
+# --- a pane whose tabs run something of its own -------------------------------------------
+
+# A cluster's shell: marked the window's terminal, and every tab another shell on it.
+tm new-window -d -t work: -n cluster -c "$sandbox/work" "sleep 300"
+kube=$(tm list-panes -t work:cluster -F '#{pane_id}')
+tm set-option -p -t "$kube" @term_pane 1
+tm set-option -p -t "$kube" @term_command "sleep 301"
+check "a pane marked as a terminal is one, whatever it was started with" \
+  test "$(desktop-terminal-tabs kind "$kube")" = terminal
+desktop-terminal-tabs new "$kube"
+kube_session=$(tm list-sessions -F '#{session_name}' | grep "^term-.*-${kube#%}$")
+settle "tm list-panes -s -t '=$kube_session' -F '#{pane_start_command}' | grep -q 'sleep 301'"
+check "and its new tab runs the pane's own command, not a plain shell" \
+  grep -q 'sleep 301' <<<"$(tm list-panes -s -t "=$kube_session" -F '#{pane_start_command}')"
+tm kill-window -t work:cluster
+
+# --- a terminal that was closed -----------------------------------------------------------
+
+# A laid-out window whose shell strip has gone: prefix + Z makes it again, under the editor.
+tm new-window -d -t work: -n again -c "$sandbox/work"
+desktop-agent-layout work:again claude
+strip=$(tm list-panes -t work:again -F '#{pane_id} #{@term_pane}' | awk 'NF > 1 { print $1 }')
+tm kill-pane -t "$strip"
+column2=$(tm list-panes -t work:again -F '#{pane_id} #{@ai_column}' | awk 'NF > 1 { print $1 }')
+desktop-terminal-tabs zoom "$column2"
+made=$(tm list-panes -t work:again -F '#{pane_id} #{@term_pane}' | awk 'NF > 1 { print $1 }')
+check "prefix + Z in a window whose terminal was closed makes one again" test -n "$made"
+check "  under the editor, even from the AI column" \
+  test "$(tm display-message -p -t "$made" '#{pane_at_bottom} #{pane_at_left}')" = "1 1"
+check "  and does not zoom it" test "$(tm display-message -p -t work:again '#{window_zoomed_flag}')" = 0
+tm kill-window -t work:again
+
 # --- the sessions do not outlive the pane -------------------------------------------------
 
 desktop-terminal-tabs gc

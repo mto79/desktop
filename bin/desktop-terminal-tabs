@@ -88,7 +88,7 @@ bar() { # session
 # in the new session, so it keeps running, keeps its history, and the layout keeps the
 # pane it had -- which the client is then started in.
 make_tabs() { # pane -> session
-  local pane=$1 dir group session placeholder width height
+  local pane=$1 dir group session placeholder width height command
   dir=$(option "$pane" pane_current_path)
   group="$(slug "$(basename "${dir:-term}")")-${pane#%}"
   session=$(session_for "$group")
@@ -104,6 +104,9 @@ make_tabs() { # pane -> session
   # the pane's command, and the pane closes like any terminal whose shell has exited.
   tmux set-option -t "$(in_session "$session")" detach-on-destroy on
   tmux set-option -t "$(in_session "$session")" @term_group "$group"
+  # What a new tab runs, when the pane says: a cluster's shell asks for another of its own.
+  command=$(option "$pane" @term_command)
+  [[ -z $command ]] || tmux set-option -t "$(in_session "$session")" @term_command "$command"
   # The window, which stays when the pane in it is traded for the shell below.
   name_tab "$(exact "$session:")"
 
@@ -132,7 +135,7 @@ attach() { # group
 # --- what the keys do ---------------------------------------------------------------------
 
 cmd_new() { # pane
-  local pane=$1 session dir window kind
+  local pane=$1 session dir window kind command
   kind=$(kind_of "$pane")
   [[ $kind == agents ]] && exec desktop-agent-tabs new "$pane"
   # Beside the work in hand. With a task's tab on top of the AI column that is the task's
@@ -145,8 +148,9 @@ cmd_new() { # pane
   esac
   # Otherwise where the terminal on top is, not where the pane began.
   [[ -n $dir ]] || dir=$(option "$(exact "$session:")" pane_current_path)
-  window=$(tmux new-window -a -t "$(exact "$session:")" ${dir:+-c "$dir"} -P -F '#{window_id}') ||
-    die "could not add a tab"
+  command=$(tmux show-options -qv -t "$(in_session "$session")" @term_command 2>/dev/null)
+  window=$(tmux new-window -a -t "$(exact "$session:")" ${dir:+-c "$dir"} -P -F '#{window_id}' \
+    ${command:+"$command"}) || die "could not add a tab"
   name_tab "$window"
   bar "$session"
 }
@@ -190,10 +194,33 @@ cmd_zoom() { # pane
   fi
   terminal=$(tmux list-panes -t "$window" -F '#{pane_id} #{@term_pane}' 2>/dev/null |
     awk 'NF > 1 { print $1; exit }')
-  # A window no layout made has no pane marked; the one in hand is zoomed, as prefix + z would.
+  # A laid-out window whose terminal was closed -- exit, or prefix + x -- gets it back:
+  # the strip under the editor, as desktop-agent-layout made it, and not zoomed, since what
+  # was missing was the terminal rather than room. A window no layout made has no AI column
+  # and no pane marked; the one in hand is zoomed, as prefix + z would.
+  if [[ -z $terminal ]] && tmux list-panes -t "$window" -F '#{@ai_column}' | grep -q .; then
+    remake_terminal "$1" "$window"
+    return 0
+  fi
   [[ -n $terminal ]] || terminal=$1
   tmux select-pane -t "$terminal"
   tmux resize-pane -Z -t "$terminal"
+}
+
+remake_terminal() { # pane window
+  local editor shell
+  # Under the pane in hand, unless that is the sidebar or the AI column: then under the
+  # largest pane that is neither, which is the editor.
+  editor=$1
+  if [[ -n $(option "$editor" @sidebar) || -n $(option "$editor" @ai_column) ]]; then
+    # A marked pane's line has its mark in front, three fields; an unmarked one two.
+    editor=$(tmux list-panes -t "$2" -F '#{@sidebar}#{@ai_column} #{e|*:#{pane_width},#{pane_height}} #{pane_id}' |
+      awk 'NF == 2' | sort -rn | awk 'NR == 1 { print $2 }')
+  fi
+  [[ -n $editor ]] || return 1
+  shell=$(tmux split-window -v -l 15% -t "$editor" -c "$(option "$editor" pane_current_path)" \
+    -P -F '#{pane_id}') || return 1
+  tmux set-option -p -t "$shell" @term_pane 1
 }
 
 visible() { [[ $(option "$1" '&&:#{window_active},#{session_attached}') == 1 ]]; }

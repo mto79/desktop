@@ -66,6 +66,13 @@ At the prompt, `kubectl` and `oc` are fish functions that run them through kubec
 shell; desktop-cluster and every script call the command itself. kubecolor runs oc rather
 than kubectl when `KUBECTL_COMMAND=oc`, which the `oc` function sets.
 
+`ocl logout` also closes the cluster's tmux session. Everything in it held a copy of the
+token the sign-out revokes, so it had all stopped working while still looking signed in.
+
+In `ocl session` the shell window's shell is marked as its terminal, so `prefix + t` there
+adds a terminal tab as it does under a repository's editor (`desktop-terminal-tabs`), and
+each tab runs another `ocl NAME` -- a shell on the cluster, not a plain one.
+
 `ocl login` and `ocl logout` delete the dashboard's cached cluster status, which it otherwise
 keeps for two minutes, and age the tmux sidebar's (`$XDG_RUNTIME_DIR/desktop/clusters.json`,
 one minute) so that it asks again; a sign-out is written into the sidebar's at once.

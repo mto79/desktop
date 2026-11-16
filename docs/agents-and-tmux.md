@@ -30,6 +30,7 @@ holds tabs too, through `desktop-terminal-tabs`.
 | Key (after the tmux prefix, `Ctrl-a`) | Does |
 |---|---|
 | `t`, `Tab`, `x` | New terminal tab, next tab, close the tab on top |
+| `Z` | The terminal full size, and back; when it was closed, a new one under the editor |
 | `e` | The sidebar: a row per session, with its agents' state (see below) |
 | `N` | Go to the agent needing you most; press again for the next |
 | `g` | Every agent on this machine in a list, needing you first |

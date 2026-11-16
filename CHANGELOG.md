@@ -12,6 +12,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- `prefix + Z` in a window whose terminal under the editor was closed brings it back,
+  rather than zooming whatever pane is left.
+- `prefix + t` in a cluster's shell window adds a terminal as a tab, and each tab is another
+  shell on that cluster.
 - k9s is in the desktop theme's colours, on the terminal's own background, like the tmux
   and argo9s around it in a cluster session. Each theme has a k9s skin, and switching
   themes switches it for the next k9s.
@@ -179,6 +183,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- `ocl logout` closes the cluster's tmux session too. The token it revokes was the one the
+  shell, k9s and argo9s were using, so they stopped working while still looking signed in,
+  and the sign-out seemed to do nothing.
 - Closing the agent picker's "Press Enter" prompt with Ctrl-D dismisses it, rather than
   ending in a Python traceback and an abrt crash report.
 - In a view, the sidebar's AGENTS are the view's own -- the agent in its column -- rather

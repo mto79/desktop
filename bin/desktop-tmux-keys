@@ -33,7 +33,7 @@ S	S	every AI tab, by column and model
 T	T	new task: a branch name, and a tab whose agent works there
 D	D	finish the task on show: push, open the review, remove it
 # Terminal
-Z	Z	the window's terminal full size, and back
+Z	Z	the window's terminal full size, and back; or a new one, if it was closed
 # Panes and windows
 |	|	split beside this pane, in its directory
 -	-	split below this pane

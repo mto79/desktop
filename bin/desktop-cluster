@@ -12,7 +12,7 @@
 #   ocl -e NAME             the environment for NAME, for this shell:  ocl -e NAME | source
 #   ocl session [NAME]      a tmux session on NAME, a shell and k9s; prefix + K picks one
 #   ocl login NAME          sign in again, or fetch the kubeconfig again
-#   ocl logout NAME         forget NAME's credentials
+#   ocl logout NAME         forget NAME's credentials, and close its tmux session
 #   ocl list                every cluster: name, kind, where it is
 #   ocl status [NAME...]    every cluster asked, all at once: signed in, nodes, version
 #   ocl status --json NAME  the same for one, as the dashboard reads it
@@ -538,6 +538,13 @@ logout)
   load "$2"
   if [[ $KIND == openshift && -s $FILE ]]; then oc --kubeconfig "$FILE" logout >/dev/null 2>&1 || true; fi
   rm -f "$FILE" && status_stale signed-out && echo "Signed out of $NAME"
+  # Its tmux session goes too. Everything in it -- the kubie shell, k9s, argo9s -- held a
+  # copy of the token just revoked, so it all stopped working while still looking signed
+  # in: the prompt kept its cluster, and a sign-out seemed to have done nothing. Last, since
+  # run from inside that session this is the end of the shell that ran it.
+  if tmux has-session -t "=$NAME" 2>/dev/null; then
+    tmux kill-session -t "=$NAME"
+  fi
   exit
   ;;
 session) action=session; shift ;;
@@ -569,7 +576,13 @@ session)
     dir="$AGENT_HOME/$NAME"
     mkdir -p "$dir"
     agent_fence "$dir" || die "could not write the agent's settings in $dir"
-    tmux new-session -d -s "$NAME" -n shell -c "$dir" "$self $(printf %q "$NAME")"
+    shell=$(tmux new-session -d -s "$NAME" -n shell -c "$dir" -P -F '#{pane_id}' \
+      "$self $(printf %q "$NAME")")
+    # The shell is the window's terminal, so prefix + t in it adds a terminal as a tab, as
+    # it does under a repository's editor -- and each tab another shell on this cluster,
+    # not a plain one that is on none. See desktop-terminal-tabs.
+    tmux set-option -p -t "$shell" @term_pane 1
+    tmux set-option -p -t "$shell" @term_command "$self $(printf %q "$NAME")"
     # What desktop-tmux-restore leaves out: a cluster's session is made by this, signing in
     # first, and not rebuilt at login as a shell that is on no cluster.
     tmux set-option -t "=$NAME:" @cluster "$NAME"
