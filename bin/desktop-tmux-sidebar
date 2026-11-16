@@ -101,10 +101,10 @@ CHECKS = {"passed": ("✓", "green"), "failed": ("✗", "red"), "running": ("…
 # "surface", the cursor's "overlay", and "accent" the section headers -- herdr's cyan.
 PALETTE = {"red": "#f38ba8", "yellow": "#f9e2af", "peach": "#fab387", "green": "#a6e3a1",
            "blue": "#89b4fa", "accent": "#89dceb", "dim": "#7f849c", "text": "#cdd6f4",
-           "surface": "#313244", "overlay": "#45475a"}
+           "surface": "#313244", "overlay": "#45475a", "rule": "#45475a"}
 BASIC = {"red": curses.COLOR_RED, "yellow": curses.COLOR_YELLOW, "peach": curses.COLOR_YELLOW,
          "green": curses.COLOR_GREEN, "blue": curses.COLOR_BLUE, "accent": curses.COLOR_CYAN,
-         "dim": -1, "text": -1, "surface": -1, "overlay": -1}
+         "dim": -1, "text": -1, "surface": -1, "overlay": -1, "rule": -1}
 
 # The keys, pinned under everything as herdr pins its own.
 FOOTER = "⏎ go  ␣ fold  p peek  v more"
@@ -672,7 +672,9 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
     # something to report opens first, then the agents, the clusters and the repositories in
     # that order, each as long as it still fits; a tall column shows everything open, a
     # short one folds what does not fit. Without a height -- a test -- everything fits.
-    used = len(out) + len(parts) + sum(len(kept) for _, _, kept, _, _, _ in parts)
+    # A blank line between sections, so they read as separate things: counted in the room.
+    gaps = len(parts) - 1
+    used = len(out) + len(parts) + gaps + sum(len(kept) for _, _, kept, _, _, _ in parts)
     state = {key: chosen[key] for key, *_ in parts if key in chosen}
     sizes = {key: len(rows) - len(kept) for key, rows, kept, *_ in parts}
     for key, rows, kept, count, dot, alert in parts:
@@ -687,6 +689,8 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
 
     for key, rows, kept, count, dot, alert in parts:
         folded = state[key] == "closed"
+        if out and out[-1]["kind"] != "gap":
+            out.append({"kind": "gap", "section": key, "session": "", "current": False})
         out.append({"kind": "section", "section": key, "session": "", "text": TITLES[key],
                     "folded": folded, "count": count, "dot": dot, "current": False})
         for row in (kept if folded else rows):
@@ -719,19 +723,25 @@ def pieces(row, width):
     if kind == "gap":
         return []
     if kind == "section":
+        # ▾ REPOS ──────────── 25 ●  -- a band across the column: the arrow says whether it
+        # is open, the rule carries the eye to how many there are and the worst state.
         arrow = "▸" if row["folded"] else "▾"
         title = row["text"] + (f" · {row['of']}" if row.get("of") and row["section"] == "agents" else "")
-        out = [(1, arrow, "dim")]
         right_text = str(row["count"]) if row["count"] else ""
-        room = width - 3 - (len(right_text) + 4) - 1
+        # The dot in the last column, the count a space before it, the rule a space before that.
+        edge = width - 3 if row.get("dot") else width - 1
+        end = edge - len(right_text) if right_text else edge + 1
+        room = end - 3 - 2
         title = title if len(title) <= room else title[:max(0, room - 1)] + "…"
-        out.append((3, title, "accent"))
+        out = [(1, arrow, "accent"), (3, title, "accent")]
+        rule_from = 3 + len(title) + 1
+        if end - 1 > rule_from:
+            out.append((rule_from, "─" * (end - 1 - rule_from), "rule"))
         if right_text:
-            column = width - 1 - len(right_text) - (2 if row.get("dot") else 0)
-            out.append((column, right_text, "dim"))
-            if row.get("dot"):
-                colour = CLUSTER_LOOK["degraded"][1] if row["dot"] == "degraded" else COLOURS.get(row["dot"], "dim")
-                out.append((width - 2, "●", colour))
+            out.append((end, right_text, "dim"))
+        if row.get("dot"):
+            colour = CLUSTER_LOOK["degraded"][1] if row["dot"] == "degraded" else COLOURS.get(row["dot"], "dim")
+            out.append((width - 2, "●", colour))
         return out
     if kind == "cluster":
         dot, colour = CLUSTER_LOOK.get(row["cluster"], ("·", "dim"))
@@ -741,6 +751,13 @@ def pieces(row, width):
         out = [(DOT, dot, colour), (NAME, name, "text")]
         if right:
             out.append((width - 1 - len(right), right, colour if row["cluster"] != "healthy" else "dim"))
+        return out
+    if kind == "header" and row.get("section") == "needs":
+        # In the colour of something wanting you, and ruled like the sections below it.
+        out = [(1, "!", "peach"), (3, row["text"], "peach")]
+        rule_from = 3 + len(row["text"]) + 1
+        if width - 2 > rule_from:
+            out.append((rule_from, "─" * (width - 2 - rule_from), "rule"))
         return out
     if kind == "header":
         right = row.get("right", "")

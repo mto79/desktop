@@ -106,6 +106,8 @@ Add a line under the current month in the same commit as the change it describes
   session you are in; clusters show their nodes or why they have none, and Enter on one
   opens its session. Space folds by hand, 1 2 3 jump, z folds the rest, a goes back to
   automatic. A click in the column acts at once, instead of a sixth of a second later.
+  Sections are a line apart, each header ruled across to its count, NEEDS YOU in the
+  attention colour.
 - After a reboot every claude tab comes back to its own conversation, not only the first tab
   of each repository: four agents in one repository used to come back as one and three
   that remembered nothing.

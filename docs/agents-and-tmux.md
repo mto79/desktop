@@ -48,14 +48,17 @@ the column away from every window, and puts it back. It is on or off for the who
 a pane lives in one window, so a single column would vanish the moment you used it to go
 somewhere else.
 
-     NEEDS YOU                       what wants you, from everywhere:
+   ! NEEDS YOU ───────────────       what wants you, from everywhere:
      ● na_vm claude 2       4m       an agent blocked, stuck or finished unseen,
      ● ocp203       signed out       a cluster degraded, or signed out with its session open
 
-   ▸ REPOS              24 ●         folded: only the session you are in shows
+
+   ▸ REPOS ─────────── 24 ●          folded: only the session you are in shows
     ▌● desktop              5m
-   ▸ CLUSTERS            6           opens by itself when one is degraded
-   ▾ AGENTS · desktop     3 ●        the agents of one session:
+
+   ▸ CLUSTERS ──────────── 6         opens by itself when one is degraded
+
+   ▾ AGENTS · desktop ─── 3 ●        the agents of one session:
      ● claude 1 desktop-5f  5m       model and tab, its name for messages, how long
        blocked · fix-runner          its state in herdr's word, and its task
      ○ opencode 1
@@ -66,14 +69,18 @@ somewhere else.
 Opened (`Space` on a section, or `1`, `2`, `3`), REPOS lists every session, and CLUSTERS
 every cluster `ocl` knows, with its nodes or why it has none:
 
-   ▾ REPOS                    24 ●
+   ▾ REPOS ─────────── 24 ●
      ● checkmk                       its dot: the agent in it most in need of you
        main                          and its branch, when the column has room
     ▌● desktop              2 5m     the session you are in, on a bar: two blocked, 5m
      · home                          no agents at all
-   ▾ CLUSTERS                  6
+
+   ▾ CLUSTERS ──────────── 6
      ● ocp202              15/15     healthy, nodes ready of nodes
      ○ ocp203         signed out
+
+Sections are a blank line apart, each header ruled across to its count and the state of
+whatever in it needs you most, and NEEDS YOU is in the colour of something wanting you.
 
 Folding is what keeps two dozen repositories, six clusters and their agents in one column.
 A section is folded or opened by hand with `Space` (or `⏎` or a click on its header), `z`

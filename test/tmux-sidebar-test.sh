@@ -233,14 +233,14 @@ drive() {
 # --- sections: what needs you, then repositories, clusters and agents, folding -------------
 
 composed=$(drive compose)
-needs=$(sed -n '/^ NEEDS YOU/,/^$/p' <<<"$composed")
+needs=$(sed -n '/NEEDS YOU/,/^$/p' <<<"$composed")
 check "what needs you comes first: blocked, stuck and finished agents from every repository" \
   test "$(grep -c '^ [●✗] ' <<<"$needs")" -ge 3
 check "  and a degraded cluster" grep -q '^ ● zeta  *3/4$' <<<"$needs"
 check "  but not one that is fine" lacks '^ ● delta' <<<"$needs"
 check "in a short column, repositories fold by themselves, keeping the one you are in" \
   test "$(sed -n '/▸ REPOS/,/CLUSTERS/p' <<<"$composed" | grep -c '^[▌ ][●○·] ')" = 1
-check "  and say how many there are, with the worst state" grep -q '^ ▸ REPOS  *4 ●$' <<<"$composed"
+check "  and say how many there are, with the worst state" grep -q '^ ▸ REPOS ─* 4 ●$' <<<"$composed"
 tall=$(drive compose-tall)
 check "in a tall column every section is open, the repositories too" \
   test "$(grep -c '^ ▾ ' <<<"$tall")-$(sed -n '/▾ REPOS/,/CLUSTERS/p' <<<"$tall" | grep -c '^[▌ ][●○·] ')" = "3-4"
@@ -253,7 +253,7 @@ check "opened by hand, every repository is shown" \
 closed=$(drive compose-closed)
 check "folded by hand, a section is its header alone" \
   test "$(sed -n '/CLUSTERS/,$p' <<<"$closed" | grep -c .)" = 2
-check "  even with something in it to report" grep -q '^ ▸ CLUSTERS  *2 ●$' <<<"$closed"
+check "  even with something in it to report" grep -q '^ ▸ CLUSTERS ─* 2 ●$' <<<"$closed"
 : >"$sandbox/did"
 drive go-cluster >/dev/null
 check "a cluster with a session is gone to" grep -q 'switch-client -c /dev/pts/9 -t =delta' "$sandbox/did"
