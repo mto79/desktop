@@ -439,7 +439,7 @@ def number(text):
         return 0
 
 
-def layout(sessions, here, detailed=False, module=None, selected=None, room=None):
+def layout(sessions, here, detailed=False, module=None, selected=None, room=None, agents_from=None):
     """The rows to draw: the sessions, then the agents of the selected one.
 
     As herdr's sidebar is laid out. Under SPACES a session takes two lines: its dot, the
@@ -454,10 +454,14 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
     lines each filled a laptop's column, and the agents -- the part you act on -- were
     left one row at the bottom with the rest out of sight. Detailed, they keep them all. Decided by the sessions alone,
     not by which one is under the cursor, so the rows stay put as the cursor moves.
+
+    The agents may be those of a session not listed: agents_from has every session whose
+    agents can be shown, a view's among them, since a view has its agent column too.
     """
     here_session = here.split(":")[0]
-    if selected not in sessions:
-        selected = here_session if here_session in sessions else next(iter(sorted(sessions)), None)
+    pool = sessions if agents_from is None else agents_from
+    if selected not in pool:
+        selected = here_session if here_session in pool else next(iter(sorted(sessions)), None)
 
     out = [{"kind": "header", "session": "", "text": "REPOS", "right": str(len(sessions)),
             "current": False}]
@@ -505,7 +509,7 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
 
     if selected is None:
         return out
-    listed = sessions[selected]["agents"]
+    listed = pool[selected]["agents"]
     out.append({"kind": "gap", "session": selected, "current": False})
     out.append({"kind": "header", "session": selected, "text": "AGENTS", "right": selected,
                 "current": False})
@@ -654,9 +658,13 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
     here_session = here.split(":")[0]
     open_sessions = set(sessions) if open_sessions is None else set(open_sessions)
     repos = {name: found for name, found in sessions.items() if name not in names}
-    if selected in names:
+    # Whose agents can be shown: a repository's, or a view's -- each view has an agent
+    # column of its own. A cluster's session is fenced off, and shows none.
+    viewed = {name: found for name, found in sessions.items() if name in found_views}
+    with_agents = dict(repos, **viewed)
+    if selected not in with_agents:
         selected = None
-    inner = layout(repos, here, detailed, module, selected, room)
+    inner = layout(repos, here, detailed, module, selected, room, with_agents)
     split = next((i for i, row in enumerate(inner) if row["kind"] == "gap"), len(inner))
     repo_rows, agent_rows = inner[1:split], inner[split + 2:]
     agents_of = inner[split + 1]["session"] if split < len(inner) else ""
@@ -664,7 +672,7 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
     out = []
     # What needs you, from every repository and cluster at once.
     needing = []
-    for name, found in repos.items():
+    for name, found in with_agents.items():
         for agent in found["agents"]:
             if agent["state"] in ALERTS:
                 needing.append((URGENCY[agent["state"]], name, agent))
@@ -1051,7 +1059,8 @@ def sidebar(screen):
     while True:
         # The agents underneath follow the session under the cursor. Sessions come first
         # and their rows do not move when the agents below change, so the cursor stays put.
-        if listed and listed[cursor]["kind"] == "session" and listed[cursor]["session"] != selected:
+        if (listed and listed[cursor]["kind"] in ("session", "view")
+                and listed[cursor]["session"] != selected):
             selected = listed[cursor]["session"]
             listed, dirty = build(), True
         height = free()

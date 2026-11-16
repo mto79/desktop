@@ -209,9 +209,10 @@ elif what == "names":
     for found in sidebar.rows("alpha:2"):
         if found["kind"] == "agent" and found["session"] == "alpha":
             print(sidebar.line_of(found, 40)[0].rstrip())
-elif what == "views":
+elif what in ("views", "views-in"):
     # Two views: epsilon, whose session is open, and update, which is not.
-    for found_row in sidebar.compose(sidebar.collect(), [], "alpha:2", False, None, None, 100, {},
+    here = "epsilon:1" if what == "views-in" else "alpha:2"
+    for found_row in sidebar.compose(sidebar.collect(), [], here, False, None, None, 100, {},
                                      found_views=["epsilon", "update"]):
         print(sidebar.line_of(found_row, 30)[0].rstrip())
 elif what.startswith("compose"):
@@ -277,6 +278,8 @@ viewed=$(drive views)
 check "views have a section of their own, an open one marked so" \
   grep -qE '^ ● epsilon  *open$' <<<"$(sed -n '/▾ VIEWS/,/^$/p' <<<"$viewed")"
 check "  one not open yet a ring" grep -qx ' ○ update' <<<"$viewed"
+check "in a view, the agents shown are the view's own" \
+  grep -qE '^ ▾ AGENTS · epsilon' <<<"$(drive views-in)"
 check "  and its session is not counted among the repositories" \
   lacks 'epsilon' <<<"$(sed -n '/REPOS/,/VIEWS/p' <<<"$viewed" | sed '$d')"
 : >"$sandbox/did"
