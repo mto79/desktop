@@ -179,6 +179,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Closing the agent picker's "Press Enter" prompt with Ctrl-D dismisses it, rather than
+  ending in a Python traceback and an abrt crash report.
 - In a view, the sidebar's AGENTS are the view's own -- the agent in its column -- rather
   than some other session's, and a view's agent waiting on you shows under NEEDS YOU.
 - A tmux window closes when its shell exits or its k9s quits, as it did before the sidebar,

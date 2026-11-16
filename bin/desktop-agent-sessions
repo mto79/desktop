@@ -221,6 +221,14 @@ def tmux_status():
     return 0
 
 
+def pause(prompt):
+    # The popup closing, or Ctrl-D, ends stdin: that is a dismissal, not a crash.
+    try:
+        input(prompt)
+    except EOFError:
+        pass
+
+
 def pick():
     """The list in fzf, from a tmux popup: Enter jumps to the session's pane.
 
@@ -233,7 +241,7 @@ def pick():
     listed = sessions()
     if not listed:
         print("No Claude Code sessions with hooks running.")
-        input("\nPress Enter to close. ")
+        pause("\nPress Enter to close. ")
         return 0
 
     colours = {"waiting": "\033[31m", "working": "\033[33m", "done": "\033[32m", "ready": "\033[2m"}
@@ -256,11 +264,11 @@ def pick():
 
     s = listed[int(chosen.split("\t", 1)[0])]
     if not s["target"]:
-        input("That session's pane has closed. Press Enter. ")
+        pause("That session's pane has closed. Press Enter. ")
         return 0
     own = os.environ.get("TMUX", "").split(",")[0]
     if s["socket"] and own and os.path.realpath(s["socket"]) != os.path.realpath(own):
-        input(f"It runs in another tmux server: tmux -S {s['socket']} attach -t {s['target']}\nPress Enter. ")
+        pause(f"It runs in another tmux server: tmux -S {s['socket']} attach -t {s['target']}\nPress Enter. ")
         return 0
     # Not switch-client: an agent in a column's tabs is reached through the column, whose
     # session is 30 columns wide and already has a client. desktop-agent-tabs knows which

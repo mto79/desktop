@@ -88,8 +88,10 @@ rm "$sandbox/runtime/desktop/agents/task.json"
 ARGS=(--pick)
 
 rm -f "$sandbox/jumped"
-sessions PICK=other </dev/null >/dev/null 2>&1
+sessions PICK=other </dev/null >/dev/null 2>"$sandbox/err"
+code=$?
 check "a session in another tmux server is not switched to here" test ! -e "$sandbox/jumped"
+check "  and the prompt saying so is closed without a traceback" test "$code" -eq 0 -a ! -s "$sandbox/err"
 
 # --- prefix + N ------------------------------------------------------------------------------
 
