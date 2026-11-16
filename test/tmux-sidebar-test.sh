@@ -78,6 +78,8 @@ case "$args" in
   ;;
 *list-clients*) echo "1790000000 /dev/pts/9" ;;
 *split-window*) echo "%9" ;;
+# A cluster with a tmux session of its own, and one without.
+*has-session*=zeta*) echo "$args" >>"$SANDBOX/did"; exit 1 ;;
 esac
 echo "$args" >>"$SANDBOX/did"
 STUB
@@ -201,6 +203,17 @@ elif what == "names":
     for found in sidebar.rows("alpha:2"):
         if found["kind"] == "agent" and found["session"] == "alpha":
             print(sidebar.line_of(found, 40)[0].rstrip())
+elif what.startswith("compose"):
+    # Two clusters: delta, which is also a tmux session, healthy; and zeta, degraded.
+    found = [{"name": "delta", "state": "healthy", "nodes": 3, "ready": 3},
+             {"name": "zeta", "state": "degraded", "nodes": 4, "ready": 3}]
+    chosen = {"compose": {}, "compose-open": {"repos": "open"},
+              "compose-closed": {"clusters": "closed", "agents": "closed"}}[what]
+    for found_row in sidebar.compose(sidebar.collect(), found, "alpha:2", False, None, None, 100, chosen):
+        print(sidebar.line_of(found_row, 30)[0].rstrip())
+elif what in ("go-cluster", "go-cluster-new"):
+    name = "delta" if what == "go-cluster" else "zeta"
+    sidebar.go({"kind": "cluster", "session": name}, "alpha:2")
 elif what == "attach":
     sidebar.attach("alpha:2")
 elif what == "toggle":
@@ -214,6 +227,36 @@ drive() {
     CLAUDE_CONFIG_DIR="$sandbox/claude" \
     python3 "$sandbox/drive.py" "$ROOT/bin/desktop-tmux-sidebar" "$1" 2>&1
 }
+
+# --- sections: what needs you, then repositories, clusters and agents, folding -------------
+
+composed=$(drive compose)
+needs=$(sed -n '/^ NEEDS YOU/,/^$/p' <<<"$composed")
+check "what needs you comes first: blocked, stuck and finished agents from every repository" \
+  test "$(grep -c '^ [●✗] ' <<<"$needs")" -ge 3
+check "  and a degraded cluster" grep -q '^ ● zeta  *3/4$' <<<"$needs"
+check "  but not one that is fine" lacks '^ ● delta' <<<"$needs"
+check "repositories fold by themselves, keeping the one you are in" \
+  test "$(sed -n '/▸ REPOS/,/CLUSTERS/p' <<<"$composed" | grep -c '^[▌ ][●○·] ')" = 1
+check "  and say how many there are, with the worst state" grep -q '^ ▸ REPOS  *4 ●$' <<<"$composed"
+check "a cluster with its own tmux session is not counted among the repositories" \
+  lacks '^ [●○·] delta$' <<<"$(sed -n '/REPOS/,/CLUSTERS/p' <<<"$(drive compose-open)")"
+check "clusters open by themselves when one is degraded, each with its nodes" \
+  grep -q '^ ● delta  *3/3$' <<<"$composed"
+check "opened by hand, every repository is shown" \
+  test "$(sed -n '/▾ REPOS/,/CLUSTERS/p' <<<"$(drive compose-open)" | grep -c '^[▌ ][●○·] ')" = 4
+closed=$(drive compose-closed)
+check "folded by hand, a section is its header alone" \
+  test "$(sed -n '/CLUSTERS/,$p' <<<"$closed" | grep -c .)" = 2
+check "  even with something in it to report" grep -q '^ ▸ CLUSTERS  *2 ●$' <<<"$closed"
+: >"$sandbox/did"
+drive go-cluster >/dev/null
+check "a cluster with a session is gone to" grep -q 'switch-client -c /dev/pts/9 -t =delta' "$sandbox/did"
+: >"$sandbox/did"
+drive go-cluster-new >/dev/null
+check "one without is made, as prefix + K makes it" grep -q 'new-window -t alpha: -n cluster desktop-cluster session zeta' "$sandbox/did"
+check "the keys to fold are listed with the sidebar's" \
+  test "$("$ROOT/bin/desktop-tmux-keys" --sidebar | cut -f1 | grep -cxE 'Space|1|z')" = 3
 
 # Claude Code's records of its running sessions, with the name each answers to: one in
 # alpha's third tab, alive -- this test's own shell stands in for it. One in the first whose
@@ -233,8 +276,8 @@ record $$ "$((started + 1))" 'ai-alpha-2-claude:@22.%32' reused-c2 reused
 
 drawn=$(drive rows)
 
-sessions_drawn=$(sed -n '/^ SPACES/,/^$/p' <<<"$drawn" | sed '1d;$d')
-check "the spaces come under a header that counts them" grep -q '^ SPACES  *5$' <<<"$drawn"
+sessions_drawn=$(sed -n '/^ REPOS/,/^$/p' <<<"$drawn" | sed '1d;$d')
+check "the repositories come under a header that counts them" grep -q '^ REPOS  *5$' <<<"$drawn"
 
 check "in a tall column a session has its branch under it" test "$(drive tall)" = gamma
 check "in one the sessions would fill they lose it, so the agents fit underneath" \

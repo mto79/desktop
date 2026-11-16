@@ -52,6 +52,7 @@ SIDEBAR="$ROOT/bin/desktop-tmux-sidebar"
 handled() {
   local key=$1
   [[ $key == Enter ]] && key='\n'
+  [[ $key == Space ]] && key=' '
   grep -qF "ord(\"$key\")" "$SIDEBAR"
 }
 count=0

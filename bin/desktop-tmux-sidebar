@@ -106,7 +106,7 @@ BASIC = {"red": curses.COLOR_RED, "yellow": curses.COLOR_YELLOW, "peach": curses
          "dim": -1, "text": -1, "surface": -1, "overlay": -1}
 
 # The keys, pinned under everything as herdr pins its own.
-FOOTER = "⏎ go  p peek  v more  q hide"
+FOOTER = "⏎ go  ␣ fold  p peek  v more"
 
 # Each agent in its own colour, the one its tabs and its pane border have: the theme sets
 # them as @agent-<model>-colour. Without 256 colours to come near a theme's hex, the plain
@@ -435,7 +435,7 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
     if selected not in sessions:
         selected = here_session if here_session in sessions else next(iter(sorted(sessions)), None)
 
-    out = [{"kind": "header", "session": "", "text": "SPACES", "right": str(len(sessions)),
+    out = [{"kind": "header", "session": "", "text": "REPOS", "right": str(len(sessions)),
             "current": False}]
     for name in sorted(sessions):
         found = sessions[name]
@@ -510,9 +510,175 @@ def rows(here, detailed=False, module=None, selected=None, room=None):
     return layout(collect(), here, detailed, module, selected, room)
 
 
+# --- the sections: what needs you, then repositories, clusters and agents, each folding ------
+
+# The column holds three kinds of thing now -- repositories, clusters and the agents of one
+# of them -- and with two dozen repositories and six clusters, all of it open is a list
+# nobody reads. So it is in sections that fold, under a strip of what needs you:
+#
+#      NEEDS YOU
+#      ● na_vm claude 2       4m      an agent blocked, stuck or finished unseen,
+#      ● ocp203  signed out           a cluster degraded, or signed out while its session is open
+#    ▾ REPOS              24 ● 2
+#    ▸ CLUSTERS            6
+#    ▾ AGENTS · desktop
+#
+# A section with something to report opens by itself, and one with nothing folds by itself
+# -- unless it was folded or opened by hand, which is remembered for every column in
+# @sidebar_folds. Folded, REPOS still shows the session you are in: where you are is not
+# something to fold away.
+
+SECTIONS = ("repos", "clusters", "agents")
+TITLES = {"repos": "REPOS", "clusters": "CLUSTERS", "agents": "AGENTS"}
+FOLDS = "@sidebar_folds"
+ALERTS = ("waiting", "failed", "stuck", "done")
+# A cluster's state as `desktop-cluster status --json` says it, drawn as a dot and a word.
+CLUSTER_LOOK = {"healthy": ("●", "green"), "degraded": ("●", "red"), "updating": ("●", "yellow"),
+                "signed-out": ("○", "dim"), "unreachable": ("·", "dim"),
+                "misconfigured": ("✗", "red"), "unknown": ("·", "dim")}
+CLUSTER_WORDS = {"signed-out": "signed out", "unreachable": "unreachable",
+                 "misconfigured": "check ocl edit", "unknown": "…"}
+CLUSTER_SECONDS = 60
+CLUSTER_CACHE = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "desktop", "clusters.json")
+CLUSTER_NAMES = {"at": 0.0, "names": []}
+
+
+def clusters(now=None):
+    """The clusters `ocl` knows, with their state, from a file every column shares.
+
+    Asking a cluster goes over the network and can take seconds, so it is never done here:
+    when the file is a minute old, one column starts `desktop-cluster status --json` in the
+    background, behind a lock so that two columns do not ask twice, and every column reads
+    whatever the file says meanwhile. Before there is a file, the names alone.
+    """
+    now = time.time() if now is None else now
+    found = None
+    try:
+        with open(CLUSTER_CACHE) as handle:
+            found = json.load(handle)
+        age = now - os.stat(CLUSTER_CACHE).st_mtime
+    except (OSError, ValueError):
+        age = None
+    if age is None or age >= CLUSTER_SECONDS:
+        try:
+            os.makedirs(os.path.dirname(CLUSTER_CACHE), exist_ok=True)
+            subprocess.Popen(
+                ["flock", "-n", CLUSTER_CACHE + ".lock", "sh", "-c",
+                 'desktop-cluster status --json >"$1.part" 2>/dev/null && mv -f "$1.part" "$1"', "-",
+                 CLUSTER_CACHE],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True)
+        except OSError:
+            pass
+    if isinstance(found, list):
+        return [c for c in found if isinstance(c, dict) and c.get("name")]
+    if now - CLUSTER_NAMES["at"] > CLUSTER_SECONDS:
+        CLUSTER_NAMES["at"] = now
+        try:
+            out = subprocess.run(["desktop-cluster", "names"], capture_output=True, text=True, timeout=3)
+            CLUSTER_NAMES["names"] = out.stdout.split() if out.returncode == 0 else []
+        except (OSError, subprocess.SubprocessError):
+            CLUSTER_NAMES["names"] = []
+    return [{"name": name, "state": "unknown"} for name in CLUSTER_NAMES["names"]]
+
+
+def folds():
+    """What was folded or opened by hand: {"clusters": "closed", ...}."""
+    found = {}
+    for item in (tmux("show-options", "-gqv", FOLDS) or "").split(","):
+        key, _, value = item.partition("=")
+        if key in SECTIONS and value in ("open", "closed"):
+            found[key] = value
+    return found
+
+
+def set_folds(chosen):
+    tmux("set-option", "-gq", FOLDS, ",".join(f"{k}={v}" for k, v in sorted(chosen.items())))
+
+
+def worst(states):
+    states = [s for s in states if s in URGENCY]
+    return min(states, key=lambda s: URGENCY[s]) if states else ""
+
+
+def compose(sessions, found_clusters, here, detailed=False, module=None, selected=None,
+            room=None, chosen=None, open_sessions=None):
+    """The rows of the whole column, in sections: see the comment above."""
+    chosen = chosen or {}
+    names = [c["name"] for c in found_clusters]
+    here_session = here.split(":")[0]
+    open_sessions = set(sessions) if open_sessions is None else set(open_sessions)
+    repos = {name: found for name, found in sessions.items() if name not in names}
+    if selected in names:
+        selected = None
+    inner = layout(repos, here, detailed, module, selected, room)
+    split = next((i for i, row in enumerate(inner) if row["kind"] == "gap"), len(inner))
+    repo_rows, agent_rows = inner[1:split], inner[split + 2:]
+    agents_of = inner[split + 1]["session"] if split < len(inner) else ""
+
+    out = []
+    # What needs you, from every repository and cluster at once.
+    needing = []
+    for name, found in repos.items():
+        for agent in found["agents"]:
+            if agent["state"] in ALERTS:
+                needing.append((URGENCY[agent["state"]], name, agent))
+    for urgency, name, agent in sorted(needing, key=lambda n: (n[0], n[1])):
+        out.append({"kind": "agent", "section": "needs", "session": name,
+                    "text": f"{name} {agent['label']}", "state": agent["state"], "for": agent["for"],
+                    "pane": agent["pane"], "model": agent["model"], "name": "", "current": False})
+    for cluster in found_clusters:
+        state = cluster.get("state", "unknown")
+        if state == "degraded" or (state == "signed-out" and cluster["name"] in open_sessions):
+            out.append(cluster_row(cluster, here_session, "needs"))
+    if out:
+        out.insert(0, {"kind": "header", "section": "needs", "session": "", "text": "NEEDS YOU",
+                       "right": "", "current": False})
+        out.append({"kind": "gap", "section": "needs", "session": "", "current": False})
+
+    def section(key, rows, count, dot, alert, keep=()):
+        state = chosen.get(key) or ("open" if alert else "closed")
+        folded = state == "closed"
+        out.append({"kind": "section", "section": key, "session": "", "text": TITLES[key],
+                    "folded": folded, "count": count, "dot": dot, "current": False})
+        shown = [r for r in rows if not folded or r.get("session") in keep and r["kind"] in ("session",)]
+        for row in shown:
+            row.setdefault("section", key)
+            out.append(row)
+
+    # Folded unless opened by hand: what in it needs you is already at the top, and the
+    # session you are in stays in sight folded. Opened by itself whenever an agent anywhere
+    # had finished, it was open nearly always.
+    repo_states = [r["state"] for r in repo_rows if r["kind"] == "session"]
+    section("repos", repo_rows, len(repos), worst(repo_states), False, keep=(here_session,))
+    if found_clusters:
+        crow = [cluster_row(c, here_session, "clusters") for c in sorted(found_clusters, key=lambda c: c["name"])]
+        cstates = [c.get("state", "unknown") for c in found_clusters]
+        bad = [s for s in cstates if s in ("degraded", "misconfigured")]
+        section("clusters", crow, len(found_clusters), "degraded" if bad else "",
+                bool(bad) or here_session in names)
+    agent_states = [r["state"] for r in agent_rows if r["kind"] == "agent"]
+    section("agents", agent_rows, sum(1 for r in agent_rows if r["kind"] == "agent"),
+            worst(agent_states), any(r["kind"] == "agent" for r in agent_rows))
+    # The agents' header says whose they are.
+    for row in out:
+        if row["kind"] == "section" and row["section"] == "agents":
+            row["of"] = agents_of
+    return out
+
+
+def cluster_row(cluster, here_session, section):
+    state = cluster.get("state", "unknown")
+    nodes, ready = cluster.get("nodes") or 0, cluster.get("ready") or 0
+    right = f"{ready}/{nodes}" if nodes and state in ("healthy", "degraded", "updating") else CLUSTER_WORDS.get(state, "")
+    return {"kind": "cluster", "section": section, "session": cluster["name"], "text": cluster["name"],
+            "state": "", "cluster": state, "right": right, "for": "", "pane": "",
+            "current": cluster["name"] == here_session}
+
+
 # Where a row's text starts: the dot, then the name a space after it.
 DOT, NAME = 1, 3
-SELECTABLE = ("session", "agent")
+SELECTABLE = ("session", "agent", "section", "cluster")
 
 
 def pieces(row, width):
@@ -520,6 +686,30 @@ def pieces(row, width):
     kind = row["kind"]
     if kind == "gap":
         return []
+    if kind == "section":
+        arrow = "▸" if row["folded"] else "▾"
+        title = row["text"] + (f" · {row['of']}" if row.get("of") and row["section"] == "agents" else "")
+        out = [(1, arrow, "dim")]
+        right_text = str(row["count"]) if row["count"] else ""
+        room = width - 3 - (len(right_text) + 4) - 1
+        title = title if len(title) <= room else title[:max(0, room - 1)] + "…"
+        out.append((3, title, "accent"))
+        if right_text:
+            column = width - 1 - len(right_text) - (2 if row.get("dot") else 0)
+            out.append((column, right_text, "dim"))
+            if row.get("dot"):
+                colour = CLUSTER_LOOK["degraded"][1] if row["dot"] == "degraded" else COLOURS.get(row["dot"], "dim")
+                out.append((width - 2, "●", colour))
+        return out
+    if kind == "cluster":
+        dot, colour = CLUSTER_LOOK.get(row["cluster"], ("·", "dim"))
+        right = row.get("right", "")
+        room = width - NAME - (len(right) + 2 if right else 1)
+        name = row["text"] if len(row["text"]) <= room else row["text"][:max(0, room - 1)] + "…"
+        out = [(DOT, dot, colour), (NAME, name, "text")]
+        if right:
+            out.append((width - 1 - len(right), right, colour if row["cluster"] != "healthy" else "dim"))
+        return out
     if kind == "header":
         right = row.get("right", "")
         room = width - len(row["text"]) - 4
@@ -546,8 +736,11 @@ def pieces(row, width):
         dot = ("○", "dim")  # an agent at its prompt: there, and wanting nothing
     else:
         dot = ("·", "dim")  # no agent at all, but still a row of its own, not a second line
-    # On the right, how many more are in the same state, and how long it has been so.
+    # On the right, how many more are in the same state, and how long it has been so. Under
+    # NEEDS YOU, a finished one says so: it has no time to show.
     right = ""
+    if kind == "agent" and row.get("section") == "needs" and state in ("done", "failed"):
+        right = WORDS[state]
     if kind == "session" and state and row["count"] > 1:
         right = f"{row['count']}"
     if row["for"] and state in ("waiting", "working", "stuck"):
@@ -583,7 +776,7 @@ def line_of(row, width):
         for i, char in enumerate(text):
             if 0 <= column + i < width:
                 line[column + i] = char
-    if row.get("current") and row["kind"] in ("session", "sub"):
+    if row.get("current") and row["kind"] in ("session", "sub", "cluster"):
         line[0] = "▌"
     return "".join(line), 0
 
@@ -595,13 +788,13 @@ def draw(screen, listed, cursor, offset, focused=True):
         # The session you are in sits on a bar, both its lines, as herdr's active row does;
         # the cursor on a brighter one, and only while the column has the keys.
         index = offset + line
-        bar = "surface" if row.get("current") and row["kind"] in ("session", "sub") else None
+        bar = "surface" if row.get("current") and row["kind"] in ("session", "sub", "cluster") else None
         if focused and index == cursor:
             bar = "overlay"
         try:
             if bar:
                 screen.addstr(line, 0, " " * (width - 1), ink("text", bar))
-            if row.get("current") and row["kind"] in ("session", "sub"):
+            if row.get("current") and row["kind"] in ("session", "sub", "cluster"):
                 screen.addstr(line, 0, "▌", ink("accent", bar))
             for column, text, colour in pieces(row, width):
                 attr = ink(colour, bar)
@@ -673,6 +866,20 @@ def go(row, here):
         except (OSError, subprocess.SubprocessError):
             pass
         return
+    if row["kind"] == "cluster":
+        # Its session if there is one; otherwise ocl makes it, signing in first, in a window
+        # of the session you are in -- the way prefix + K does.
+        try:
+            exists = subprocess.run(["tmux", "has-session", "-t", f"={row['session']}"],
+                                    capture_output=True, timeout=5).returncode == 0
+        except (OSError, subprocess.SubprocessError):
+            exists = False
+        if exists:
+            tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
+        else:
+            tmux("new-window", "-t", f"{here.split(':')[0]}:", "-n", "cluster",
+                 f"desktop-cluster session {shlex.quote(row['session'])}")
+        return
     if row["kind"] != "session":
         return
     tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
@@ -704,11 +911,33 @@ def sidebar(screen):
     detailed = tmux("show-options", "-gqv", VIEW) == "detail"
     here = tmux(*where)
     data = collect()
+    found_clusters = clusters()
+    chosen = folds()
     selected = here.split(":")[0]
     def free():
         return max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
 
-    listed = layout(data, here, detailed, module, selected, free())
+    def build():
+        return compose(data, found_clusters, here, detailed, module, selected, free(), chosen)
+
+    def section_of(index):
+        """The section a row is in, and the index of that section's header."""
+        key = listed[index].get("section") if listed else None
+        head = next((i for i, r in enumerate(listed) if r["kind"] == "section" and r["section"] == key), None)
+        return key, head
+
+    def fold(key, state=None):
+        """Open or close a section by hand, for every column; the cursor goes to its header."""
+        nonlocal chosen, listed, cursor
+        current = next((r["folded"] for r in listed if r["kind"] == "section" and r["section"] == key), None)
+        if current is None:
+            return
+        chosen = dict(folds(), **{key: state or ("open" if current else "closed")})
+        set_folds(chosen)
+        listed = build()
+        cursor = next((i for i, r in enumerate(listed) if r["kind"] == "section" and r["section"] == key), 0)
+
+    listed = build()
     cursor = next((i for i, row in enumerate(listed) if row["current"]), step(listed, 0, 1))
     offset = 0
     focused = False
@@ -721,7 +950,7 @@ def sidebar(screen):
         # and their rows do not move when the agents below change, so the cursor stays put.
         if listed and listed[cursor]["kind"] == "session" and listed[cursor]["session"] != selected:
             selected = listed[cursor]["session"]
-            listed, dirty = layout(data, here, detailed, module, selected, free()), True
+            listed, dirty = build(), True
         height = free()
         if cursor < offset:
             offset = cursor
@@ -751,13 +980,33 @@ def sidebar(screen):
             tmux("set-option", "-gq", VIEW, "detail" if detailed else "compact")
             last = 0
         elif key in (ord("\n"), curses.KEY_ENTER, ord("l"), curses.KEY_RIGHT):
-            if listed:
+            if listed and listed[cursor]["kind"] == "section":
+                fold(listed[cursor]["section"])
+                dirty = True
+            elif listed:
                 go(listed[cursor], here)
+        elif key == ord(" "):
+            # The section the cursor is in, from wherever in it the cursor is.
+            if listed:
+                fold(section_of(cursor)[0])
+                dirty = True
+        elif key in (ord("1"), ord("2"), ord("3")):
+            fold(SECTIONS[key - ord("1")], "open")
+            dirty = True
+        elif key == ord("z"):
+            # Everything folded but the section the cursor is in.
+            if listed:
+                keep = section_of(cursor)[0]
+                chosen = {k: ("open" if k == keep else "closed") for k in SECTIONS}
+                set_folds(chosen)
+                listed = build()
+                cursor = next((i for i, r in enumerate(listed) if r.get("section") == keep), 0)
+                dirty = True
         elif key == ord("r"):
             last = 0
         elif key == curses.KEY_RESIZE:
             # Taller or shorter, the sessions may now have their second lines or not.
-            listed, dirty = layout(data, here, detailed, module, selected, free()), True
+            listed, dirty = build(), True
             cursor = min(cursor, max(0, len(listed) - 1))
             # tmux resizes panes in proportion, so a wider or narrower terminal would
             # leave the column wider or narrower than it needs to be. It is a fixed thing
@@ -778,7 +1027,10 @@ def sidebar(screen):
                 # A click on a second line is a click on what it belongs to.
                 cursor, dirty = owner_of(listed, offset + row), True
                 draw(screen, listed, cursor, offset, focused)
-                go(listed[cursor], here)
+                if listed[cursor]["kind"] == "section":
+                    fold(listed[cursor]["section"])
+                else:
+                    go(listed[cursor], here)
 
         # On a timer, because an agent that starts waiting has to appear on its own and
         # tmux has no hook for that. Skipped entirely while this window is not on screen.
@@ -800,7 +1052,9 @@ def sidebar(screen):
             here = tmux(*where)
             detailed = tmux("show-options", "-gqv", VIEW) == "detail"
             data = collect()
-            fresh = layout(data, here, detailed, module, selected, free())
+            found_clusters = clusters()
+            chosen = folds()
+            fresh = build()
             # A theme switched meanwhile brings its own agent colours.
             if agent_colours() != colours:
                 colours = agent_colours()

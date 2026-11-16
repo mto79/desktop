@@ -48,24 +48,49 @@ the column away from every window, and puts it back. It is on or off for the who
 a pane lives in one window, so a single column would vanish the moment you used it to go
 somewhere else.
 
-     SPACES                    20
-     ● checkmk                       its dot: the agent in it most in need of you
-       main
-    ▌● desktop              2 5m     the session you are in, on a bar: two blocked, 5m
-    ▌  feat/sidebar +42 −7           its branch, and what the branch changed
-     ● ocp-helm-charts        7m     stuck (peach): working, but silent for 7 minutes
-       main
-     · home                          no agents at all
+     NEEDS YOU                       what wants you, from everywhere:
+     ● na_vm claude 2       4m       an agent blocked, stuck or finished unseen,
+     ● ocp203       signed out       a cluster degraded, or signed out with its session open
 
-     AGENTS               desktop    the agents of one session:
-     ● claude 1 desktop-5f    5m     model and tab, its name for messages, how long
+   ▸ REPOS              24 ●         folded: only the session you are in shows
+    ▌● desktop              5m
+   ▸ CLUSTERS            6           opens by itself when one is degraded
+   ▾ AGENTS · desktop     3 ●        the agents of one session:
+     ● claude 1 desktop-5f  5m       model and tab, its name for messages, how long
        blocked · fix-runner          its state in herdr's word, and its task
      ○ opencode 1
-       idle                          idle, or an agent that reports nothing
+       idle
 
-     ⏎ go  p peek  v more  q hide
+     ⏎ go  ␣ fold  p peek  v more
 
-It is drawn as herdr's sidebar is, as near as a terminal pane allows: two sections, each
+Opened (`Space` on a section, or `1`, `2`, `3`), REPOS lists every session, and CLUSTERS
+every cluster `ocl` knows, with its nodes or why it has none:
+
+   ▾ REPOS                    24 ●
+     ● checkmk                       its dot: the agent in it most in need of you
+       main                          and its branch, when the column has room
+    ▌● desktop              2 5m     the session you are in, on a bar: two blocked, 5m
+     · home                          no agents at all
+   ▾ CLUSTERS                  6
+     ● ocp202              15/15     healthy, nodes ready of nodes
+     ○ ocp203         signed out
+
+Folding is what keeps two dozen repositories, six clusters and their agents in one column.
+A section is folded or opened by hand with `Space` (or `⏎` or a click on its header), `z`
+folds all but the one the cursor is in, and `1` `2` `3` open repositories, clusters or
+agents and go there. What is chosen by hand is remembered, for every column, in
+`@sidebar_folds`. Left alone, REPOS stays folded -- what in it needs you is at the top
+already -- CLUSTERS opens when one is degraded or you are in a cluster's session, and AGENTS
+is open whenever there are agents.
+
+The clusters' state comes from `ocl status --json`, which asks every cluster over the
+network: so it is never asked while drawing. A column on screen starts it in the background
+when the answer is a minute old, behind a lock so two columns do not ask twice, into
+`$XDG_RUNTIME_DIR/desktop/clusters.json`, which they all read. `⏎` on a cluster goes to its
+tmux session, or makes one as `prefix + K` does (`ocl session`), signing in first. A tmux
+session named after a cluster is listed under CLUSTERS, not REPOS.
+
+It is drawn as herdr's sidebar is, as near as a terminal pane allows: sections, each
 entry on two lines, a coloured dot for the state, the active row on a bar, Catppuccin
 Mocha's colours (the nearest of the 256) and the keys along the bottom. A window that
 missed its column -- the restore builds windows at login, before any client can give them
@@ -73,7 +98,7 @@ room -- gets one the first time it is looked at, behind a `@sidebar_held` mark s
 at one that has its column costs nothing. The restore leaves the column out of what it
 saves; the sidebar puts it back.
 
-It is in two parts, as herdr's sidebar is. **On top, a row per session.** Windows are not
+**REPOS has a row per session.** Windows are not
 listed; a session's windows are on its own tab bar. When the sessions on two lines each
 would take more than half the column, every session but the one you are in keeps to one,
 so the agents underneath still fit: with twenty-odd sessions the list had filled a laptop's
