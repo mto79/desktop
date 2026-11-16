@@ -543,6 +543,17 @@ logout)
   # in: the prompt kept its cluster, and a sign-out seemed to have done nothing. Last, since
   # run from inside that session this is the end of the shell that ran it.
   if tmux has-session -t "=$NAME" 2>/dev/null; then
+    # Anyone looking at it is moved first, to the session they were in most recently. Left
+    # to tmux, a client goes to whichever session was active last, and that was one behind
+    # an agent column or a terminal's tabs -- which closes, or detaches, after this one: the
+    # terminal closed along with the cluster's session.
+    away=$(tmux list-sessions -F '#{session_activity} #{session_name} #{@ai_group}#{@term_group}' 2>/dev/null |
+      awk -v name="$NAME" 'NF == 2 && $2 != name && $2 !~ /^(ai|term)-/' | sort -rn | awk 'NR == 1 { print $2 }')
+    if [[ -n $away ]]; then
+      while read -r client; do
+        [[ -n $client ]] && tmux switch-client -c "$client" -t "=$away" 2>/dev/null
+      done < <(tmux list-clients -t "=$NAME" -F '#{client_tty}' 2>/dev/null)
+    fi
     tmux kill-session -t "=$NAME"
   fi
   exit

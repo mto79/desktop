@@ -185,6 +185,8 @@ Add a line under the current month in the same commit as the change it describes
 
 - Logging in no longer leaves a failed NVIDIA X Server Settings unit behind. Its autostart
   restores X settings, and under Wayland there is no X server to restore them to.
+- `ocl logout` from inside the cluster's session moves you to the session you were in
+  before, rather than closing the terminal along with it.
 - `ocl logout` closes the cluster's tmux session too. The token it revokes was the one the
   shell, k9s and argo9s were using, so they stopped working while still looking signed in,
   and the sign-out seemed to do nothing.

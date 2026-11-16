@@ -236,6 +236,11 @@ cat >"$stubs/tmux" <<STUB
 #!/usr/bin/env bash
 echo "tmux \$*" >>"$sandbox/tmux-calls"
 [[ \$1 == has-session ]] && { [[ -e "$sandbox/has-session" ]]; exit; }
+# The sessions, most recently active last on purpose: an agent column's and a terminal's
+# tabs' are the most recent, and the cluster's own; desktop the one to go back to.
+[[ \$1 == list-sessions ]] && printf '%s\n' '300 home' '500 desktop' '900 ai-ocp202-1-claude grp' \
+  '800 term-x-5 tg' '950 ocp202'
+[[ \$1 == list-clients ]] && echo /dev/pts/9
 exit 0
 STUB
 chmod +x "$stubs/tmux"
@@ -246,6 +251,9 @@ check "signing out removes that cluster's kubeconfig" test ! -e "$store/ocp202.k
 check "and no other" test -e "$store/lab.kubeconfig"
 check "and closes the cluster's tmux session, where all of it had stopped working" \
   grep -qx "tmux kill-session -t =ocp202" "$sandbox/tmux-calls"
+check "  having moved whoever was looking at it to the session they were in before, first" \
+  test "$(grep -E 'switch-client|kill-session' "$sandbox/tmux-calls" | tr '\n' ,)" = \
+  "tmux switch-client -c /dev/pts/9 -t =desktop,tmux kill-session -t =ocp202,"
 rm -f "$sandbox/has-session"
 : >"$sandbox/tmux-calls"
 run logout lab >/dev/null 2>&1
