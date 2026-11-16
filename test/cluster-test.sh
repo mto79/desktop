@@ -84,6 +84,8 @@ case "\$1" in
 login)
   [[ -e "$sandbox/slow" ]] && sleep 2
   [[ " \$* " == *" --web "* ]] && xdg-open "https://oauth-openshift.apps.web.example/oauth/authorize?client_id=x"
+  # A browser that never calls back: oc waits, as the real one does, for ever.
+  [[ -e "$sandbox/hang" ]] && { echo \$\$ >"$sandbox/oc-pid"; exec sleep 60; }
   [[ -e "$sandbox/refuse" ]] && exit 1
   printf 'context=default/api-x:6443/u\ncluster=api-x:6443\ntoken=good\n' >"\$file"
   for a in "\$@"; do [[ \$a == --server ]] && grab=1 && continue; [[ \${grab:-} ]] && put server "\$a" && grab=""; done; true ;;
@@ -330,7 +332,8 @@ STUB
 cat >"$stubs/hyprctl" <<STUB
 #!/usr/bin/env bash
 case "\$1" in
-clients) echo '[{"address":"0xa1","initialClass":"brave-oauth-openshift.apps.web.example__oauth_authorize-Default"},
+clients) [[ -e "$sandbox/gone" ]] && { echo '[]'; exit; }
+  echo '[{"address":"0xa1","initialClass":"brave-oauth-openshift.apps.web.example__oauth_authorize-Default"},
                 {"address":"0xb2","initialClass":"brave-browser"},
                 {"address":"0xc3","initialClass":"brave-teams.example__-Default"}]' ;;
 dispatch) echo "hyprctl \$2" >>"$log" ;;
@@ -353,6 +356,30 @@ run logout web >/dev/null 2>&1
 HYPRLAND_INSTANCE_SIGNATURE= run login web >/dev/null 2>&1
 check "off the desktop, oc opens it as it always did" called "xdg-open https://oauth-openshift.apps.web.example"
 check "and nothing is closed" bash -c "! grep -q window.close '$log'"
+
+# A sign-in window closed before signing in, or never used: oc is not left waiting for ever,
+# and nor is the tmux window the sidebar opened for it.
+gone() { ! kill -0 "$(cat "$sandbox/oc-pid" 2>/dev/null)" 2>/dev/null; }
+touch "$sandbox/hang"; rm -f "$sandbox/gone" "$sandbox/oc-pid"
+(sleep 2; touch "$sandbox/gone") &
+began=$SECONDS
+HYPRLAND_INSTANCE_SIGNATURE=x run login web >"$sandbox/out" 2>&1; status=$?
+check "closing the sign-in window gives the sign-in up" test "$status" -ne 0 -a $((SECONDS - began)) -lt 10
+check "and says so" grep -q "sign-in window was closed" "$sandbox/out"
+check "and oc is not left waiting" gone
+touch "$sandbox/gone"; rm -f "$sandbox/oc-pid"
+began=$SECONDS
+HYPRLAND_INSTANCE_SIGNATURE=x DESKTOP_CLUSTER_WEB_PATIENCE=2 run login web >"$sandbox/out" 2>&1; status=$?
+check "a sign-in nobody finishes is given up after a while" test "$status" -ne 0 -a $((SECONDS - began)) -lt 10
+check "and oc with it" gone
+rm -f "$sandbox/gone" "$sandbox/oc-pid"
+: >"$log"
+PATH="$stubs:$PATH" XDG_CONFIG_HOME="$sandbox/config" XDG_STATE_HOME="$sandbox/state" XDG_CACHE_HOME="$sandbox/cache" XDG_RUNTIME_DIR="$sandbox/run" \
+  HYPRLAND_INSTANCE_SIGNATURE=x timeout -s INT 3 bash "$CLUSTER" login web </dev/null >/dev/null 2>&1
+check "Ctrl-C stops oc too, which was started in the background" gone
+check "and closes the sign-in window" called 'address:0xa1'
+check "and leaves nothing in the store" bash -c "! ls -A '$store' | grep -q '^\.'"
+rm -f "$sandbox/hang"
 sed -i '/^web /d' "$sandbox/config/desktop/clusters.conf"
 rm -f "$stubs/desktop-launch-webapp" "$stubs/hyprctl" "$store/web.kubeconfig"
 

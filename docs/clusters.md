@@ -72,6 +72,11 @@ browser, and closes it once `oc login` returns, whether the sign-in worked or no
 the page with `xdg-open`; during the sign-in an `xdg-open` of desktop-cluster's own comes
 first on `PATH`. Over ssh, with no Hyprland, oc opens the page the way it always has.
 
+`oc login --web` waits for the browser's callback for as long as it takes, so it is watched:
+the sign-in window seen and then closed gives the sign-in up, and so do five minutes without
+one (`DESKTOP_CLUSTER_WEB_PATIENCE`, in seconds). Before that, a window closed unfinished left
+oc waiting for good, and with it the tmux `cluster` window the sidebar had opened.
+
 A client certificate (RKE2, Talos) runs out eventually; the cluster then answers
 "Unauthorized", the state becomes `signed-out`, and opening it fetches a new kubeconfig.
 A cluster that does not answer at all is `unreachable`, not signed out: it is not asked to

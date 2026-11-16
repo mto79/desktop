@@ -151,16 +151,57 @@ STUB
 
 # A Chromium web-app window is classed after the page it opened, as
 # brave-HOST__PATH-Default, so the sign-in window is told from every other by its host.
-close_web_window() {
+web_windows() { # dir -> the sign-in window's addresses, once oc has opened one
   local url host
   url=$(cat "$1/url" 2>/dev/null) || return 0
   host=${url#*://} host=${host%%[/?#]*} host=${host%%:*}
   [[ -n $host ]] || return 0
   hyprctl clients -j 2>/dev/null |
-    jq -r --arg h "-${host}__" '.[] | select(.initialClass | contains($h)) | .address' |
-    while read -r addr; do
-      hyprctl dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" >/dev/null
-    done
+    jq -r --arg h "-${host}__" '.[] | select(.initialClass | contains($h)) | .address'
+}
+
+close_web_window() {
+  local addr
+  web_windows "$1" | while read -r addr; do
+    hyprctl dispatch "hl.dsp.window.close({ window = \"address:$addr\" })" >/dev/null
+  done
+}
+
+# oc login --web waits for the browser's callback, and without one it waits for ever: the
+# sign-in window closed unfinished left oc, and the tmux window the sidebar had opened for
+# it, there for good -- one more each time the cluster was chosen again. So oc is watched
+# while it waits: the window seen and then gone is a sign-in given up, and so is five
+# minutes without one.
+WEB_PATIENCE=${DESKTOP_CLUSTER_WEB_PATIENCE:-300}
+web_login() { # dir oc-args...
+  local dir=$1 pid seen=false start=$SECONDS
+  shift
+  PATH="$dir:$PATH" oc login "$@" &
+  pid=$!
+  # A job started with & ignores Ctrl-C in a script, so it is passed on by hand; exit runs
+  # login's EXIT trap, which takes the scratch files away.
+  # shellcheck disable=SC2064
+  trap "kill $pid 2>/dev/null; close_web_window '$dir'; exit 130" INT TERM HUP
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    if [[ -n $(web_windows "$dir") ]]; then
+      seen=true
+    elif $seen; then
+      kill -0 "$pid" 2>/dev/null || break
+      echo "The sign-in window was closed before signing in." >&2
+      kill "$pid" 2>/dev/null
+      break
+    fi
+    if ((SECONDS - start >= WEB_PATIENCE)); then
+      echo "No sign-in after $((WEB_PATIENCE / 60)) minutes; giving up." >&2
+      kill "$pid" 2>/dev/null
+      break
+    fi
+  done
+  wait "$pid"
+  local status=$?
+  trap - INT TERM HUP
+  return "$status"
 }
 
 # The new kubeconfig is written beside the old and moved over it only once it is whole:
@@ -194,7 +235,11 @@ login() {
     *) die "$NAME: login= is password, web or token" ;;
     esac
     local ok=true
-    PATH="$tmp.web:$PATH" oc login "${args[@]}" || ok=false
+    if [[ -x $tmp.web/xdg-open ]]; then
+      web_login "$tmp.web" "${args[@]}" || ok=false
+    else
+      oc login "${args[@]}" || ok=false
+    fi
     close_web_window "$tmp.web"
     $ok || die "signing in to $NAME failed"
     ;;

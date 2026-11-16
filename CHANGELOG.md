@@ -157,6 +157,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A browser sign-in to a cluster that is closed before signing in, or left for five minutes,
+  is given up instead of waiting for ever. Choosing the cluster again in the tmux sidebar
+  no longer leaves one more `cluster` window behind each time; Ctrl-C stops it as well.
 - The dashboard and the tmux sidebar show a cluster signed in to or out of with `ocl` the
   next time they look, instead of up to two minutes later; a sign-out shows in the sidebar
   at once.
