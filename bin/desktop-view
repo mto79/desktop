@@ -16,6 +16,10 @@
 #
 #   reviews   desktop-view watch 300 desktop-reviews --list
 #   update    desktop-update
+#   gitlab    dir=~/Data/NA/Views/gitlab  desktop-view watch 120 glab mr list
+#
+# dir=, straight after the name, is the folder the view's session and agent work in; without
+# it, ~/views/<name>.
 #
 # The session is named after the view, so a view opened twice is gone to the second time
 # rather than run again. A command that ends leaves its output up until Enter, so that an
@@ -31,14 +35,25 @@ die() {
   exit 1
 }
 
-# Every view as "name<TAB>command", the comments and the blank lines left out.
+# Every view as "name<TAB>dir<TAB>command", the comments and the blank lines left out, and
+# dir empty when the line gives none.
 views() {
   [[ -f $CONFIG ]] || return 0
-  sed -E 's/^[[:space:]]+//; /^(#|$)/d; s/[[:space:]]+/\t/' "$CONFIG"
+  sed -E 's/^[[:space:]]+//; /^(#|$)/d; s/[[:space:]]+/\t/' "$CONFIG" |
+    awk -F'\t' '{ dir = ""; command = $2
+      if (command ~ /^dir=/) { dir = command; sub(/[[:space:]].*/, "", dir); sub(/^dir=/, "", dir)
+        sub(/^dir=[^[:space:]]*[[:space:]]*/, "", command) }
+      print $1 "\t" dir "\t" command }'
 }
 
 command_of() {
-  views | awk -F'\t' -v name="$1" '$1 == name { print $2; found = 1; exit } END { exit !found }'
+  views | awk -F'\t' -v name="$1" '$1 == name { print $3; found = 1; exit } END { exit !found }'
+}
+
+dir_of() {
+  local dir
+  dir=$(views | awk -F'\t' -v name="$1" '$1 == name { print $2; exit }')
+  echo "${dir/#\~/$HOME}"
 }
 
 # A view has an agent column on the right, as a repository's session has, to ask about
@@ -49,7 +64,8 @@ start() {
   local name=$1 dir
   command_of "$name" >/dev/null || die "no view called '$name' (see $CONFIG)"
   tmux has-session -t "=$name" 2>/dev/null && return 0
-  dir="$AGENT_HOME/$name"
+  dir=$(dir_of "$name")
+  [[ -n $dir ]] || dir="$AGENT_HOME/$name"
   mkdir -p "$dir"
   tmux new-session -d -s "$name" -n "$name" -c "$dir" "$(readlink -f "$0") run $(printf %q "$name")"
   # What desktop-tmux-restore leaves out: a view is made by this, from views.conf, and not

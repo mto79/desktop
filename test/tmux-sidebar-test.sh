@@ -217,7 +217,7 @@ elif what in ("views", "views-in"):
         print(sidebar.line_of(found_row, 30)[0].rstrip())
 elif what.startswith("compose"):
     # Two clusters: delta, which is also a tmux session, healthy; and zeta, degraded.
-    found = [{"name": "delta", "state": "healthy", "nodes": 3, "ready": 3},
+    found = [{"name": "delta", "state": "healthy", "nodes": 3, "ready": 3, "env": "prod"},
              {"name": "zeta", "state": "degraded", "nodes": 4, "ready": 3}]
     chosen = {"compose": {}, "compose-tall": {}, "compose-open": {"repos": "open"},
               "compose-closed": {"clusters": "closed", "agents": "closed"}}[what]
@@ -261,7 +261,8 @@ check "in a tall column every section is open, the repositories too" \
 check "a cluster with its own tmux session is not counted among the repositories" \
   lacks '^ [●○·] delta$' <<<"$(sed -n '/REPOS/,/CLUSTERS/p' <<<"$(drive compose-open)")"
 check "clusters open by themselves when one is degraded, each with its nodes" \
-  grep -q '^ ● delta  *3/3$' <<<"$composed"
+  grep -q '^ ● delta prod  *3/3$' <<<"$composed"
+check "  and its environment after its name, where env= gives one" grep -qE '^ ● zeta  +3/4$' <<<"$composed"
 check "opened by hand, every repository is shown" \
   test "$(sed -n '/▾ REPOS/,/CLUSTERS/p' <<<"$(drive compose-open)" | grep -c '^[▌ ][●○·] ')" = 4
 closed=$(drive compose-closed)

@@ -12,6 +12,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A cluster says which environment it is: `env=` in clusters.conf -- devl, test, acpt, prod --
+  shown after its name in the sidebar, production in red, and in `ocl list` and `ocl status`.
+- `dir=` in clusters.conf and views.conf puts a cluster's or a view's session and agent in a
+  folder of your choosing, instead of `~/clusters/NAME` or `~/views/NAME`.
 - `prefix + Z` in a window whose terminal under the editor was closed brings it back,
   rather than zooming whatever pane is left.
 - `prefix + t` in a cluster's shell window adds a terminal as a tab, and each tab is another

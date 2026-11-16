@@ -103,6 +103,16 @@ Any kind also takes `namespace=` (to start in), `console=` (for `-c`; OpenShift 
 own), `argocd=` (Argo CD's namespace: `openshift-gitops` on OpenShift, `argocd` elsewhere),
 `insecure=true` and `ca=`.
 
+`env=` says which environment a cluster is -- `devl`, `test`, `acpt`, `prod`, or any word.
+The sidebar shows it after the cluster's name, production in red, acceptance in peach, test
+in yellow and development in green, and `ocl list` and `ocl status` show it as a column.
+
+`dir=` is the folder a cluster's session and its agent column work in (`~` allowed), made
+and fenced when the session is; without it, `~/clusters/NAME`. A session already open keeps
+the folder it was made in until it is closed.
+
+    ocp202    openshift  server=https://api.ocp202.example:6443 env=devl dir=~/Work/Clusters/ocp202
+
 `login=web` gives the sign-in page a web-app window of its own rather than a tab in the
 browser, and closes it once `oc login` returns, whether the sign-in worked or not. oc opens
 the page with `xdg-open`; during the sign-in an `xdg-open` of desktop-cluster's own comes

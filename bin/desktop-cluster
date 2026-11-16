@@ -44,7 +44,10 @@
 #
 # And for any kind: namespace= to start in, console= for -c, argocd= for the namespace
 # Argo CD runs in (openshift-gitops on OpenShift, argocd elsewhere), insecure=true to skip
-# TLS verification, ca= for a CA file to verify it with.
+# TLS verification, ca= for a CA file to verify it with. env= says which environment it is
+# -- devl, test, acpt, prod, or any word -- shown beside it in the sidebar and in ocl list,
+# prod in red. dir= is the folder its session and agent work in (~ allowed), instead of
+# ~/clusters/NAME: notes and manifests can then live where the rest of that work does.
 #
 # Never written into the repository: the file names hosts, and the repository is public.
 
@@ -83,13 +86,13 @@ load() {
   NAME=$1
   KIND=$(cut -f2 <<<"$line")
   opt_server="" opt_login="" opt_kubeconfig="" opt_talosconfig="" opt_nodes="" opt_ssh=""
-  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca=""
+  opt_namespace="" opt_console="" opt_argocd="" opt_insecure="" opt_ca="" opt_env="" opt_dir=""
   for kv in $(cut -f3 <<<"$line"); do
     key=${kv%%=*} value=${kv#*=}
     [[ $kv == *=* ]] || die "$NAME: '$kv' is not key=value"
     value=${value/#\~/$HOME}
     case "$key" in
-    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca)
+    server | login | kubeconfig | talosconfig | nodes | ssh | namespace | console | argocd | insecure | ca | env | dir)
       printf -v "opt_$key" '%s' "$value" ;;
     *) die "$NAME: unknown setting '$key'" ;;
     esac
@@ -456,8 +459,8 @@ status_json() {
     fi
   fi
   jq -cn --arg name "$NAME" --arg kind "$KIND" --arg reach "$state" --arg version "$version" \
-    --argjson count "$nodes" --argjson updating "$updating" '
-    {name: $name, kind: $kind, version: $version, updating: $updating,
+    --argjson count "$nodes" --argjson updating "$updating" --arg env "$opt_env" '
+    {name: $name, kind: $kind, env: $env, version: $version, updating: $updating,
      nodes: $count.nodes, ready: $count.ready}
     | .state = (if $reach == "signed-out" then "signed-out"
                 elif $reach == "unreachable" then "unreachable"
@@ -489,7 +492,7 @@ cmd_status() {
     cat "$work"/*.json | jq -cs 'sort_by(.name)'
   else
     cat "$work"/*.json | jq -rs 'sort_by(.name)[] |
-      [.name, .kind, .state, (if .nodes > 0 then "\(.ready)/\(.nodes) nodes" else "" end), .version] | @tsv' |
+      [.name, .env, .kind, .state, (if .nodes > 0 then "\(.ready)/\(.nodes) nodes" else "" end), .version] | @tsv' |
       table
   fi
   rm -rf "$work"
@@ -498,7 +501,8 @@ cmd_status() {
 cmd_list() {
   entries | while IFS=$'\t' read -r name kind rest; do
     where=$(grep -oE '(server|ssh|talosconfig|kubeconfig)=[^ ]+' <<<"$rest" | head -1)
-    printf '%s\t%s\t%s\n' "$name" "$kind" "${where#*=}"
+    env=$(grep -oE '(^| )env=[^ ]+' <<<"$rest" | head -1)
+    printf '%s\t%s\t%s\t%s\n' "$name" "${env#*=}" "$kind" "${where#*=}"
   done | table
 }
 
@@ -584,7 +588,7 @@ session)
   ensure
   self=$(readlink -f "$0")
   if ! tmux has-session -t "=$NAME" 2>/dev/null; then
-    dir="$AGENT_HOME/$NAME"
+    dir=${opt_dir:-$AGENT_HOME/$NAME}
     mkdir -p "$dir"
     agent_fence "$dir" || die "could not write the agent's settings in $dir"
     shell=$(tmux new-session -d -s "$NAME" -n shell -c "$dir" -P -F '#{pane_id}' \

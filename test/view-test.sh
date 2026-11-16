@@ -27,6 +27,7 @@ cat >"$sandbox/config/desktop/views.conf" <<'EOF2'
 
 reviews   desktop-view watch 300 desktop-reviews --list
   update	desktop-update --yes
+notes     dir=~/Data/notes  desktop-view watch 60 ls
 EOF2
 
 view() {
@@ -36,7 +37,7 @@ view() {
 }
 
 check "the views are listed by name, comments and blank lines left out" \
-  test "$(view names | tr '\n' ,)" = "reviews,update,"
+  test "$(view names | tr '\n' ,)" = "reviews,update,notes,"
 check "the repository's own list is there, for before there is one" \
   test -s "$ROOT/config/desktop/views.conf"
 check "  and each of its commands is one that exists" \
@@ -52,6 +53,14 @@ check "with an agent column on the right, the column alone" \
   grep -qx "desktop-agent-layout --column =update:update claude" "$sandbox/did"
 check "and marked as a view, so a restore leaves it to desktop-view" \
   grep -qx "set-option -t =update: @view update" "$sandbox/did"
+: >"$sandbox/did"
+view start reviews >/dev/null
+: >"$sandbox/did"
+view start notes >/dev/null
+check "a view with dir= works there instead, ~ for home" \
+  grep -qE "^new-session -d -s notes -n notes -c /home/u/Data/notes .*desktop-view run notes$" "$sandbox/did"
+check "  and runs its command without it" \
+  test "$(env -i PATH=/usr/bin:/bin XDG_CONFIG_HOME="$sandbox/config" bash -c "source <(sed -n '/^views()/,/^}/p;/^command_of()/,/^}/p' '$ROOT/bin/desktop-view'); CONFIG='$sandbox/config/desktop/views.conf'; command_of notes")" = "desktop-view watch 60 ls"
 : >"$sandbox/did"
 view start reviews >/dev/null
 check "one already open is left as it is" lacks new-session "$sandbox/did"

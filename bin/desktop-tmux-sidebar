@@ -567,6 +567,11 @@ CLUSTER_LOOK = {"healthy": ("●", "green"), "degraded": ("●", "red"), "updati
 CLUSTER_WORDS = {"signed-out": "signed out", "unreachable": "unreachable",
                  "misconfigured": "check ocl edit", "unknown": "…"}
 CLUSTER_SECONDS = 60
+# Which environment a cluster is, from env= in clusters.conf: production stands out, the
+# rest less and less. Any other word is drawn dim.
+ENV_COLOURS = {"prod": "red", "production": "red", "acpt": "peach", "acc": "peach",
+               "acceptance": "peach", "test": "yellow", "tst": "yellow", "devl": "green",
+               "dev": "green", "development": "green"}
 CLUSTER_CACHE = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "desktop", "clusters.json")
 CLUSTER_NAMES = {"at": 0.0, "names": []}
 
@@ -749,6 +754,7 @@ def cluster_row(cluster, here_session, section):
     nodes, ready = cluster.get("nodes") or 0, cluster.get("ready") or 0
     right = f"{ready}/{nodes}" if nodes and state in ("healthy", "degraded", "updating") else CLUSTER_WORDS.get(state, "")
     return {"kind": "cluster", "section": section, "session": cluster["name"], "text": cluster["name"],
+            "env": cluster.get("env") or "",
             "state": "", "cluster": state, "right": right, "for": "", "pane": "",
             "current": cluster["name"] == here_session}
 
@@ -790,6 +796,10 @@ def pieces(row, width):
         room = width - NAME - (len(right) + 2 if right else 1)
         name = row["text"] if len(row["text"]) <= room else row["text"][:max(0, room - 1)] + "…"
         out = [(DOT, dot, colour), (NAME, name, "text")]
+        # After the name, its environment, where the row has room for it.
+        env = row.get("env", "")
+        if env and NAME + len(name) + 1 + len(env) < width - 1 - (len(right) + 1 if right else 0):
+            out.append((NAME + len(name) + 1, env, ENV_COLOURS.get(env.lower(), "dim")))
         if right:
             out.append((width - 1 - len(right), right, colour if row["cluster"] != "healthy" else "dim"))
         return out

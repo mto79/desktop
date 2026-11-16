@@ -113,7 +113,8 @@ session named after a cluster is listed under CLUSTERS, not REPOS.
 VIEWS are sessions that show something rather than hold a repository's work: the merge and
 pull requests waiting for you (`desktop-reviews --list`, again every five minutes), a
 `desktop-update`, btop, the journal's warnings. They are listed in
-`~/.config/desktop/views.conf`, a name and a command a line, and `desktop-view` opens one
+`~/.config/desktop/views.conf`, a name and a command a line (with `dir=PATH` after the name
+for the folder its session and agent work in, rather than `~/views/<name>`), and `desktop-view` opens one
 from a prompt too (fzf, without a name). `⏎` on a view goes to its session, named after it,
 or makes it first; an open one has a green dot. A command that ends keeps its output up
 until Enter, so a finished update can still be read. `desktop-view watch <seconds>

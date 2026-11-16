@@ -123,8 +123,8 @@ printf 'context=lab\ncluster=default\nserver=https://lab.example:6443\ntoken=goo
 cat >"$sandbox/config/desktop/clusters.conf" <<CONF
 # name    kind        how to reach it
 ocp202    openshift   server=https://api.ocp202.example:6443   # the old one
-ocp203    openshift   server=https://api.ocp203.example:6443 login=token
-lab       rke2        ssh=admin@lab-cp1.example namespace=apps
+ocp203    openshift   server=https://api.ocp203.example:6443 login=token env=prod
+lab       rke2        ssh=admin@lab-cp1.example namespace=apps env=devl dir=~/work/lab
 edge      talos       talosconfig=$sandbox/talosconfig nodes=192.0.2.11
 kind      kubernetes  kubeconfig=$sandbox/lab.yaml insecure=true
 broken    rke2
@@ -144,7 +144,9 @@ store="$sandbox/state/desktop/clusters"
 check "the names are the file's, comments and all left out" \
   test "$(run names | paste -sd' ')" = "ocp202 ocp203 lab edge kind broken"
 check "list says each one's kind and where it is" \
-  bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run list | grep -qE '^lab +rke2 +admin@lab-cp1.example'"
+  bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run list | grep -qE '^lab +devl +rke2 +admin@lab-cp1.example'"
+check "  and its environment, blank where env= says none" \
+  bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run list | grep -qE '^ocp202 +openshift +https'"
 check "a cluster that is not in the file is said to be missing" \
   bash -c "$(declare -f run); stubs='$stubs' sandbox='$sandbox' CLUSTER='$CLUSTER'; run nope 2>&1 | grep -q 'no cluster called nope'"
 check "and one missing how to reach it says what it needs" \
@@ -216,6 +218,8 @@ check "a node not ready is degraded" test "$(state ocp202)" = degraded
 check "OpenShift says its version from the cluster version" \
   test "$(jq -r '.[] | select(.name == "ocp202") | .version' <<<"$answer")" = 4.22.16
 check "never signed in to is signed out" test "$(state ocp203)" = signed-out
+check "status says each one's environment, as env= gives it" \
+  test "$(jq -r '[.[] | select(.name == "ocp203" or .name == "ocp202") | "\(.name)=\(.env)"] | join(" ")' <<<"$answer")" = "ocp202= ocp203=prod"
 
 # A cluster the size of a real one: its nodes, as JSON, are past what one argument may hold,
 # and handed to jq whole that made it "misconfigured" the moment it was signed in to.
@@ -327,6 +331,13 @@ check "and gone to" grep -q '^tmux switch-client -t =ocp202$' "$sandbox/tmux-cal
 touch "$sandbox/has-session"
 TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
 check "a second time it is only gone to" test "$(grep -c 'new-' "$sandbox/tmux-calls")-$(grep -c switch-client "$sandbox/tmux-calls")" = "0-1"
+rm -f "$sandbox/has-session"
+: >"$sandbox/tmux-calls"
+HOME="$sandbox/home-dir" TMUX=/tmp/fake,1,0 run session lab >/dev/null 2>&1
+check "a cluster with dir= has its session and agent there, ~ for home" \
+  test "$(grep -c -- "-c $sandbox/home-dir/work/lab " "$sandbox/tmux-calls")" = 3
+check "  the folder made, and fenced like any other" test -s "$sandbox/home-dir/work/lab/.claude/settings.json"
+touch "$sandbox/has-session"
 check "prefix + K opens it" grep -q "^bind-key K run-shell \"tmux neww -n cluster 'desktop-cluster session'\"" "$ROOT/config/tmux/tmux.conf"
 # The stub stays, with no session to be found: anything later that asks tmux must never
 # reach a real one. A sign-out further down once closed the real ocp202 of whoever ran this.
