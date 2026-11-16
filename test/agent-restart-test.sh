@@ -4,7 +4,9 @@
 # conversation. What is checked: that it does, that it leaves a session it was given
 # alone, that it stops when the crash is a loop, and that nothing else is restarted.
 #
-# The agents are stubs that kill themselves with SIGILL. Nothing here starts a real one.
+# The agents are stubs that exit 132, which is all a shell sees of a death by SIGILL. They
+# do not raise the signal: each one would leave a core dump and an abrt report behind.
+# Nothing here starts a real one.
 source "$(dirname "$0")/lib.sh"
 
 AGENT="$ROOT/bin/desktop-agent"
@@ -13,7 +15,7 @@ trap 'rm -rf "$sandbox"' EXIT
 stubs="$sandbox/bin"
 mkdir -p "$stubs" "$sandbox/work"
 
-# <name>: dies of SIGILL while $sandbox/crashes says so, one fewer each time, and writes
+# <name>: "dies of SIGILL" while $sandbox/crashes says so, one fewer each time, and writes
 # down what it was started with.
 for name in opencode claude; do
   cat >"$stubs/$name" <<STUB
@@ -22,7 +24,7 @@ echo "\$*" >>"$sandbox/runs"
 left=\$(cat "$sandbox/crashes" 2>/dev/null || echo 0)
 if ((left > 0)); then
   echo \$((left - 1)) >"$sandbox/crashes"
-  kill -ILL \$\$
+  exit 132
 fi
 STUB
 done
