@@ -151,6 +151,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A new terminal no longer empties `~/.kube/config` or exports an empty `KUBECONFIG`: a
+  leftover from before `ocl` gave each cluster a kubeconfig of its own did both every time
+  fish started.
 - A cluster with many nodes is shown healthy once signed in to, in `ocl status` and on the
   dashboard, instead of "misconfigured": its node list was too long to hand over whole.
 - `prefix + ?` lists every key tmux.conf adds: fourteen were missing, among them the splits,

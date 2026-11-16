@@ -288,4 +288,16 @@ echo "# mine" >>"$mconf"
 migrate
 check "run again, a clusters.conf that is there is left alone" grep -qx '# mine' "$mconf"
 
+# --- the old kubectx snippet goes
+SNIPPET_MIGRATION="$ROOT/migrations/1794831715.sh"
+khome="$sandbox/khome"
+mkdir -p "$khome/.config/fish/conf.d"
+printf '# Auto-merge all kubeconfigs in ~/.kube/clusters\nset -x KUBECONFIG\n' >"$khome/.config/fish/conf.d/kubectx.fish"
+HOME="$khome" XDG_CONFIG_HOME="$khome/.config" bash "$SNIPPET_MIGRATION" >/dev/null
+check "the old kubectx snippet is removed" test ! -e "$khome/.config/fish/conf.d/kubectx.fish"
+echo "set -x KUBECONFIG ~/mine" >"$khome/.config/fish/conf.d/kubectx.fish"
+HOME="$khome" XDG_CONFIG_HOME="$khome/.config" bash "$SNIPPET_MIGRATION" >/dev/null
+check "one of your own by that name is left alone" grep -q mine "$khome/.config/fish/conf.d/kubectx.fish"
+check "and fish does not set KUBECONFIG for every shell" bash -c "! grep -rq KUBECONFIG '$ROOT/config/fish/conf.d'"
+
 finish
