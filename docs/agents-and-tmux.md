@@ -48,6 +48,10 @@ the column away from every window, and puts it back. It is on or off for the who
 a pane lives in one window, so a single column would vanish the moment you used it to go
 somewhere else.
 
+A window whose work has ended still closes: when a pane exits or is killed and only the
+column is left, `desktop-tmux-sidebar --sweep` (on `pane-exited` and `after-kill-pane`)
+closes the window, as tmux would have without the column.
+
    ! NEEDS YOU ───────────────       what wants you, from everywhere:
      ● na_vm claude 2       4m       an agent blocked, stuck or finished unseen,
      ● ocp203       signed out       a cluster degraded, or signed out with its session open

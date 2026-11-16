@@ -427,8 +427,10 @@ touch "$sandbox/on"
 : >"$sandbox/did"
 drive on >/dev/null
 check "--on, as a tmux.conf reload runs it, leaves open columns open" \
-  lacks 'kill-pane' "$sandbox/did"
+  lacks 'kill-pane -t' "$sandbox/did"
 check "and still hooks new windows" grep -q 'set-hook -g after-new-window\[50\] ' "$sandbox/did"
+check "and closes a window whose pane exits, or is killed, leaving only its column" \
+  bash -c "grep -q 'set-hook -g pane-exited\[50\] .*--sweep' '$sandbox/did' && grep -q 'set-hook -g after-kill-pane\[50\] .*--sweep' '$sandbox/did'"
 check "and a window that missed its column gets one when it is looked at" \
   grep -q "set-hook -g session-window-changed\[50\] if -F '#{@sidebar_held}' '' " "$sandbox/did"
 check "on every way of coming to look at one" \
@@ -453,9 +455,10 @@ rm "$sandbox/twice"
 : >"$sandbox/did"
 drive toggle >/dev/null
 check "turning it off closes every column" \
-  test "$(grep -c 'kill-pane' "$sandbox/did")" = 2
+  test "$(grep -c '^kill-pane -t' "$sandbox/did")" = 2
 check "and removes only its own hook" grep -q 'set-hook -gu after-new-window\[50\]' "$sandbox/did"
 check "the looking-at ones as well" grep -q 'set-hook -gu session-window-changed\[50\]' "$sandbox/did"
+check "and the one that closes a window left with only its column" grep -q 'set-hook -gu pane-exited\[50\]' "$sandbox/did"
 check "and forgets which windows had one" grep -q 'set-option -wqu -t .* @sidebar_held' "$sandbox/did"
 
 # A column off screen stays quiet until tmux says what is on screen changed: tmux.conf
@@ -478,6 +481,25 @@ if [[ -n $real ]]; then
   rm -f "/tmp/tmux-$(id -u)/$socket"
   check "tmux reads tmux.conf without an error" test -z "$errors"
   [[ -n $errors ]] && echo "      $(head -3 <<<"$errors")"
+fi
+
+# A window whose work has ended goes, column and all; one with work left stays. A real
+# tmux of its own, reached through TMUX_TMPDIR, since the script runs plain `tmux`.
+if [[ -n $real ]]; then
+  tdir=$(mktemp -d)
+  rt() { env -u TMUX TMUX_TMPDIR="$tdir" "$real" "$@"; }
+  rt -f /dev/null new-session -d -s s -n done "sleep 60"
+  rt split-window -t s:done -d "sleep 60"
+  rt set-option -p -t s:done.1 @sidebar 1
+  rt new-window -d -t s: -n busy "sleep 60"
+  rt split-window -t s:busy -d "sleep 60"
+  rt set-option -p -t s:busy.1 @sidebar 1
+  rt kill-pane -t s:done.0
+  env -u TMUX TMUX_TMPDIR="$tdir" PATH="$(dirname "$real"):/usr/bin:/bin" python3 "$ROOT/bin/desktop-tmux-sidebar" --sweep
+  windows=$(rt list-windows -t s -F '#{window_name}' | tr '\n' ' ')
+  rt kill-server 2>/dev/null
+  rm -rf "$tdir"
+  check "a window left with only its sidebar is closed" test "$windows" = "busy "
 fi
 
 finish

@@ -157,6 +157,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A tmux window closes when its shell exits or its k9s quits, as it did before the sidebar,
+  instead of staying open with only the sidebar in it.
 - A browser sign-in to a cluster that is closed before signing in, or left for five minutes,
   is given up instead of waiting for ever. Choosing the cluster again in the tmux sidebar
   no longer leaves one more `cluster` window behind each time; Ctrl-C stops it as well.

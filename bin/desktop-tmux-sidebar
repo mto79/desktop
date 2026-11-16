@@ -85,6 +85,10 @@ HOOKS = ("after-new-window[50]", "after-new-session[50]")
 # python start.
 VIEW_HOOKS = ("client-session-changed[50]", "session-window-changed[50]", "client-attached[50]")
 HELD = "@sidebar_held"
+# And a window whose work has ended goes. Without the column, a window closes when its last
+# pane does; with it, the column was still there, so a shell exited or a k9s quit left a
+# window holding a sidebar and nothing else -- six of them at once, from sign-ins given up.
+EXIT_HOOKS = ("pane-exited[50]", "after-kill-pane[50]")
 
 # Drawn as herdr draws its sidebar: a coloured dot per state, and the state said in a word
 # on the line under the name. herdr's words, where it has one -- "blocked" is waiting on you,
@@ -1187,12 +1191,29 @@ def attach_locked(window):
         tmux("set-option", "-wq", "-t", window, HELD, "1")
 
 
+def sweep():
+    """Close every window that holds nothing but sidebar columns.
+
+    Across the server rather than the hook's own window: a pane that exits is already gone
+    when its hook runs, and so, with it, is the plain way of saying which window it was in.
+    One tmux call when there is nothing to close, which is nearly always.
+    """
+    listing = tmux("list-panes", "-a", "-F", "#{window_id}\t#{@sidebar}")
+    windows = {}
+    for line in listing.splitlines():
+        window, _, mark = line.partition("\t")
+        windows.setdefault(window, []).append(mark == "1")
+    for window, marks in windows.items():
+        if marks and all(marks):
+            tmux("kill-window", "-t", window)
+
+
 def toggle():
     """Off if any window has one, on everywhere if none does."""
     if panes():
         for pane in panes():
             tmux("kill-pane", "-t", pane)
-        for event in HOOKS + VIEW_HOOKS:
+        for event in HOOKS + VIEW_HOOKS + EXIT_HOOKS:
             tmux("set-hook", "-gu", event)
         for window in tmux("list-windows", "-a", "-F", "#{window_id}").splitlines():
             tmux("set-option", "-wqu", "-t", window, HELD)
@@ -1220,6 +1241,8 @@ def on():
                  f"\"run-shell -b '{sys.argv[0]} --attach #{{window_id}}'\"")
     for event in VIEW_HOOKS:
         tmux("set-hook", "-g", event, looked_at)
+    for event in EXIT_HOOKS:
+        tmux("set-hook", "-g", event, f"run-shell -b '{sys.argv[0]} --sweep'")
     # Only the windows on screen now; every other one gets its column the first time it is
     # looked at, through the hooks above. A column is a python process of ten megabytes,
     # and one in each of forty-six windows was 435 MB for columns mostly never seen.
@@ -1234,6 +1257,8 @@ if __name__ == "__main__":
         toggle()
     elif argument == "--on":
         on()
+    elif argument == "--sweep":
+        sweep()
     elif argument == "--attach":
         attach(sys.argv[2] if len(sys.argv) > 2 else "")
     else:
