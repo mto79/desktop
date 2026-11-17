@@ -173,7 +173,15 @@ check_secure_boot() {
   tainted=$(cat /proc/sys/kernel/tainted 2>/dev/null || echo 0)
   # /sys/module rather than lsmod | grep -q: under pipefail, grep leaving early makes
   # lsmod's broken pipe fail the test, and the explanation never showed.
-  [[ -d /sys/module/nvidia ]] && nvidia=" The NVIDIA driver is loaded as an unsigned module, which Secure Boot would refuse unless it is signed with an enrolled key -- the usual reason it is off."
+  # Signed or not: DKMS signs it with a key of its own, which is not the same as one
+  # Secure Boot trusts.
+  if [[ -d /sys/module/nvidia ]]; then
+    if [[ -n $(modinfo -F signer nvidia 2>/dev/null) ]]; then
+      nvidia=" The NVIDIA driver is signed with a key of its own, which Secure Boot refuses until that key is enrolled -- the usual reason it is off."
+    else
+      nvidia=" The NVIDIA driver is loaded as an unsigned module, which Secure Boot would refuse unless it is signed with an enrolled key -- the usual reason it is off."
+    fi
+  fi
   add secure-boot warn "Secure Boot is off" \
     "Anything that gets root can replace the kernel or bootloader, and it would still boot.$nvidia" \
     "$(secure_boot_fix)"
