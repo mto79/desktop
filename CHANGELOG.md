@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Brave, Chromium and Firefox are in the desktop's theme -- the tab strip the bar's colour,
+  the toolbar the theme's background -- and switch with it, each at its next start. Firefox
+  has the desktop font for its tabs and menus too.
 - A cluster's web GUIs -- console, Argo CD, Grafana and the rest -- open as tabs in one
   browser window on workspace 1 when you sign in to it, without taking you there, and
   close when you sign out. A home window with your own links opens at login. The links

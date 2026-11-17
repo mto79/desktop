@@ -46,7 +46,7 @@ https://argocd.ocp203.example/    Argo CD
 CONF
 
 guis() {
-  env -i PATH="$stubs:/usr/bin:/bin" HOME="$sandbox/home" XDG_CONFIG_HOME="$sandbox/config" \
+  env -i PATH="$stubs:$ROOT/bin:/usr/bin:/bin" HOME="$sandbox/home" XDG_CONFIG_HOME="$sandbox/config" \
     XDG_STATE_HOME="$sandbox/state" XDG_DATA_HOME="$sandbox/data" XDG_RUNTIME_DIR="$sandbox/run" \
     DESKTOP_THEME_DIR="$sandbox/theme" bash "$ROOT/bin/desktop-guis" "$@" 2>&1
 }

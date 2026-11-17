@@ -81,29 +81,11 @@ running() { pgrep -f -- "--user-data-dir=$PROFILE( |$)" >/dev/null 2>&1; }
 dress() {
   local font
   mkdir -p "$PROFILE/Default" "$STATE/theme" "$STATE/env/glib-2.0/settings"
-  python3 - "$THEME_DIR/shell.json" "$STATE/theme/manifest.json" "$PROFILE/Default/Preferences" <<'EOF'
+  # The theme is the one every Chromium browser here wears (desktop-browser-theme).
+  DESKTOP_THEME_DIR="$THEME_DIR" desktop-browser-theme chromium "$STATE/theme"
+  python3 - "$PROFILE/Default/Preferences" <<'EOF'
 import json, os, sys
-shell, manifest, prefs = sys.argv[1:]
-try:
-    t = json.load(open(shell))
-except (OSError, ValueError):
-    t = {}
-bar = t.get("bar", {})
-background = t.get("background", "#1a1b26")
-def rgb(h):
-    h = h.lstrip("#")
-    return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
-colours = {
-    "frame": bar.get("background", background), "frame_inactive": bar.get("background", background),
-    "toolbar": background, "tab_text": t.get("foreground", "#c0caf5"),
-    "tab_background_text": t.get("muted", "#565f89"), "tab_background_text_inactive": t.get("muted", "#565f89"),
-    "bookmark_text": t.get("foreground", "#c0caf5"), "toolbar_text": t.get("foreground", "#c0caf5"),
-    "toolbar_button_icon": t.get("foreground", "#c0caf5"), "omnibox_background": bar.get("raised", background),
-    "omnibox_text": t.get("foreground", "#c0caf5"), "ntp_background": background,
-    "ntp_text": t.get("foreground", "#c0caf5"), "ntp_link": t.get("accent", "#7aa2f7"),
-}
-json.dump({"manifest_version": 3, "name": "Desktop theme", "version": "1",
-           "theme": {"colors": {k: rgb(v) for k, v in colours.items()}}}, open(manifest, "w"), indent=1)
+prefs = sys.argv[1]
 try:
     p = json.load(open(prefs))
 except (OSError, ValueError):

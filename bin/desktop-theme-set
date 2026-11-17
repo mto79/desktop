@@ -41,6 +41,9 @@ fi
 
 # Restart components to apply new theme
 pkill -SIGUSR2 btop
+# The browsers, each the next time it starts: Brave and Chromium through the theme their
+# launchers load, Firefox through userChrome.css.
+desktop-browser-theme
 # Every running server re-reads the config, which re-sources the theme's tmux.conf.
 tmux list-sessions &>/dev/null && tmux source-file ~/.config/tmux/tmux.conf
 # The shell re-reads the theme in place; restarting it is only the fallback for a

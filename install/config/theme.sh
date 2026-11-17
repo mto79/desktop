@@ -25,6 +25,10 @@ ln -snf ~/.config/desktop/current/theme/neovim.lua ~/.config/nvim/lua/plugins/th
 mkdir -p ~/.config/btop/themes
 ln -snf ~/.config/desktop/current/theme/btop.theme ~/.config/btop/themes/current.theme
 
+# Every browser in the theme: Brave and Chromium through a theme their launchers load,
+# Firefox through userChrome.css (desktop-browser-theme).
+~/.local/share/desktop/bin/desktop-browser-theme
+
 mkdir -p ~/.config/mako
 ln -snf ~/.config/desktop/current/theme/mako.ini ~/.config/mako/config
 

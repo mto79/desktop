@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+# desktop-browser-theme: every browser on the system in the desktop's theme.
+#
+#   desktop-browser-theme                 all of them, from the current theme
+#   desktop-browser-theme chromium <dir>  only the Chromium theme, written into <dir>
+#
+# Run by desktop-theme-set, so a theme switch reaches the browsers too: each shows it the
+# next time it starts. Colours come from the theme's shell.json, the one file every theme
+# has that says the bar's colours as well as the text's.
+#
+#   Brave, Chromium  A theme -- a Chromium "extension" that is only colours -- generated
+#                    into ~/.local/state/desktop/browser-theme, and loaded by the browser's
+#                    own launcher entry, a copy in ~/.local/share/applications with
+#                    --load-extension added. Brave ignores Chromium's own colour setting,
+#                    so a theme is the one way in. Opened some other way -- the command typed
+#                    at a prompt -- the browser has its own look until the next start
+#                    through the launcher, the menu or a link.
+#   Firefox          userChrome.css in each profile, through a file of its own that
+#                    userChrome.css imports, so one of your own is kept; and the desktop's
+#                    font for its tabs and menus.
+
+set -uo pipefail
+
+THEME_DIR="${DESKTOP_THEME_DIR:-$HOME/.config/desktop/current/theme}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/browser-theme"
+APPS="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+SYSTEM_APPS="${DESKTOP_SYSTEM_APPS:-/usr/share/applications}"
+FIREFOX="${DESKTOP_FIREFOX_DIR:-$HOME/.mozilla/firefox}"
+MARK="desktop-browser-theme"
+
+# The theme's colours, as shell variables: background, foreground, muted, accent, and the
+# bar's background and raised.
+colours() {
+  python3 - "$THEME_DIR/shell.json" <<'EOF'
+import json, sys
+try:
+    t = json.load(open(sys.argv[1]))
+except (OSError, ValueError):
+    t = {}
+bar = t.get("bar", {})
+bg = t.get("background", "#1a1b26")
+for key, value in (("bg", bg), ("fg", t.get("foreground", "#c0caf5")), ("muted", t.get("muted", "#565f89")),
+                   ("accent", t.get("accent", "#7aa2f7")), ("bar", bar.get("background", bg)),
+                   ("raised", bar.get("raised", bg))):
+    print(f"{key}={value}")
+EOF
+}
+
+chromium() { # dir
+  local dir=$1
+  mkdir -p "$dir"
+  python3 - "$THEME_DIR/shell.json" "$dir/manifest.json" <<'EOF'
+import json, sys
+shell, manifest = sys.argv[1:]
+try:
+    t = json.load(open(shell))
+except (OSError, ValueError):
+    t = {}
+bar = t.get("bar", {})
+bg = t.get("background", "#1a1b26")
+fg, muted = t.get("foreground", "#c0caf5"), t.get("muted", "#565f89")
+def rgb(h):
+    h = h.lstrip("#")
+    return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+colours = {
+    "frame": bar.get("background", bg), "frame_inactive": bar.get("background", bg),
+    "toolbar": bg, "tab_text": fg, "tab_background_text": muted, "tab_background_text_inactive": muted,
+    "bookmark_text": fg, "toolbar_text": fg, "toolbar_button_icon": fg,
+    "omnibox_background": bar.get("raised", bg), "omnibox_text": fg,
+    "ntp_background": bg, "ntp_text": fg, "ntp_link": t.get("accent", "#7aa2f7"),
+}
+json.dump({"manifest_version": 3, "name": "Desktop theme", "version": "1",
+           "theme": {"colors": {k: rgb(v) for k, v in colours.items()}}}, open(manifest, "w"), indent=1)
+EOF
+}
+
+# A Chromium browser's launcher entry, copied and given the theme. Every Exec= line: the
+# window, the new window and the private one. Written again each time, from the system's
+# own, so an update of the browser's entry is followed.
+launcher() { # desktop file name
+  local name=$1 source="$SYSTEM_APPS/$1" flags
+  [[ -f $source ]] || return 0
+  flags="--disable-features=DisableLoadExtensionCommandLineSwitch --load-extension=$STATE/chromium"
+  mkdir -p "$APPS"
+  # Never over an entry of your own: only one this wrote, or none.
+  if [[ -f $APPS/$name ]] && ! grep -q "^X-Desktop-Generated=$MARK" "$APPS/$name"; then
+    echo "desktop-browser-theme: $APPS/$name is your own, left as it is" >&2
+    return 0
+  fi
+  awk -v flags="$flags" -v mark="$MARK" '
+    /^Exec=/ { n = split(substr($0, 6), part, " "); line = "Exec=" part[1] " " flags
+               for (i = 2; i <= n; i++) line = line " " part[i]; print line; next }
+    { print }
+    /^\[Desktop Entry\]$/ && !done { print "X-Desktop-Generated=" mark; done = 1 }' "$source" >"$APPS/$name.$$" &&
+    mv -f "$APPS/$name.$$" "$APPS/$name"
+}
+
+firefox() {
+  local profile dir css font font_rule bg fg muted accent bar raised
+  [[ -f $FIREFOX/profiles.ini ]] || return 0
+  eval "$(colours)"
+  font=$(desktop-font-current 2>/dev/null)
+  font_rule=""
+  [[ -n $font ]] && font_rule=":root, menupopup, panel, #urlbar, .tabbrowser-tab { font-family: \"$font\" !important; }"
+  while read -r profile; do
+    [[ -n $profile ]] || continue
+    [[ $profile == /* ]] && dir=$profile || dir="$FIREFOX/$profile"
+    [[ -d $dir ]] || continue
+    mkdir -p "$dir/chrome"
+    css="$dir/chrome/desktop-theme.css"
+    cat >"$css" <<EOF
+/* Written by desktop-browser-theme from the desktop's theme; written again on a switch. */
+:root {
+  --toolbox-bgcolor: $bar !important;
+  --toolbox-bgcolor-inactive: $bar !important;
+  --toolbox-textcolor: $muted !important;
+  --toolbox-textcolor-inactive: $muted !important;
+  --toolbar-bgcolor: $bg !important;
+  --toolbar-color: $fg !important;
+  --tab-selected-bgcolor: $bg !important;
+  --tab-selected-textcolor: $fg !important;
+  --toolbar-field-background-color: $raised !important;
+  --toolbar-field-color: $fg !important;
+  --toolbar-field-focus-background-color: $raised !important;
+  --toolbar-field-focus-color: $fg !important;
+  --arrowpanel-background: $bg !important;
+  --arrowpanel-color: $fg !important;
+  --focus-outline-color: $accent !important;
+}
+#navigator-toolbox, #TabsToolbar, #titlebar { background-color: $bar !important; }
+/* Firefox 160 paints these past the variables above. */
+#nav-bar, #PersonalToolbar { background: $bg !important; color: $fg !important; }
+.tab-background:is([selected], [multiselected]) { background: $bg !important; }
+.tabbrowser-tab { color: $muted !important; }
+.tabbrowser-tab[selected] { color: $fg !important; }
+#urlbar-background, #searchbar { background: $raised !important; }
+#urlbar, #urlbar-input { color: $fg !important; }
+$font_rule
+EOF
+    # Imported by userChrome.css, at its top where an @import has to be; one of your own
+    # keeps everything else it says.
+    if ! grep -qF '@import "desktop-theme.css";' "$dir/chrome/userChrome.css" 2>/dev/null; then
+      { echo '@import "desktop-theme.css";'; cat "$dir/chrome/userChrome.css" 2>/dev/null || true; } >"$dir/chrome/userChrome.css.$$" &&
+        mv -f "$dir/chrome/userChrome.css.$$" "$dir/chrome/userChrome.css"
+    fi
+    # Firefox reads userChrome.css only when told to.
+    grep -qF 'toolkit.legacyUserProfileCustomizations.stylesheets' "$dir/user.js" 2>/dev/null ||
+      echo 'user_pref("toolkit.legacyUserProfileCustomizations.stylesheets", true);' >>"$dir/user.js"
+  done < <(sed -n 's/^Path=//p' "$FIREFOX/profiles.ini" | sort -u)
+}
+
+case "${1:-}" in
+chromium) chromium "${2:?usage: desktop-browser-theme chromium <dir>}" ;;
+"")
+  chromium "$STATE/chromium"
+  launcher brave-browser.desktop
+  launcher chromium-browser.desktop
+  firefox
+  ;;
+-h | --help) sed -n '3,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+*)
+  echo "desktop-browser-theme: unknown command '$1'" >&2
+  exit 1
+  ;;
+esac

@@ -66,6 +66,24 @@ includes its file through that path, so nothing has to be rewritten to switch.
 A program with no include mechanism gets a wrapper: `desktop-gdu` builds gdu's config from
 the theme each time it runs.
 
+The browsers are themed from `shell.json` by `desktop-browser-theme`, which
+`desktop-theme-set` runs; each shows the change the next time it starts:
+
+- Brave and Chromium load a generated theme (`~/.local/state/desktop/browser-theme/chromium`)
+  through their own launcher entries, copies in `~/.local/share/applications` with
+  `--load-extension` added. Brave ignores Chromium's colour setting, so a theme is the one
+  way in; and recent Chromium needs `--disable-features=DisableLoadExtensionCommandLineSwitch`
+  to take `--load-extension` at all. A launcher entry of your own by that name is left
+  alone. Started by typing the command at a prompt, the browser goes without the theme
+  until it is next started through the launcher, the menu or a link.
+- Firefox gets a `desktop-theme.css` in each profile's `chrome/`, imported at the top of
+  `userChrome.css` (one of your own is kept beneath it), with the desktop font for its tabs
+  and menus, and `toolkit.legacyUserProfileCustomizations.stylesheets` set in `user.js` so
+  that it reads it.
+- The web GUIs' browser (`desktop-guis`, see [guis.md](guis.md)) wears the same theme.
+
+`chromium.theme` is a leftover from Omarchy, read by nothing here.
+
 k9s reads its skin through `~/.config/k9s/skins/desktop.yaml`, a link to the theme's
 `k9s.yaml`, named as `ui.skin` in k9s's own config. A running k9s keeps the skin it started
 with; the next one has the new theme. The skins are in the colours of the theme's
