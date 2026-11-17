@@ -23,6 +23,12 @@ name of your own (the tab shows the page's title):
     https://console-openshift-console.apps.ocp203.example/   OpenShift
     https://argocd.ocp203.example/                           System Argo CD
 
+Home is always there, the first tab: its window opens at login, and again on arriving at
+workspace 1 if it was closed. Its first tab is a page of its own, every group's links in
+the theme's colours and the desktop font, so it has something on it before `[home]` has a
+link; links of its own follow as further tabs. A comment starts a line or follows a space,
+so a URL's own `#` -- Kasten's `#/` -- is kept.
+
 A group named after a cluster in `clusters.conf` is opened by `ocl` when you sign in to it
 and when its session is opened (`prefix + K`, Enter in the sidebar), and closed by
 `ocl logout`. `[home]` is opened at login. A link commented out with `#` is kept but not
@@ -48,7 +54,8 @@ workspace. So the windows are put together when you arrive on workspace 1, where
 is going anyway: `guis.lua` runs `desktop-guis arrange` on `workspace.active` for workspace
 1, and `open` runs it when workspace 1 is on screen. Until you look, they wait there side by
 side; arranging never pulls you anywhere, and gives the focus back to the window that had
-it. The order is guis.conf's, home first.
+it. The order is guis.conf's, and home is moved to the front however late it joined
+(`hl.dsp.group.move_window`, a place at a time).
 
 `hl.dsp.group.lock` is Hyprland's lock on every group at once (`lockgroups`), not one
 group's: set, nothing can join any group, and every `into_group` answers "ok" and does

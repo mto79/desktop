@@ -57,7 +57,7 @@ links() {
   [[ -r $CONF ]] || return 0
   awk -v want="[$1]" '
     /^[[:space:]]*\[/ { gsub(/[[:space:]]/, ""); on = ($0 == want); next }
-    on { sub(/#.*/, ""); if (NF) print $1 }' "$CONF"
+    on { sub(/(^|[[:space:]])#.*/, ""); if (NF) print $1 }' "$CONF"
 }
 
 groups() {
@@ -123,9 +123,69 @@ EOF
     >"$STATE/env/glib-2.0/settings/keyfile"
 }
 
+# The home tab's own page: every group's links, in the theme's colours and the desktop's
+# font, so home is there with something on it before [home] has a link of its own. Written
+# again each time home opens, from guis.conf as it is then.
+home_page() {
+  local font
+  font=$(desktop-font-current 2>/dev/null)
+  mkdir -p "$STATE"
+  python3 - "$CONF" "$THEME_DIR/shell.json" "${font:-monospace}" "$STATE/home.html" <<'EOF'
+import html, json, re, sys
+conf, shell, font, out = sys.argv[1:]
+try:
+    t = json.load(open(shell))
+except (OSError, ValueError):
+    t = {}
+bar = t.get("bar", {})
+bg, fg = t.get("background", "#1a1b26"), t.get("foreground", "#c0caf5")
+muted, accent = t.get("muted", "#565f89"), t.get("accent", "#7aa2f7")
+raised = bar.get("raised", bg)
+groups, current = [], None
+try:
+    lines = open(conf).read().splitlines()
+except OSError:
+    lines = []
+for line in lines:
+    head = re.match(r"\s*\[([^]]+)\]", line)
+    if head:
+        current = (head.group(1), [])
+        groups.append(current)
+        continue
+    # A comment starts a line or follows a space: a URL's own # -- Kasten's #/ -- is no comment.
+    line = re.sub(r"(^|\s)#.*", "", line).strip()
+    if current and line:
+        url, _, name = line.partition(" ")
+        current[1].append((url, name.strip() or url))
+cards = []
+for name, items in groups:
+    if not items:
+        continue
+    links = "".join(f'<a href="{html.escape(u)}">{html.escape(n)}</a>' for u, n in items)
+    cards.append(f"<section><h2>{html.escape(name)}</h2>{links}</section>")
+body = "".join(cards) or '<p class="empty">No links yet: add them to ~/.config/desktop/guis.conf.</p>'
+style = f"""
+body {{ background: {bg}; color: {fg}; font-family: "{html.escape(font)}", monospace; margin: 2rem; }}
+main {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 1rem; }}
+section {{ background: {raised}; padding: 0.8rem 1rem; }}
+h2 {{ color: {accent}; font-size: 1rem; margin: 0 0 0.5rem; }}
+a {{ display: block; color: {fg}; text-decoration: none; padding: 0.15rem 0; }}
+a:hover {{ color: {accent}; }}
+.empty {{ color: {muted}; }}
+"""
+open(out, "w").write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>home</title>'
+                     f"<style>{style}</style></head><body><main>{body}</main></body></html>\n")
+EOF
+}
+
 cmd_open() {
   local name=$1 urls before after new i
   mapfile -t urls < <(links "$name")
+  # Home is always there, its own page first: a tab even before it has links of its own.
+  if [[ $name == home ]]; then
+    home_page
+    urls=("file://$STATE/home.html" "${urls[@]}")
+  fi
   ((${#urls[@]})) || return 0
   mkdir -p "$RUN"
   exec 9>"$RUN/.lock"
@@ -150,7 +210,8 @@ cmd_open() {
     if [[ -n $new ]]; then
       echo "$new" >"$RUN/$name"
       flock -u 9
-      [[ $(active_workspace) == 1 ]] && cmd_arrange
+      # Unless this is home being opened by an arrange, which goes on to take it in.
+      [[ -z ${ARRANGING:-} && $(active_workspace) == 1 ]] && cmd_arrange
       return 0
     fi
   done
@@ -172,6 +233,9 @@ cmd_arrange() {
   mkdir -p "$RUN"
   exec 8>"$RUN/.arrange"
   flock -n 8 || return 0
+  ARRANGING=1
+  # Workspace 1 starts with home, whatever was closed meanwhile.
+  is_open home || cmd_open home
   while read -r name; do
     [[ -s $RUN/$name ]] || continue
     address=$(cat "$RUN/$name")
@@ -202,9 +266,22 @@ cmd_arrange() {
     done
     $joined || echo "desktop-guis: could not put $address into the group" >&2
   done
+  # Home the first tab, however late it joined: a place back at a time until it is.
+  if is_open home; then
+    address=$(cat "$RUN/home")
+    if [[ $(group_of "$address" | head -1) != "$address" ]]; then
+      hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null
+      for _ in $(seq "$(group_of "$address" | wc -l)"); do
+        [[ $(group_of "$address" | head -1) == "$address" ]] && break
+        hyprctl dispatch 'hl.dsp.group.move_window({ forward = false })' >/dev/null
+      done
+    fi
+  fi
   [[ -n $focus ]] && hyprctl dispatch "hl.dsp.focus({ window = \"address:$focus\" })" >/dev/null
   return 0
 }
+
+is_open() { [[ -s $RUN/$1 ]] && addresses | grep -qxF "$(cat "$RUN/$1")"; }
 
 cmd_close() {
   local name=$1 address

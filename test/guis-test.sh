@@ -44,12 +44,13 @@ https://git.example/      GitLab
 [ocp203]
 https://console.ocp203.example/   OpenShift
 https://argocd.ocp203.example/    Argo CD
+https://k10.ocp203.example/k10/#/ Kasten   # a note
 CONF
 
 guis() {
   env -i PATH="$stubs:$ROOT/bin:/usr/bin:/bin" HOME="$sandbox/home" XDG_CONFIG_HOME="$sandbox/config" \
     XDG_STATE_HOME="$sandbox/state" XDG_DATA_HOME="$sandbox/data" XDG_RUNTIME_DIR="$sandbox/run" \
-    DESKTOP_THEME_DIR="$sandbox/theme" bash "$ROOT/bin/desktop-guis" "$@" 2>&1
+    DESKTOP_THEME_DIR="$sandbox/theme" DESKTOP_GUIS="${DESKTOP_GUIS:-}" bash "$ROOT/bin/desktop-guis" "$@" 2>&1
 }
 
 # --- a group opened
@@ -57,6 +58,8 @@ guis() {
 guis open ocp203 >/dev/null
 check "a group opens as one browser window, its links the tabs, commented ones left out" \
   grep -qE -- '--new-window --window-name=ocp203 https://console.ocp203.example/ https://argocd.ocp203.example/ ' "$sandbox/calls"
+check "  a URL's own # kept, a comment after a space dropped" \
+  grep -qE -- ' https://k10.ocp203.example/k10/#/ CONFIG=' "$sandbox/calls"
 check "  in a profile of its own, with the class the workspace 1 rule matches" \
   grep -qE -- "--user-data-dir=$sandbox/state/desktop/guis/browser --class=desktop-guis " "$sandbox/calls"
 check "  dressed in the theme: a theme generated from shell.json" \
@@ -77,6 +80,22 @@ check "opened again while its window is there, nothing more is opened" lacks bro
 check "a group with no links opens nothing" test -z "$(guis open nope; grep browser "$sandbox/calls")"
 
 : >"$sandbox/calls"
+guis open home >/dev/null
+check "home's own page is its first tab, before its links" \
+  grep -qE -- "--window-name=home file://$sandbox/state/desktop/guis/home.html https://git.example/ " "$sandbox/calls"
+check "  a page of every group's links, by their names" \
+  test "$(grep -o '<a href="[^"]*">[^<]*' "$sandbox/state/desktop/guis/home.html" | tr '\n' ' ')" = \
+  '<a href="https://git.example/">GitLab <a href="https://console.ocp203.example/">OpenShift <a href="https://argocd.ocp203.example/">Argo CD <a href="https://k10.ocp203.example/k10/#/">Kasten '
+check "  in the theme's colours" grep -q 'background: #1a1b26' "$sandbox/state/desktop/guis/home.html"
+printf '[ocp203]\nhttps://console.ocp203.example/ OpenShift\n' >"$sandbox/config/desktop/guis-nohome.conf"
+: >"$sandbox/calls"
+guis close home
+: >"$sandbox/calls"
+DESKTOP_GUIS="$sandbox/config/desktop/guis-nohome.conf" guis open home >/dev/null
+check "home opens with no links of its own, its page alone" \
+  grep -qE -- "--window-name=home file://$sandbox/state/desktop/guis/home.html CONFIG=" "$sandbox/calls"
+
+: >"$sandbox/calls"
 guis arrange
 check "arranging off workspace 1 touches nothing: nothing is pulled anywhere" lacks dispatch "$sandbox/calls"
 check "  and going to workspace 1 is what arranges it, in the Lua config" \
@@ -92,7 +111,7 @@ guis close ocp203
 check "closing one that is not open does nothing" lacks dispatch "$sandbox/calls"
 
 check "list says each group and how many links" \
-  grep -qE '^ocp203 +closed +2 links$' <<<"$(guis list)"
+  grep -qE '^ocp203 +closed +3 links$' <<<"$(guis list)"
 
 # --- filled from Homer
 mkdir -p "$sandbox/homer"
