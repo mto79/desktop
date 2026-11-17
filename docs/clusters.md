@@ -9,6 +9,7 @@ OpenShift, RKE2, Talos and any other Kubernetes cluster, reached the same way:
     ocl -c NAME             web console    ocl -t NAME     Talos dashboard
     ocl -x NAME CMD...      one command    ocl -e NAME     exports for this shell
     ocl status              every cluster asked at once: signed in, nodes, version
+    ocl watch               the same, and a notification for each that changed
     ocl session [NAME]      a tmux session on it: a shell and k9s
     ocl login NAME | logout NAME | list | names | edit
 
@@ -80,6 +81,17 @@ each tab runs another `ocl NAME` -- a shell on the cluster, not a plain one.
 `ocl login` and `ocl logout` delete the dashboard's cached cluster status, which it otherwise
 keeps for two minutes, and age the tmux sidebar's (`$XDG_RUNTIME_DIR/desktop/clusters.json`,
 one minute) so that it asks again; a sign-out is written into the sidebar's at once.
+
+## Watched
+
+`desktop-cluster-watch.timer` runs `ocl watch` every two minutes: every cluster asked, as
+`ocl status` does, and a notification for each whose state changed since the last time --
+gone unreachable or back again, a node not ready or all ready again, signed out by a token
+that expired. Unreachable and degraded are urgent. The answer is written into the sidebar's
+file as well, which otherwise is only asked for while a column is being drawn, and could say
+"unreachable" long after the cluster came back. The first run, after a boot, says nothing:
+there is nothing yet to compare with. A cluster you are not signed in to is not asked over
+the network at all, so it can only ever be "signed out".
 
 A sign-in is written beside the old file and moved over it only when it worked, so a
 cancelled password prompt leaves the previous kubeconfig as it was.

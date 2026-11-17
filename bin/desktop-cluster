@@ -16,6 +16,7 @@
 #   ocl list                every cluster: name, kind, where it is
 #   ocl status [NAME...]    every cluster asked, all at once: signed in, nodes, version
 #   ocl status --json NAME  the same for one, as the dashboard reads it
+#   ocl watch               every cluster asked, and a notification for each that changed
 #   ocl names               the names, one per line
 #   ocl edit                open the clusters file
 #
@@ -56,7 +57,7 @@ set -uo pipefail
 CONF="${DESKTOP_CLUSTERS:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/clusters.conf}"
 STORE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/clusters"
 ME=${0##*/}
-RESERVED=" list status names login logout edit help session "
+RESERVED=" list status watch names login logout edit help session "
 
 die() {
   echo "$ME: $*" >&2
@@ -65,7 +66,7 @@ die() {
   exit 1
 }
 
-usage() { sed -n '3,20s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '3,21s/^# \{0,1\}//p' "$0"; }
 
 # ------------------------------------------------------------------------------ the file
 
@@ -508,6 +509,38 @@ cmd_status() {
   rm -rf "$work"
 }
 
+# Every cluster asked, by a timer (desktop-cluster-watch.timer), and a notification for each
+# that changed since last time: gone unreachable or back, a node down or all ready again,
+# signed out by an expired token. The sidebar's file is written too, so it shows the answer
+# without waiting for a column to be drawn -- it only asks while one is. The first run, and
+# a change from or to "unknown", says nothing: there is nothing to compare with.
+cmd_watch() {
+  local dir="${XDG_RUNTIME_DIR:-/tmp}/desktop" now line
+  mkdir -p "$dir"
+  exec 7>"$dir/clusters.json.lock"
+  flock -w 60 7 || return 0
+  now=$(cmd_status --json) || return 1
+  jq -e 'type == "array"' <<<"$now" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$now" >"$dir/clusters.json.$$" && mv -f "$dir/clusters.json.$$" "$dir/clusters.json"
+  if [[ -s $dir/clusters-watch.json ]]; then
+    while IFS=$'\t' read -r urgency title body; do
+      notify-send -a "Clusters" -u "$urgency" -i network-server "$title" "$body" 2>/dev/null || true
+      echo "$title: $body"
+    done < <(jq -r --slurpfile was "$dir/clusters-watch.json" '
+      ($was[0] | map({key: .name, value: .}) | from_entries) as $before
+      | .[] | . as $c | $before[$c.name] as $b
+      | select($b != null and $b.state != $c.state and $b.state != "unknown" and $c.state != "unknown")
+      | (if $c.state == "unreachable" then ["critical", "\($c.name) unreachable", "Not answering at its API."]
+         elif $b.state == "unreachable" then ["normal", "\($c.name) reachable again", $c.state]
+         elif $c.state == "degraded" then ["critical", "\($c.name) degraded", "\($c.ready) of \($c.nodes) nodes ready"]
+         elif $c.state == "signed-out" then ["normal", "\($c.name) signed out", "ocl login \($c.name)"]
+         elif $b.state == "degraded" then ["normal", "\($c.name) \($c.state) again", "\($c.ready) of \($c.nodes) nodes ready"]
+         else ["low", "\($c.name) \($c.state)", "was \($b.state)"] end)
+      | @tsv' <<<"$now")
+  fi
+  printf '%s\n' "$now" >"$dir/clusters-watch.json"
+}
+
 cmd_list() {
   entries | while IFS=$'\t' read -r name kind rest; do
     where=$(grep -oE '(server|ssh|talosconfig|kubeconfig)=[^ ]+' <<<"$rest" | head -1)
@@ -545,6 +578,7 @@ case "${1:-}" in
 list) cmd_list; exit ;;
 names) names; exit ;;
 status) shift; cmd_status "$@"; exit ;;
+watch) cmd_watch; exit ;;
 edit) cmd_edit ;;
 login) [[ -n ${2:-} ]] || die "usage: $ME login NAME"; load "$2"; login; exit ;;
 logout)

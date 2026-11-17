@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A notification when a cluster goes unreachable, loses a node or is signed out, and when
+  it comes back: every cluster is asked every two minutes, and the sidebar shows the answer
+  without waiting to be redrawn.
 - Workspace 1 always starts with a home tab in front of the clusters' GUIs: your own browser,
   with your bookmarks, and home's own links if you give it any. Opened at login, and again
   on going to workspace 1 if it was closed.

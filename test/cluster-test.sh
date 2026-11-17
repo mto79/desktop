@@ -239,6 +239,26 @@ check "one that does not answer is unreachable, not signed out" test "$(state ki
 check "one written down wrong is said to be, and the rest are still asked" \
   test "$(state broken) $(state edge)" = "misconfigured healthy"
 
+# --- watched
+printf '#!/usr/bin/env bash\necho "notify-send $*" >>"%s"\n' "$log" >"$stubs/notify-send"
+chmod +x "$stubs/notify-send"
+: >"$log"
+run watch >/dev/null 2>&1
+check "the first watch says nothing: there is nothing to compare with" lacks notify-send "$log"
+check "  and writes the sidebar's file, so it need not wait for a column to ask" \
+  test "$(jq -r '.[] | select(.name == "kind") | .state' "$sandbox/run/desktop/clusters.json")" = unreachable
+sed -i 's/token=down/token=good/' "$store/kind.kubeconfig"
+printf 'context=ocp202\ncluster=x\ntoken=good\nnodes=half\n' >"$store/ocp202.kubeconfig"
+: >"$log"
+run watch >/dev/null 2>&1
+check "a cluster answering again is told" grep -q 'notify-send .* kind reachable again' "$log"
+check "  and one losing a node, urgently" grep -q 'notify-send .*-u critical .* ocp202 degraded' "$log"
+check "  and nothing about those that did not change" \
+  test "$(grep -c '^notify-send' "$log")" = 2
+: >"$log"
+run watch >/dev/null 2>&1
+check "told once, not every time it is asked" lacks notify-send "$log"
+
 # --- signing out
 # tmux stubbed, never the real one: a sign-out closes the cluster's session, and the one
 # running this test may well have a session called ocp202.
