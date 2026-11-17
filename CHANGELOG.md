@@ -204,6 +204,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Opening a cluster's web GUIs no longer turns off KeePassXC-Browser in your own browser:
+  they load a copy of it, and your browser no longer finds its own copy changed and
+  takes it for corrupted.
 - Passing through workspace 1 no longer flickers back to it: the web GUIs are put into
   their group only while you are there, and home is opened beside that rather than waited
   for, so nothing focuses a window there after you have moved on.

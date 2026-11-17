@@ -136,26 +136,37 @@ EOF
     >"$STATE/env/glib-2.0/settings/keyfile"
 }
 
-# KeePassXC-Browser, as your own browser has it installed: its folder, the newest version,
-# loaded into the GUIs' profile beside the theme -- the cluster GUIs are where the passwords
-# are wanted. Its installed manifest keeps the Web Store's key, so loaded from there it has
-# the Store's ID, the one KeePassXC's native-messaging host lets in; the host's manifest is
-# linked into the profile, where a browser with a --user-data-dir of its own looks for it.
-# Nothing when your browser has no KeePassXC-Browser. Connecting it to KeePassXC is asked
-# once, the first time it is used in this profile.
+# KeePassXC-Browser, as your own browser has it installed, the newest version: copied into
+# the GUIs' state and the copy loaded beside the theme -- the cluster GUIs are where the
+# passwords are wanted. A copy, never your browser's own folder: a browser loading a folder
+# as an extension deletes its _metadata, the Web Store's signed checksums, and your own
+# browser then took the extension for corrupted and turned it off. The manifest keeps the
+# Store's key, so the copy has the Store's ID, the one KeePassXC's native-messaging host
+# lets in; the host's manifest is linked into the profile, where a browser with a
+# --user-data-dir of its own looks for it. Nothing when your browser has no
+# KeePassXC-Browser. Connecting it to KeePassXC is asked once, the first time it is used
+# in this profile.
 KEEPASSXC_BROWSER=oboonakemofpalcgghocfoadofidjkkk
 keepassxc_browser() {
-  local root dir host=org.keepassxc.keepassxc_browser.json
+  local root dir copy host=org.keepassxc.keepassxc_browser.json
   for root in BraveSoftware/Brave-Browser google-chrome chromium microsoft-edge vivaldi; do
     root="${XDG_CONFIG_HOME:-$HOME/.config}/$root"
     dir=$(printf '%s\n' "$root"/*/Extensions/"$KEEPASSXC_BROWSER"/*/manifest.json 2>/dev/null |
       grep -v '\*' | sort -V | tail -1)
     [[ -n $dir ]] || continue
+    dir=$(dirname "$dir")
+    # A version's copy is made once; another version's replaces it.
+    copy="$STATE/keepassxc-browser/$(basename "$dir")"
+    if [[ ! -f $copy/manifest.json ]]; then
+      rm -rf "$STATE/keepassxc-browser"
+      mkdir -p "$STATE/keepassxc-browser"
+      cp -r "$dir" "$copy.tmp" && rm -rf "$copy.tmp/_metadata" && mv "$copy.tmp" "$copy" || return 1
+    fi
     if [[ -f $root/NativeMessagingHosts/$host ]]; then
       mkdir -p "$PROFILE/NativeMessagingHosts"
       ln -sfn "$root/NativeMessagingHosts/$host" "$PROFILE/NativeMessagingHosts/$host"
     fi
-    dirname "$dir"
+    echo "$copy"
     return 0
   done
   return 1

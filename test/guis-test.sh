@@ -154,13 +154,22 @@ brave="$sandbox/config/BraveSoftware/Brave-Browser"
 for v in 1.9.0_0 1.10.4_0; do
   mkdir -p "$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/$v"
   echo '{}' >"$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/$v/manifest.json"
+  mkdir -p "$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/$v/_metadata"
+  echo '{}' >"$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/$v/_metadata/verified_contents.json"
 done
 mkdir -p "$brave/NativeMessagingHosts"
 echo '{}' >"$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
 : >"$sandbox/calls"
 guis open ocp203 >/dev/null
 check "KeePassXC-Browser, as your own browser has it, is loaded beside the theme, the newest" \
-  grep -qE -- "--load-extension=$sandbox/state/desktop/guis/theme,$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/1.10.4_0 " "$sandbox/calls"
+  grep -qE -- "--load-extension=$sandbox/state/desktop/guis/theme,$sandbox/state/desktop/guis/keepassxc-browser/1.10.4_0 " "$sandbox/calls"
+check "  a copy of it: your own browser's folder is never loaded, which deletes its _metadata" \
+  lacks -- "--load-extension=.*BraveSoftware" "$sandbox/calls"
+check "  the copy without the _metadata a loaded folder may not have" \
+  test -f "$sandbox/state/desktop/guis/keepassxc-browser/1.10.4_0/manifest.json" -a \
+    ! -e "$sandbox/state/desktop/guis/keepassxc-browser/1.10.4_0/_metadata"
+check "  and the original left whole, the Store's checksums in it" \
+  test -f "$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/1.10.4_0/_metadata/verified_contents.json"
 check "  and KeePassXC's host is there for it in the profile" \
   test "$(readlink "$sandbox/state/desktop/guis/browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json")" = "$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
 guis close ocp203
