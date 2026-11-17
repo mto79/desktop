@@ -82,6 +82,12 @@ Before the browser starts, `desktop-guis`:
 - gives it the desktop's font (`desktop-font-current`) for its tabs and address bar,
   through a GSettings file of its own: `GSETTINGS_BACKEND=keyfile` with `XDG_CONFIG_HOME`
   pointed at it. The browser takes its interface font from GTK, which reads it there;
+- loads KeePassXC-Browser into it, from where your own browser has it installed -- the
+  newest version, beside the theme in `--load-extension`. The installed manifest keeps the
+  Web Store's key, so it has the Store's ID, the one KeePassXC's native-messaging host lets
+  in; the host's manifest is linked into the profile's `NativeMessagingHosts`, where a
+  browser with a `--user-data-dir` of its own looks. Connecting it to your database is
+  asked once, the first time it is used there;
 - sets the profile dark, opening nothing of the last session, without Brave's analytics
   notice, and without asking whether to close a window with several tabs -- the window is
   closed for you on sign-out, and would otherwise stay.

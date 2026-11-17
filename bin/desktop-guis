@@ -136,6 +136,31 @@ EOF
     >"$STATE/env/glib-2.0/settings/keyfile"
 }
 
+# KeePassXC-Browser, as your own browser has it installed: its folder, the newest version,
+# loaded into the GUIs' profile beside the theme -- the cluster GUIs are where the passwords
+# are wanted. Its installed manifest keeps the Web Store's key, so loaded from there it has
+# the Store's ID, the one KeePassXC's native-messaging host lets in; the host's manifest is
+# linked into the profile, where a browser with a --user-data-dir of its own looks for it.
+# Nothing when your browser has no KeePassXC-Browser. Connecting it to KeePassXC is asked
+# once, the first time it is used in this profile.
+KEEPASSXC_BROWSER=oboonakemofpalcgghocfoadofidjkkk
+keepassxc_browser() {
+  local root dir host=org.keepassxc.keepassxc_browser.json
+  for root in BraveSoftware/Brave-Browser google-chrome chromium microsoft-edge vivaldi; do
+    root="${XDG_CONFIG_HOME:-$HOME/.config}/$root"
+    dir=$(printf '%s\n' "$root"/*/Extensions/"$KEEPASSXC_BROWSER"/*/manifest.json 2>/dev/null |
+      grep -v '\*' | sort -V | tail -1)
+    [[ -n $dir ]] || continue
+    if [[ -f $root/NativeMessagingHosts/$host ]]; then
+      mkdir -p "$PROFILE/NativeMessagingHosts"
+      ln -sfn "$root/NativeMessagingHosts/$host" "$PROFILE/NativeMessagingHosts/$host"
+    fi
+    dirname "$dir"
+    return 0
+  done
+  return 1
+}
+
 # Is this window the user's own browser's, which is what home is? At login a terminal maps in
 # the same burst and head -1 once took that. Home's window is of the browser's own app-id --
 # the GUIs' profile is class desktop-guis (left out of the diff), a terminal's its own -- so
@@ -249,11 +274,13 @@ cmd_open() {
   fi
   before=$(addresses)
   running || dress
+  local extensions=$STATE/theme keepassxc
+  keepassxc=$(keepassxc_browser) && extensions+=",$keepassxc"
   # Without the lock's descriptor: a browser that kept it would hold the lock for as long
   # as it runs, and the next group would wait for it for ever.
   XDG_CONFIG_HOME="$STATE/env" GSETTINGS_BACKEND=keyfile setsid uwsm app -- "$(browser)" \
     --user-data-dir="$PROFILE" --class="$CLASS" --no-first-run --no-default-browser-check \
-    --disable-features=DisableLoadExtensionCommandLineSwitch --load-extension="$STATE/theme" \
+    --disable-features=DisableLoadExtensionCommandLineSwitch --load-extension="$extensions" \
     --new-window --window-name="$name" "${urls[@]}" >/dev/null 2>&1 9>&- &
   # The new window, to be closed by when the group is.
   for ((i = 0; i < 60; i++)); do

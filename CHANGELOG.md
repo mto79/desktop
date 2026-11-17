@@ -204,6 +204,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The clusters' web GUIs on workspace 1 have KeePassXC-Browser, the one your own browser
+  has, connected to KeePassXC: passwords fill there as they do in your own browser.
 - Starting up, workspace 1 has one browser, home, rather than two: the window the browser
   opens of its own as it starts -- an empty New Tab -- is closed, a home brought back by
   its session restore is taken as home, and a terminal opening at the same moment is no

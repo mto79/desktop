@@ -141,6 +141,23 @@ check "closing one that is not open does nothing" lacks dispatch "$sandbox/calls
 check "list says each group and how many links" \
   grep -qE '^ocp203 +closed +3 links$' <<<"$(guis list)"
 
+# --- KeePassXC-Browser, from your own browser
+brave="$sandbox/config/BraveSoftware/Brave-Browser"
+for v in 1.9.0_0 1.10.4_0; do
+  mkdir -p "$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/$v"
+  echo '{}' >"$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/$v/manifest.json"
+done
+mkdir -p "$brave/NativeMessagingHosts"
+echo '{}' >"$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
+: >"$sandbox/calls"
+guis open ocp203 >/dev/null
+check "KeePassXC-Browser, as your own browser has it, is loaded beside the theme, the newest" \
+  grep -qE -- "--load-extension=$sandbox/state/desktop/guis/theme,$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/1.10.4_0 " "$sandbox/calls"
+check "  and KeePassXC's host is there for it in the profile" \
+  test "$(readlink "$sandbox/state/desktop/guis/browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json")" = "$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
+guis close ocp203
+rm -rf "$sandbox/config/BraveSoftware"
+
 # --- filled from Homer
 mkdir -p "$sandbox/homer"
 cat >"$sandbox/homer/config.yml" <<'YAML'
