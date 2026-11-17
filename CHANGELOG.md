@@ -227,6 +227,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Workspace 1 has one home at login again when last session ended with home open: the
+  browser's restored home is used, rather than a second one opened beside it.
 - opencode's tokens show in the AI panel's last seven days again: newer opencode keeps a
   message's id apart from the message, and every one of its messages was passed over.
 - The bar's security shield says how things stand at a glance: a ticked outline when all is

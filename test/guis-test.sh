@@ -35,17 +35,27 @@ cat >"$stubs/uwsm" <<STUB
 #!/usr/bin/env bash
 shift 2
 echo "browser \$* CONFIG=\$XDG_CONFIG_HOME BACKEND=\$GSETTINGS_BACKEND" >>"$sandbox/calls"
-# The GUIs' profile makes a desktop-guis window; your own browser one of its own class,
-# and as it starts -- it is never running here -- an empty window of its own beside it.
+# The GUIs' profile makes a desktop-guis window. Your own browser, as it starts, opens an
+# empty window of its own -- and the home of last time, name and all, when its session
+# restore has one ($sandbox/restore-home) -- and once running opens what it is asked for.
 class=brave-browser name=""
 [[ " \$* " == *" --class=desktop-guis "* ]] && class=desktop-guis
 [[ " \$* " =~ " --window-name="([^ ]+) ]] && name=\${BASH_REMATCH[1]}
 n=\$(wc -l <"$sandbox/windows")
-[[ \$class == brave-browser ]] && printf '0xstart%s\tbrave-browser\tNew Tab - Brave\n' "\$n" >>"$sandbox/windows"
-printf '0xnew%s\t%s\t%s\n' "\$n" "\$class" "\$name" >>"$sandbox/windows"
+if [[ \$class == brave-browser && ! -e "$sandbox/brave-running" ]]; then
+  touch "$sandbox/brave-running"
+  printf '0xstart%s\tbrave-browser\tNew Tab - Brave\n' "\$n" >>"$sandbox/windows"
+  [[ -e "$sandbox/restore-home" ]] && printf '0xrestored%s\tbrave-browser\thome\n' "\$n" >>"$sandbox/windows"
+fi
+[[ \$class == desktop-guis || \$* == *--new-window* ]] && printf '0xnew%s\t%s\t%s\n' "\$n" "\$class" "\$name" >>"$sandbox/windows"
+exit 0
 STUB
-# Nothing of the browser's is running: it is started by what is tested.
-printf '#!/usr/bin/env bash\nexit 1\n' >"$stubs/pgrep"
+# Your own browser runs once the stub above has started it; the GUIs' profile never does.
+cat >"$stubs/pgrep" <<STUB
+#!/usr/bin/env bash
+[[ \$1 == -a && -e "$sandbox/brave-running" ]] && { echo "123 brave"; exit 0; }
+exit 1
+STUB
 printf '#!/usr/bin/env bash\necho brave-browser.desktop\n' >"$stubs/xdg-settings"
 printf '#!/usr/bin/env bash\necho "Test Font Mono"\n' >"$stubs/desktop-font-current"
 chmod +x "$stubs"/*
@@ -117,6 +127,20 @@ check "the empty window the browser opened as it started is closed: one browser,
 check "  and home is the one named home, not that one" \
   grep -q 'home$' <<<"$(grep -F "$(cat "$sandbox/run/desktop/guis/home")" "$sandbox/windows")"
 guis close home
+
+# Started at login by home itself, the browser brings back last time's home in its session:
+# that one is home, and no second is asked for beside it.
+saved=$(cat "$sandbox/windows"); : >"$sandbox/windows"; rm -f "$sandbox/brave-running"
+touch "$sandbox/restore-home"
+: >"$sandbox/calls"
+guis open home >/dev/null
+check "a browser started with home in its restored session has one home, not two" \
+  test "$(grep -c $'\thome$' "$sandbox/windows")" = 1
+check "  the restored one, its tabs and all" grep -q '^0xrestored' "$sandbox/run/desktop/guis/home"
+check "  with no second home asked for" lacks -- '--window-name=home' "$sandbox/calls"
+check "  and the browser's empty window closed" lacks '^0xstart' "$sandbox/windows"
+guis close home
+rm -f "$sandbox/restore-home"; printf '%s\n' "$saved" | grep . >"$sandbox/windows"
 printf '0xrestored\tbrave-browser\thome\n' >>"$sandbox/windows"
 : >"$sandbox/calls"
 guis open home >/dev/null

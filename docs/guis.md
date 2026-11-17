@@ -32,7 +32,11 @@ browser takes seconds to start and you may have moved on by then, so home is mov
 workspace 1 without following it; windows of yours grouped with it -- Teams, restored
 beside it -- are let go first rather than taken along. The theme's switches go with it
 only when this is what starts your browser: handed to one already running, they make it
-pass over `--window-name` too. A comment starts a line or follows a space, so a URL's own
+pass over `--window-name` too. When this is what starts your browser, it starts it bare
+first and waits for its session restore: a home of last time comes back named home, and
+is taken as home, tabs and all, rather than a second asked for beside it. Only when none
+came back is home asked of the browser then running; its empty New Tab window is closed
+either way. A comment starts a line or follows a space, so a URL's own
 `#` -- Kasten's `#/` -- is kept.
 
 A group named after a cluster in `clusters.conf` is opened by `ocl` when you sign in to it

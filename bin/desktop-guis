@@ -263,6 +263,25 @@ open_home() {
   local flags=(--disable-features=DisableLoadExtensionCommandLineSwitch --load-extension="$theme")
   local starting=true
   own_running && { flags=(); starting=false; }
+  if $starting; then
+    # Started bare first, and given its moment: it brings back the last session, which may
+    # well have home in it, name and all. Started with home asked for as well, that made two
+    # windows named home side by side, the restored one and the new.
+    setsid uwsm app -- "$(browser)" "${flags[@]}" >/dev/null 2>&1 8>&- 9>&- &
+    for ((i = 0; i < 60; i++)); do
+      sleep 0.25
+      [[ -n $(comm -13 <(echo "$before") <(hyprctl -j clients 2>/dev/null | jq -r '.[].address' | sort)) ]] && break
+    done
+    sleep "${DESKTOP_GUIS_SETTLE:-3}"
+    after=$(hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class != $c) | .address' | sort)
+    if adopt_home; then
+      close_extra < <(comm -13 <(echo "$before") <(echo "$after"))
+      flock -u 9
+      return 0
+    fi
+    # No home came back: asked of the browser now running, which takes no theme switches.
+    flags=()
+  fi
   setsid uwsm app -- "$(browser)" "${flags[@]}" --new-window --window-name=home "${urls[@]}" \
     >/dev/null 2>&1 8>&- 9>&- &
   # Other windows map in the same burst, at login above all: take the one the browser
