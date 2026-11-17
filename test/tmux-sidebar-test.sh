@@ -511,6 +511,31 @@ if [[ -n $real ]]; then
   [[ -n $errors ]] && echo "      $(head -3 <<<"$errors")"
 fi
 
+# A column off screen still follows the clusters' file: a cluster that came back is not
+# shown unreachable, for a moment, when you switch to it. A real column, in a detached
+# session of a real tmux -- off screen -- given a file that changes under it.
+if [[ -n $real ]]; then
+  tdir=$(mktemp -d)
+  mkdir -p "$tdir/run/desktop" "$tdir/bin"
+  printf '#!/bin/sh\nexit 0\n' >"$tdir/bin/desktop-view"
+  printf '#!/bin/sh\necho ocp202\n' >"$tdir/bin/desktop-cluster"
+  chmod +x "$tdir/bin/"*
+  file="$tdir/run/desktop/clusters.json"
+  echo '[{"name": "ocp202", "state": "unreachable"}]' >"$file"
+  touch "$tdir/run/desktop-tmux-view"
+  rt() { env -u TMUX TMUX_TMPDIR="$tdir" XDG_RUNTIME_DIR="$tdir/run" "$real" "$@"; }
+  rt -f /dev/null new-session -d -s s -x 60 -y 40 \
+    "PATH=$tdir/bin:$(dirname "$real"):/usr/bin:/bin XDG_RUNTIME_DIR=$tdir/run TERM=screen python3 $ROOT/bin/desktop-tmux-sidebar"
+  shows() { for _ in $(seq 50); do rt capture-pane -p -t s | grep -q "ocp202.*$1" && return 0; sleep 0.1; done; return 1; }
+  shows unreachable; first=$?
+  echo '[{"name": "ocp202", "state": "healthy", "nodes": 3, "ready": 3}]' >"$file.new" && mv "$file.new" "$file"
+  shows 3/3; second=$?
+  rt kill-server 2>/dev/null
+  rm -rf "$tdir"
+  check "a column off screen draws a cluster's new state as soon as the file has it" \
+    test "$first-$second" = 0-0
+fi
+
 # A window whose work has ended goes, column and all; one with work left stays. A real
 # tmux of its own, reached through TMUX_TMPDIR, since the script runs plain `tmux`.
 if [[ -n $real ]]; then

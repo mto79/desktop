@@ -576,6 +576,14 @@ CLUSTER_CACHE = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "deskt
 CLUSTER_NAMES = {"at": 0.0, "names": []}
 
 
+def cluster_stamp():
+    """When the clusters' file last changed, or None when there is none."""
+    try:
+        return os.stat(CLUSTER_CACHE).st_mtime_ns
+    except OSError:
+        return None
+
+
 def clusters(now=None):
     """The clusters `ocl` knows, with their state, from a file every column shares.
 
@@ -1031,6 +1039,7 @@ def sidebar(screen):
     here = tmux(*where)
     data = collect()
     found_clusters = clusters()
+    cluster_seen = cluster_stamp()
     found_views = views()
     chosen = folds()
     selected = here.split(":")[0]
@@ -1171,6 +1180,16 @@ def sidebar(screen):
             mark = view_mark()
             if (mark is not None and mark == seen_mark and not seen.startswith("1")
                     and last - seen_at < UNSEEN_RECHECK_SECONDS):
+                # Off screen, but the clusters' file changed: their rows are redrawn now,
+                # from the file alone, so a cluster back since this column was last drawn
+                # is not shown "unreachable" for a moment when you switch to it.
+                stamp = cluster_stamp()
+                if stamp != cluster_seen:
+                    cluster_seen, found_clusters = stamp, clusters()
+                    fresh = build()
+                    if fresh != listed:
+                        listed, dirty = fresh, True
+                        cursor = min(cursor, max(0, len(listed) - 1))
                 continue
             seen, seen_mark, seen_at = tmux(*visible), mark, last
             if focused != (seen == "11"):
@@ -1180,7 +1199,7 @@ def sidebar(screen):
             here = tmux(*where)
             detailed = tmux("show-options", "-gqv", VIEW) == "detail"
             data = collect()
-            found_clusters = clusters()
+            found_clusters, cluster_seen = clusters(), cluster_stamp()
             found_views = views()
             chosen = folds()
             fresh = build()
