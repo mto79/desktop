@@ -136,6 +136,48 @@ EOF
     >"$STATE/env/glib-2.0/settings/keyfile"
 }
 
+# Is this window the user's own browser's, which is what home is? At login a terminal maps in
+# the same burst and head -1 once took that. Home's window is of the browser's own app-id --
+# the GUIs' profile is class desktop-guis (left out of the diff), a terminal's its own -- so
+# the new window that is a browser is home's. The family browser() can hand back.
+#
+# And by its title, home: a browser started at login opens a window of its own as well -- an
+# empty New Tab, or the last session's -- and taking that one left two on workspace 1.
+is_home_window() {
+  local class title
+  IFS=$'\t' read -r class title < <(hyprctl -j clients 2>/dev/null |
+    jq -r --arg a "$1" '.[] | select(.address == $a) | [.class, .title] | @tsv')
+  [[ $title == home ]] || return 1
+  case $class in
+  google-chrome* | brave-browser* | microsoft-edge* | vivaldi* | chromium*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+# A window named home there already -- the browser's session restore brings back the last
+# one, name and all -- is taken as home rather than a second opened beside it.
+adopt_home() {
+  local address
+  while read -r address; do
+    is_home_window "$address" && { echo "$address" >"$RUN/home"; return 0; }
+  done < <(hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class != $c) | .address')
+  return 1
+}
+
+# What else the browser opened as it started, on workspace 1 beside home: an empty New Tab
+# window is closed, so the workspace has the one browser. A window with pages in it -- the
+# session restored -- is yours and is left.
+close_extra() { # addresses that appeared with home
+  local address title workspace
+  while read -r address; do
+    [[ -n $address && $address != "$(cat "$RUN/home")" ]] || continue
+    IFS=$'\t' read -r title workspace < <(hyprctl -j clients 2>/dev/null |
+      jq -r --arg a "$address" '.[] | select(.address == $a) | [.title, .workspace.id] | @tsv')
+    [[ $workspace == 1 && $title == "New Tab"* ]] || continue
+    hyprctl dispatch "hl.dsp.window.close({ window = \"address:$address\" })" >/dev/null
+  done
+}
+
 # Home is your own browser -- your profile, your bookmarks -- not the GUIs' profile: a window
 # of it named home, the first tab on workspace 1, with [home]'s links if it has any. A
 # window of your own browser has no class to be sent to workspace 1 by, so it is opened only
@@ -150,6 +192,7 @@ open_home() {
   exec 9>"$RUN/.lock"
   flock 9
   is_open home && return 0
+  adopt_home && { flock -u 9; return 0; }
   mapfile -t urls < <(links home)
   # In the theme your browser's launcher gives it (desktop-browser-theme), should this be
   # what starts it.
@@ -160,14 +203,29 @@ open_home() {
   # The theme only for a browser this starts: handed to one already running, those switches
   # make it pass over --window-name too, and home would be named after its page.
   local flags=(--disable-features=DisableLoadExtensionCommandLineSwitch --load-extension="$theme")
-  own_running && flags=()
+  local starting=true
+  own_running && { flags=(); starting=false; }
   setsid uwsm app -- "$(browser)" "${flags[@]}" --new-window --window-name=home "${urls[@]}" \
     >/dev/null 2>&1 8>&- 9>&- &
+  # Other windows map in the same burst, at login above all: take the one the browser
+  # named home, not merely the first new one, which once was a terminal.
   for ((i = 0; i < 60; i++)); do
     sleep 0.25
     after=$(hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class != $c) | .address' | sort)
-    new=$(comm -13 <(echo "$before") <(echo "$after") | head -1)
-    [[ -n $new ]] && { echo "$new" >"$RUN/home"; flock -u 9; return 0; }
+    while read -r new; do
+      [[ -n $new ]] || continue
+      if is_home_window "$new"; then
+        echo "$new" >"$RUN/home"
+        # Started by this, the browser opens a window of its own too, a moment apart.
+        if $starting; then
+          sleep "${DESKTOP_GUIS_SETTLE:-3}"
+          after=$(hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class != $c) | .address' | sort)
+          close_extra < <(comm -13 <(echo "$before") <(echo "$after"))
+        fi
+        flock -u 9
+        return 0
+      fi
+    done < <(comm -13 <(echo "$before") <(echo "$after"))
   done
   echo "desktop-guis: home's window did not appear" >&2
   return 1

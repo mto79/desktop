@@ -10,28 +10,34 @@ trap 'rm -rf "$sandbox"' EXIT
 stubs="$sandbox/stubs"
 mkdir -p "$stubs" "$sandbox/config/desktop" "$sandbox/theme" "$sandbox/run"
 
-# Hyprland: the windows of class desktop-guis are those listed in $sandbox/windows, and a
-# browser that starts adds one. Every dispatch is written down.
+# Hyprland: the windows are the lines of $sandbox/windows -- address, class and title,
+# tab-separated -- and a browser that starts adds one. Every dispatch is written down.
 cat >"$stubs/hyprctl" <<STUB
 #!/usr/bin/env bash
 case "\$1" in
 -j) [[ \$2 == activeworkspace ]] && { echo "{\"id\": \$(cat "$sandbox/ws" 2>/dev/null || echo 3)}"; exit; }
   touch "$sandbox/windows"
-  jq -R 'split(" ") | {address: .[0], class: (.[1] // "desktop-guis"), workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
+  jq -R 'split("\t") | {address: .[0], class: (.[1] // "desktop-guis"), title: (.[2] // ""), workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
 dispatch) echo "dispatch \$2" >>"$sandbox/calls"
-  gone=\$(sed -nE 's/.*address:([^"]+).*/\1/p' <<<"\$2")
-  [[ -n \$gone ]] && sed -i "/^\$gone\$/d" "$sandbox/windows" ;;
+  gone=\$(sed -nE 's/^hl\.dsp\.window\.close.*address:([^"]+).*/\1/p' <<<"\$2")
+  [[ -n \$gone ]] && sed -i "/^\$gone\t/d" "$sandbox/windows" ;;
 esac
 STUB
 cat >"$stubs/uwsm" <<STUB
 #!/usr/bin/env bash
 shift 2
 echo "browser \$* CONFIG=\$XDG_CONFIG_HOME BACKEND=\$GSETTINGS_BACKEND" >>"$sandbox/calls"
-# The GUIs' profile makes a desktop-guis window; your own browser one of its own class.
-class=brave-browser
+# The GUIs' profile makes a desktop-guis window; your own browser one of its own class,
+# and as it starts -- it is never running here -- an empty window of its own beside it.
+class=brave-browser name=""
 [[ " \$* " == *" --class=desktop-guis "* ]] && class=desktop-guis
-echo "0xnew\$(wc -l <"$sandbox/windows") \$class" >>"$sandbox/windows"
+[[ " \$* " =~ " --window-name="([^ ]+) ]] && name=\${BASH_REMATCH[1]}
+n=\$(wc -l <"$sandbox/windows")
+[[ \$class == brave-browser ]] && printf '0xstart%s\tbrave-browser\tNew Tab - Brave\n' "\$n" >>"$sandbox/windows"
+printf '0xnew%s\t%s\t%s\n' "\$n" "\$class" "\$name" >>"$sandbox/windows"
 STUB
+# Nothing of the browser's is running: it is started by what is tested.
+printf '#!/usr/bin/env bash\nexit 1\n' >"$stubs/pgrep"
 printf '#!/usr/bin/env bash\necho brave-browser.desktop\n' >"$stubs/xdg-settings"
 printf '#!/usr/bin/env bash\necho "Test Font Mono"\n' >"$stubs/desktop-font-current"
 chmod +x "$stubs"/*
@@ -54,7 +60,7 @@ CONF
 guis() {
   env -i PATH="$stubs:$ROOT/bin:/usr/bin:/bin" HOME="$sandbox/home" XDG_CONFIG_HOME="$sandbox/config" \
     XDG_STATE_HOME="$sandbox/state" XDG_DATA_HOME="$sandbox/data" XDG_RUNTIME_DIR="$sandbox/run" \
-    DESKTOP_THEME_DIR="$sandbox/theme" DESKTOP_GUIS="${DESKTOP_GUIS:-}" bash "$ROOT/bin/desktop-guis" "$@" 2>&1
+    DESKTOP_THEME_DIR="$sandbox/theme" DESKTOP_GUIS="${DESKTOP_GUIS:-}" DESKTOP_GUIS_SETTLE=0 bash "$ROOT/bin/desktop-guis" "$@" 2>&1
 }
 
 # --- a group opened
@@ -98,6 +104,16 @@ check "  and remembered, though it is not of the GUIs' class" \
 : >"$sandbox/calls"
 guis open home >/dev/null
 check "  opened once" lacks browser "$sandbox/calls"
+check "the empty window the browser opened as it started is closed: one browser, not two" \
+  lacks '^0xstart' "$sandbox/windows"
+check "  and home is the one named home, not that one" \
+  grep -q 'home$' <<<"$(grep -F "$(cat "$sandbox/run/desktop/guis/home")" "$sandbox/windows")"
+guis close home
+printf '0xrestored\tbrave-browser\thome\n' >>"$sandbox/windows"
+: >"$sandbox/calls"
+guis open home >/dev/null
+check "a home the browser's session restore brought back is taken, not a second opened" \
+  test "$(grep -c browser "$sandbox/calls")-$(cat "$sandbox/run/desktop/guis/home")" = "0-0xrestored"
 guis close home
 printf '[ocp203]\nhttps://console.ocp203.example/ OpenShift\n' >"$sandbox/config/desktop/guis-nohome.conf"
 : >"$sandbox/calls"

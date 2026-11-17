@@ -201,6 +201,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Starting up, workspace 1 has one browser, home, rather than two: the window the browser
+  opens of its own as it starts -- an empty New Tab -- is closed, a home brought back by
+  its session restore is taken as home, and a terminal opening at the same moment is no
+  longer taken for it.
 - A web GUI link with a `#` in its address, as Kasten's has, keeps its name rather than
   being cut at the `#` as though a comment began there.
 - Logging in no longer leaves a failed NVIDIA X Server Settings unit behind. Its autostart
