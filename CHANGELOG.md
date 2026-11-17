@@ -204,6 +204,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The bar's security shield says how things stand at a glance: a ticked outline when all is
+  clear, a ! for something to look at, filled for something to act on. Warnings used to
+  show a bare tick, and serious findings the same ticked shield as all clear.
 - Home is on workspace 1 even when the browser was slow to start at login and you had
   moved on: it is brought there without taking you along, and without the windows it was
   grouped with elsewhere.

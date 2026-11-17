@@ -53,7 +53,11 @@ BarItem {
     popups.toggle(root.panelId, this)
 
   IconLabel {
-    icon: root.bad > 0 ? "\u{f0565}" : (root.findings.length > 0 ? "\u{f0e1e}" : "\u{f0565}")
+    // One shield, louder as it matters more: an outline with a tick when clear, an outline
+    // with ! for something to look at, filled with ! for something to act on, and empty
+    // until the first check. It once showed a bare tick for warnings and the clear
+    // shield's tick for something bad -- both read as "fine".
+    icon: !root.result ? "\u{f0499}" : (root.bad > 0 ? "\u{f0ecc}" : (root.findings.length > 0 ? "\u{f0ecd}" : "\u{f0cc8}"))
     text: root.findings.length > 0 ? String(root.findings.length) : ""
     color: root.bad > 0 ? Color.barUrgent : (root.findings.length > 0 ? Color.barAttention : Color.barMuted)
   }
