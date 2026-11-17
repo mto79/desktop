@@ -27,7 +27,10 @@ Home is always there, the first tab: a window of your own browser -- your profil
 bookmarks -- named home, with `[home]`'s links as its tabs, or a new tab when it has none.
 It opens at login, and again on arriving at workspace 1 if it was closed. A window of your
 own browser has no class of its own to be sent to workspace 1 by, so it is only ever
-opened while workspace 1 is on screen, and lands there. The theme's switches go with it
+opened while workspace 1 is on screen, and lands there. At login the
+browser takes seconds to start and you may have moved on by then, so home is moved to
+workspace 1 without following it; windows of yours grouped with it -- Teams, restored
+beside it -- are let go first rather than taken along. The theme's switches go with it
 only when this is what starts your browser: handed to one already running, they make it
 pass over `--window-name` too. A comment starts a line or follows a space, so a URL's own
 `#` -- Kasten's `#/` -- is kept.
