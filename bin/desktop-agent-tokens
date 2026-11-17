@@ -47,7 +47,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # Bump when what is extracted from a file changes, so old cache entries are not reused.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 # How long a parsed file is remembered after it was last written to.
 CACHE_HORIZON_DAYS = 60
@@ -233,13 +233,15 @@ def parse_opencode_database(path, offset, state):
     except sqlite3.Error:
         return records, 0, state
     try:
-        for session, raw in connection.execute("SELECT session_id, data FROM message"):
+        # The id is a column of its own: since late 2026 opencode no longer repeats it in
+        # the message, and every message was dropped for the want of it.
+        for key, session, raw in connection.execute("SELECT id, session_id, data FROM message"):
             try:
                 message = json.loads(raw)
             except (TypeError, ValueError):
                 continue
-            record = opencode_record(message, None, session)
-            if record and message.get("id"):
+            record = opencode_record(message, key, session)
+            if record and (message.get("id") or key):
                 records.append(record)
     except sqlite3.Error:
         pass

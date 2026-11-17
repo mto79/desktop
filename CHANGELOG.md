@@ -210,6 +210,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- opencode's tokens show in the AI panel's last seven days again: newer opencode keeps a
+  message's id apart from the message, and every one of its messages was passed over.
 - The bar's security shield says how things stand at a glance: a ticked outline when all is
   clear, a ! for something to look at, filled for something to act on. Warnings used to
   show a bare tick, and serious findings the same ticked shield as all clear.

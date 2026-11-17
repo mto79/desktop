@@ -147,6 +147,21 @@ opencode=$(run --agent opencode | jq '.agents[0].today')
 check "opencode's thinking tokens are counted as output" test "$(jq -r .output <<<"$opencode")" = 50
 check "opencode's user messages are not counted" test "$(jq -r .burned <<<"$opencode")" = 155
 
+# The database, as opencode writes it now: the message's id in a column of its own, and no
+# longer in the message. Every message was once dropped for the want of it.
+rm -rf "$XDG_DATA_HOME/opencode/storage"
+python3 - "$XDG_DATA_HOME/opencode/opencode.db" "$created" <<'EOF'
+import json, sqlite3, sys
+db = sqlite3.connect(sys.argv[1])
+db.execute("CREATE TABLE message (id text PRIMARY KEY, session_id text, time_created integer, data text)")
+message = {"role": "assistant", "tokens": {"input": 300, "output": 20, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+           "time": {"created": int(sys.argv[2])}}
+db.execute("INSERT INTO message VALUES ('msg_1', 'ses_2', ?, ?)", (int(sys.argv[2]), json.dumps(message)))
+db.commit()
+EOF
+check "opencode's database is read, its ids taken from their column" \
+  test "$(run --agent opencode | jq -r '.agents[0].today.burned')" = 320
+
 # --- the panel reads the same numbers
 window_out=$(run --agent claude --window 5 | jq -r '.agents[0].window.output')
 expected=$(python3 -c "
