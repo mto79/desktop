@@ -159,7 +159,9 @@ Popup {
     spacing: 2
 
     PanelHero {
-      icon: root.badCount > 0 ? "\u{f0565}" : (root.warnCount > 0 ? "\u{f0e1e}" : "\u{f0565}")
+      // The bar's shield, the same three states: filled with ! to act on, an outline with !
+      // to look at, a ticked outline when clear (Security.qml).
+      icon: root.badCount > 0 ? "\u{f0ecc}" : (root.warnCount > 0 ? "\u{f0ecd}" : "\u{f0cc8}")
       iconColor: root.badCount > 0 ? Color.popupUrgent : (root.warnCount > 0 ? Color.popupAccent : Color.popupText)
       title: "Security"
       spinning: root.checking

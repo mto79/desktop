@@ -154,6 +154,10 @@ Add a line under the current month in the same commit as the change it describes
 
 - The Tokyo Night wallpapers no longer carry the wallpaper site's label in their bottom
   right corner.
+- Clicking the bar's GitLab mark opens a pipelines panel, as the security shield and the
+  backup open theirs: a section for each GitLab you are logged in to, its merge requests
+  most urgent first, and a way to check now or add another GitLab. `SUPER + D`, then `J`.
+  The security panel's shield is the bar's again, in the same three states.
 - The pipelines tooltip is in colour: each status mark as the bar draws it -- red failed,
   amber waiting, green passed -- and the titles quieter than the names under them.
 - The login screen fills the laptop's screen rather than a corner of it, in the desktop's

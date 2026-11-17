@@ -13,8 +13,8 @@ import "pipelines.js" as Layout
 // pipeline finishes, and a shell restart must not ask again or say it all again. Hidden
 // while you have nothing open, so it is there only when there is something to look at.
 //
-// A click opens the pipeline that matters most -- the first failed, or running, or
-// waiting one -- and a right click your merge requests on GitLab. A draft counts only
+// A click opens the pipelines panel, a section per GitLab; a right click the pipeline
+// that matters most -- the first failed, or running, or waiting one. A draft counts only
 // when its pipeline runs or failed; the tooltip lists it all the same.
 BarItem {
   id: root
@@ -53,8 +53,15 @@ BarItem {
     }
   }
 
-  command: first ? ["xdg-open", first.pipelineUrl] : null
-  rightCommand: first ? ["xdg-open", "https://" + first.host + "/dashboard/merge_requests"] : null
+  // A click opens the panel, as the security shield's and the backup's do: there are
+  // several GitLabs, and the panel has a section for each. A right click is the quick
+  // way to the pipeline that matters most.
+  panelId: "pipelines"
+
+  onClicked: if (popups)
+    popups.toggle(root.panelId, this)
+
+  rightCommand: first && first.status !== "none" ? ["xdg-open", first.pipelineUrl] : null
 
   // A title line with the counts, the merge requests with a pipeline most urgent first --
   // project and number, the title under it -- and what a click does last. See pipelines.js.

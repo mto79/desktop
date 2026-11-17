@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The pipelines widget's tooltip, laid out in shell/Bar/widgets/pipelines.js.
+# The pipelines tooltip and panel, laid out in shell/Bar/widgets/pipelines.js.
 #
 # It was a list of every merge request, "passed  tb/openshift/ocp-helm-charts!484  Feature:
 # ...", the ones with no pipeline among them, wrapping at the tooltip's width. Now: the
@@ -36,7 +36,7 @@ check "  no line wider than the tooltip, so nothing wraps" \
 check "  the group path left out" lacks "tb/openshift" <<<"$out"
 check "  merge requests without a pipeline counted, not listed" grep -q "^2 without a pipeline$" <<<"$out"
 check "  and not listed" lacks "tools-and-scripts" <<<"$out"
-check "  what a click does, last" test "$(tail -1 <<<"$out")" = "Click: failed  ·  right-click: all MRs"
+check "  what a click does, last" test "$(tail -1 <<<"$out")" = "Click: details · right-click: failed"
 check "GitLab out of reach is said under the title" \
   test "$(sed -n 2p <<<"$(tip "$requests" stale)")" = "GitLab not reachable, as last seen"
 
@@ -50,5 +50,31 @@ check "  lines broken with <br>, StyledText's" test "$(grep -o '<br>' <<<"$style
 lt=$(tip '[{"status":"failed","ref":"g/p!1","title":"a <b>bold</b> & claim"}]' styled)
 check "  a < in a title is escaped, never markup" grep -qF 'a&nbsp;&lt;b&gt;bold&lt;/b&gt;&nbsp;&amp;&nbsp;claim' <<<"$lt"
 check "  and no colour at all when none are given: plain text" lacks '<font' <<<"$out"
+
+# The panel's sections, one per GitLab (pipelines.js groups()).
+grp() {
+  node -e "
+    const p = require('$ROOT/shell/Bar/widgets/pipelines.js');
+    const info = JSON.parse(process.argv[1]);
+    const out = process.argv[2] === 'summary' ? p.summary(info) : JSON.stringify(p.groups(info));
+    console.log(out);" "$1" "${2:-}"
+}
+info='{"hosts":[{"host":"git.example","state":"ok"},{"host":"lab.example","state":"unreachable"},{"host":"new.example","state":"ok"}],
+ "requests":[
+  {"host":"git.example","status":"success","ref":"g/a!1","title":"one"},
+  {"host":"git.example","status":"failed","ref":"g/b!2","title":"Draft: two","draft":true},
+  {"host":"git.example","status":"none","ref":"g/c!3","title":"three"},
+  {"host":"lab.example","status":"running","ref":"g/d!4","title":"four","stale":true}]}'
+g=$(grp "$info")
+check "a section for every GitLab, in the order they are asked" \
+  test "$(jq -r 'map(.host) | join(" ")' <<<"$g")" = "git.example lab.example new.example"
+check "  one with nothing open is a section all the same" test "$(jq -r '.[2].open' <<<"$g")" = 0
+check "  one off the VPN says so" test "$(jq -r '.[1].reachable' <<<"$g")" = false
+check "  the failed one first, the passed after it" test "$(jq -r '.[0].requests | map(.name) | join(",")' <<<"$g")" = "b !2  draft,a !1"
+check "  failed, running and waiting are the ones marked" test "$(jq -r '.[0].requests | map(.urgent) | join(",")' <<<"$g")" = "true,false"
+check "  merge requests without a pipeline counted, not listed" test "$(jq -r '.[0].without' <<<"$g")" = 1
+check "the headline is the worst there is" test "$(grp "$info" summary)" = "1 failed"
+check "  all passed when all did" test "$(grp '{"requests":[{"status":"success"}]}' summary)" = "all passed"
+check "  and says when nothing is open" test "$(grp '{"requests":[]}' summary)" = "nothing open"
 
 finish

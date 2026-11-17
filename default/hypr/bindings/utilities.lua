@@ -94,6 +94,9 @@ hl.define_submap("panels", function()
   -- G for grab the screen: R is the microphone, S the backup, V the VPN.
   hl.bind("G", hl.dsp.exec_cmd("desktop-shell shell togglePanel recording"), { description = "Screen recording panel" })
   hl.bind("G", hl.dsp.submap("reset"))
+  -- J for jobs, CI's: P is the media panel and I the AI one.
+  hl.bind("J", hl.dsp.exec_cmd("desktop-shell shell togglePanel pipelines"), { description = "Pipelines panel" })
+  hl.bind("J", hl.dsp.submap("reset"))
   hl.bind("M", hl.dsp.exec_cmd("desktop-shell shell togglePanel memory"), { description = "Memory panel" })
   hl.bind("M", hl.dsp.submap("reset"))
   hl.bind("N", hl.dsp.exec_cmd("desktop-shell shell togglePanel network"), { description = "Network panel" })

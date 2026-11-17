@@ -187,6 +187,13 @@ Item {
     onDismissed: popupHost.notifyClosed(panelId)
   }
 
+  PipelinesPanel {
+    id: pipelinesPanel
+
+    Component.onCompleted: popupHost.register(panelId, this)
+    onDismissed: popupHost.notifyClosed(panelId)
+  }
+
   RecordingPanel {
     id: recordingPanel
 

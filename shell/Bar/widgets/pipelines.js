@@ -1,7 +1,7 @@
 // The pipelines widget's tooltip, laid out the way the bar's other tooltips are: a title
 // line that answers the hover, the detail under it, and what a click does last.
 //
-// Kept free of QML so node can run it: test/pipelines-tooltip-test.sh does.
+// Kept free of QML so node can run it: test/pipelines-layout-test.sh does.
 
 // Most urgent first. "none" -- a merge request with no pipeline -- is not listed one by
 // one: it says nothing about CI, and four of them pushed the ones that did off the end.
@@ -134,9 +134,77 @@ function tooltip(requests, first, stale, colours) {
     lines.push([], [piece(more.join("  \u00b7  "), c.muted)]);
 
   // Inside the 40 characters: a longer hint wrapped onto a second line.
-  lines.push([], [piece(first && first.status !== "none" ? "Click: " + words[first.status] + "  \u00b7  right-click: all MRs" : "Right-click: all your MRs")]);
+  lines.push([], [piece(first && first.status !== "none" ? "Click: details \u00b7 right-click: " + words[first.status] : "Click for details")]);
   return render(lines, !!colours);
 }
 
+// The panel's sections: one per GitLab desktop-pipelines asks -- every host glab is
+// logged in to, in the order it asks them -- with its merge requests that have a pipeline,
+// most urgent first, and how many have none. A host with nothing open is still a section,
+// so a GitLab you added shows up before you have opened anything on it.
+function groups(info) {
+  info = info || {};
+  var requests = info.requests || [];
+  var hosts = (info.hosts || []).map(function (h) {
+    return h.host;
+  });
+  requests.forEach(function (r) {
+    if (hosts.indexOf(r.host) === -1)
+      hosts.push(r.host);
+  });
+  return hosts.map(function (host) {
+    var state = (info.hosts || []).filter(function (h) {
+      return h.host === host;
+    }).map(function (h) {
+      return h.state;
+    })[0] || "ok";
+    var mine = requests.filter(function (r) {
+      return r.host === host;
+    });
+    var listed = mine.filter(function (r) {
+      return r.status !== "none";
+    }).map(function (r, i) {
+      return { r: r, i: i };
+    }).sort(function (a, b) {
+      return rank(a.r.status) - rank(b.r.status) || a.i - b.i;
+    }).map(function (x) {
+      return {
+        status: x.r.status,
+        glyph: glyphs[x.r.status] || "",
+        urgent: x.r.status === "failed" || x.r.status === "running" || x.r.status === "pending",
+        name: name(x.r.ref) + (isDraft(x.r) ? "  draft" : ""),
+        title: title(x.r.title),
+        word: words[x.r.status],
+        pipelineUrl: x.r.pipelineUrl,
+        url: x.r.url
+      };
+    });
+    return {
+      host: host,
+      reachable: state === "ok",
+      open: mine.length,
+      requests: listed,
+      without: mine.length - listed.length
+    };
+  });
+}
+
+// The panel's headline, in words: the worst there is, or that all is quiet.
+function summary(info) {
+  var requests = (info && info.requests) || [];
+  if (requests.length === 0)
+    return "nothing open";
+  for (var i = 0; i < order.length; i++) {
+    var n = requests.filter(function (r) {
+      return r.status === order[i];
+    }).length;
+    if (n > 0 && order[i] !== "success")
+      return n + " " + words[order[i]];
+  }
+  return requests.some(function (r) {
+    return r.status === "success";
+  }) ? "all passed" : "no pipelines";
+}
+
 if (typeof module !== "undefined")
-  module.exports = { tooltip: tooltip, name: name, title: title };
+  module.exports = { tooltip: tooltip, name: name, title: title, groups: groups, summary: summary };

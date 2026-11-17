@@ -454,8 +454,18 @@ glab is logged in to: one GraphQL question per host, every minute
 answer goes to `$XDG_RUNTIME_DIR/desktop/pipelines.json`, and the bar's GitLab mark,
 beside the security shield, watches that file: red with the number failed, blue with
 the number running, amber while one waits to start or for a manual job, green when all
-passed, and gone when you have nothing open. A click opens the pipeline that matters most,
-a right click your merge requests. The tooltip counts each outcome in its title and lists
+passed, and gone when you have nothing open. A click opens the pipelines panel, as the
+security shield and the backup open theirs (`SUPER + D`, then `J`); a right click the
+pipeline that matters most.
+
+The panel has a section for each GitLab -- every host glab is logged in to, one with
+nothing open included, one off the VPN marked as such. Each lists your merge requests with
+a pipeline, most urgent first, a row opening its pipeline and a right click the merge
+request; those without a pipeline are counted, and open your merge requests there. At the
+bottom, Check now asks every GitLab at once, and Add a GitLab runs `glab auth login` in a
+terminal: the new host has its own section from the next check on.
+
+The tooltip counts each outcome in its title and lists
 the ones with a pipeline, most urgent first, each mark in its colour on the bar, the
 project and number with the title under it; those without a pipeline are counted.
 
