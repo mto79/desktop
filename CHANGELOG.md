@@ -204,6 +204,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Home is on workspace 1 even when the browser was slow to start at login and you had
+  moved on: it is brought there without taking you along, and without the windows it was
+  grouped with elsewhere.
 - The security check's way to Secure Boot is this machine's: enroll the key DKMS signs
   the NVIDIA driver with, rather than akmods' key, which signed nothing here -- and it says
   which step you are at, the key waiting for MokManager or enrolled.

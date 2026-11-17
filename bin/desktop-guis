@@ -191,12 +191,33 @@ is_home_window() {
   esac
 }
 
+# Home on workspace 1, wherever it opened. A window of your own browser has no class to be
+# placed by, so it opens on the workspace on screen when it appears -- and at login the
+# browser takes seconds to start, by when you may be elsewhere: home, and the session it
+# restored, came up on workspace 2. Moved without following, so you stay where you are.
+home_to_one() {
+  local address workspace
+  [[ -s $RUN/home ]] || return 0
+  address=$(cat "$RUN/home")
+  workspace=$(hyprctl -j clients 2>/dev/null | jq -r --arg a "$address" '.[] | select(.address == $a) | .workspace.id')
+  [[ -n $workspace && $workspace != 1 ]] || return 0
+  # In a group there with windows of its own -- Teams, restored beside it -- it would take
+  # them along: a group moves whole. Theirs are let go first, by address, no focus needed.
+  local member
+  while read -r member; do
+    [[ -n $member && $member != "$address" ]] || continue
+    grep -qxF "$member" "$RUN"/* 2>/dev/null && continue
+    hyprctl dispatch "hl.dsp.window.move({ out_of_group = true, window = \"address:$member\" })" >/dev/null
+  done < <(group_of "$address")
+  hyprctl dispatch "hl.dsp.window.move({ workspace = 1, window = \"address:$address\", follow = false })" >/dev/null
+}
+
 # A window named home there already -- the browser's session restore brings back the last
 # one, name and all -- is taken as home rather than a second opened beside it.
 adopt_home() {
   local address
   while read -r address; do
-    is_home_window "$address" && { echo "$address" >"$RUN/home"; return 0; }
+    is_home_window "$address" && { echo "$address" >"$RUN/home"; home_to_one; return 0; }
   done < <(hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class != $c) | .address')
   return 1
 }
@@ -253,6 +274,7 @@ open_home() {
       [[ -n $new ]] || continue
       if is_home_window "$new"; then
         echo "$new" >"$RUN/home"
+        home_to_one
         # Started by this, the browser opens a window of its own too, a moment apart.
         if $starting; then
           sleep "${DESKTOP_GUIS_SETTLE:-3}"
@@ -348,6 +370,8 @@ cmd_arrange() {
   # than waited for: a browser takes seconds to start, and a group put together after you had
   # gone pulled you back. Its own open arranges again once it is there.
   is_open home || setsid "$0" open home </dev/null >/dev/null 2>&1 8>&- &
+  # Open but somewhere else -- opened while you were elsewhere -- it is brought here.
+  is_open home && home_to_one
   while read -r name; do
     [[ -s $RUN/$name ]] || continue
     address=$(cat "$RUN/$name")

@@ -23,7 +23,7 @@ case "\$1" in
   fi
   [[ \$2 == activewindow ]] && { echo "{\"address\": \"\$(cat "$sandbox/active" 2>/dev/null)\"}"; exit; }
   touch "$sandbox/windows"
-  jq -R 'split("\t") | {address: .[0], class: (.[1] // "desktop-guis"), title: (.[2] // ""), workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
+  jq -R 'split("\t") | {address: .[0], class: (.[1] // "desktop-guis"), title: (.[2] // ""), workspace: {id: ((.[3] // "1") | tonumber)}, grouped: ((.[4] // "") | split(",") | map(select(. != "")))}' "$sandbox/windows" | jq -s . ;;
 dispatch) echo "dispatch \$2" >>"$sandbox/calls"
   focused=\$(sed -nE 's/^hl\.dsp\.focus.*address:([^"]+).*/\1/p' <<<"\$2")
   [[ -n \$focused ]] && echo "\$focused" >"$sandbox/active"
@@ -195,6 +195,25 @@ check "  gone partway, nothing is moved and the focus is not given back from the
   test "$(grep -c dispatch "$sandbox/calls")" = 1
 rm -f "$sandbox/ws-seq" "$sandbox/run/desktop/guis/home" "$sandbox/run/desktop/guis/ocp203"
 : >"$sandbox/windows"
+
+# --- home brought to workspace 1
+# Opened while you were on workspace 2 -- the browser slow to start at login -- home was
+# left there. The fourth column is a window's workspace.
+printf '0xhome\tbrave-browser\thome\t2\t0xhome,0xteams\n0xteams\tbrave-teams\tTeams\t2\t0xhome,0xteams\n' >"$sandbox/windows"
+mkdir -p "$sandbox/run/desktop/guis"
+echo 0xhome >"$sandbox/run/desktop/guis/home"
+echo 1 >"$sandbox/ws"
+: >"$sandbox/calls"
+guis arrange >/dev/null
+check "home opened on another workspace is moved to workspace 1, without following it" \
+  grep -qF 'hl.dsp.window.move({ workspace = 1, window = "address:0xhome", follow = false })' "$sandbox/calls"
+check "  in a group with a window of your own, that window is let go first, not taken along" \
+  test "$(grep -n -e 'out_of_group = true, window = "address:0xteams"' -e 'workspace = 1, window = "address:0xhome"' "$sandbox/calls" | cut -d: -f1 | tr '\n' ' ')" = "1 2 "
+printf '0xhome\tbrave-browser\thome\t1\n' >"$sandbox/windows"
+: >"$sandbox/calls"
+guis arrange >/dev/null
+check "  and home already there is not moved" lacks 'workspace = 1, window' "$sandbox/calls"
+rm -f "$sandbox/run/desktop/guis/home"; : >"$sandbox/windows"; echo 3 >"$sandbox/ws"
 
 # --- filled from Homer
 mkdir -p "$sandbox/homer"
