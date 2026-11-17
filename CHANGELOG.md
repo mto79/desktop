@@ -12,6 +12,11 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A cluster's web GUIs -- console, Argo CD, Grafana and the rest -- open as tabs in one
+  browser window on workspace 1 when you sign in to it, without taking you there, and
+  close when you sign out. A home window with your own links opens at login. The links
+  are in `~/.config/desktop/guis.conf`, filled from a Homer dashboard with
+  `desktop-guis import`; the window is in the theme's colours and the desktop's font.
 - A cluster says which environment it is: `env=` in clusters.conf -- devl, test, acpt, prod --
   shown after its name in the sidebar, production in red, and in `ocl list` and `ocl status`.
 - `dir=` in clusters.conf and views.conf puts a cluster's or a view's session and agent in a

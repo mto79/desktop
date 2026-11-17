@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+
+# desktop-guis: the web GUIs of what you are working on, ready on workspace 1.
+#
+#   desktop-guis open <group>     a browser window with the group's links as tabs
+#   desktop-guis close <group>    that window closed
+#   desktop-guis list             the groups, and which are open
+#   desktop-guis import <url>     the clusters' links from a Homer dashboard
+#
+# The groups are in ~/.config/desktop/guis.conf: [home], which opens at login, and one
+# section per cluster, which `ocl` opens when you sign in to the cluster and closes when
+# you sign out. A line a link, the URL and then whatever name you like:
+#
+#   [home]
+#   https://git.example/                         GitLab
+#
+#   [ocp203]
+#   https://console-openshift-console.apps.ocp203.example/   OpenShift
+#
+# Never in the repository: it names hosts, and the repository is public.
+#
+# The windows come from a browser profile of their own, started with a class of its own,
+# desktop-guis, which a window rule sends to workspace 1 without following it
+# (default/hypr/apps/guis.lua). That is what makes it ready there rather than gone to:
+# Hyprland's own groups cannot be put together without focusing each window in turn, and
+# a window placed by its title is placed too late -- a browser names a window only once its
+# page has loaded. A profile of its own keeps these sign-ins apart from your browsing too.
+#
+# The profile is dressed as the desktop: a theme generated from the current theme's
+# shell.json -- the tab strip the bar's colour, the toolbar the theme's background -- and
+# the desktop's font for the tabs and the address bar, through a GSettings file of its own.
+
+set -uo pipefail
+
+CONF="${DESKTOP_GUIS:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/guis.conf}"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/guis"
+# Not under ~/.local/share/desktop: that is the repository, and this holds sign-ins.
+PROFILE="$STATE/browser"
+RUN="${XDG_RUNTIME_DIR:-/tmp}/desktop/guis"
+THEME_DIR="${DESKTOP_THEME_DIR:-$HOME/.config/desktop/current/theme}"
+CLASS=desktop-guis
+
+die() {
+  echo "desktop-guis: $*" >&2
+  exit 1
+}
+
+# The links of a group, one URL a line; nothing when there is no such group.
+links() {
+  [[ -r $CONF ]] || return 0
+  awk -v want="[$1]" '
+    /^[[:space:]]*\[/ { gsub(/[[:space:]]/, ""); on = ($0 == want); next }
+    on { sub(/#.*/, ""); if (NF) print $1 }' "$CONF"
+}
+
+groups() {
+  [[ -r $CONF ]] || return 0
+  sed -nE 's/^[[:space:]]*\[([^]]+)\].*/\1/p' "$CONF"
+}
+
+# The browser: the default one when it is Chromium-based, since a theme and a class of its
+# own are Chromium's; chromium otherwise.
+browser() {
+  local desktop exec
+  desktop=$(xdg-settings get default-web-browser 2>/dev/null)
+  case $desktop in
+  google-chrome* | brave-browser* | microsoft-edge* | vivaldi* | chromium*) ;;
+  *) desktop=chromium-browser.desktop ;;
+  esac
+  exec=$(sed -n 's/^Exec=\([^ ]*\).*/\1/p' {~/.local,~/.nix-profile,/usr}/share/applications/"$desktop" 2>/dev/null | head -1)
+  echo "${exec:-chromium-browser}"
+}
+
+addresses() {
+  hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class == $c) | .address'
+}
+
+running() { pgrep -f -- "--user-data-dir=$PROFILE( |$)" >/dev/null 2>&1; }
+
+# What the profile is dressed in, written before it starts: Chromium reads both only then.
+dress() {
+  local font
+  mkdir -p "$PROFILE/Default" "$STATE/theme" "$STATE/env/glib-2.0/settings"
+  python3 - "$THEME_DIR/shell.json" "$STATE/theme/manifest.json" "$PROFILE/Default/Preferences" <<'EOF'
+import json, os, sys
+shell, manifest, prefs = sys.argv[1:]
+try:
+    t = json.load(open(shell))
+except (OSError, ValueError):
+    t = {}
+bar = t.get("bar", {})
+background = t.get("background", "#1a1b26")
+def rgb(h):
+    h = h.lstrip("#")
+    return [int(h[i:i + 2], 16) for i in (0, 2, 4)]
+colours = {
+    "frame": bar.get("background", background), "frame_inactive": bar.get("background", background),
+    "toolbar": background, "tab_text": t.get("foreground", "#c0caf5"),
+    "tab_background_text": t.get("muted", "#565f89"), "tab_background_text_inactive": t.get("muted", "#565f89"),
+    "bookmark_text": t.get("foreground", "#c0caf5"), "toolbar_text": t.get("foreground", "#c0caf5"),
+    "toolbar_button_icon": t.get("foreground", "#c0caf5"), "omnibox_background": bar.get("raised", background),
+    "omnibox_text": t.get("foreground", "#c0caf5"), "ntp_background": background,
+    "ntp_text": t.get("foreground", "#c0caf5"), "ntp_link": t.get("accent", "#7aa2f7"),
+}
+json.dump({"manifest_version": 3, "name": "Desktop theme", "version": "1",
+           "theme": {"colors": {k: rgb(v) for k, v in colours.items()}}}, open(manifest, "w"), indent=1)
+try:
+    p = json.load(open(prefs))
+except (OSError, ValueError):
+    p = {}
+# Dark, and the windows of last time not brought back: a group is opened when it is wanted.
+p.setdefault("browser", {}).setdefault("theme", {})["color_scheme2"] = 2
+p["browser"]["has_seen_welcome_page"] = True
+p.setdefault("session", {})["restore_on_startup"] = 5
+# Brave's own first-run notice about its usage statistics, answered: off, and not asked.
+p.setdefault("brave", {})["p3a"] = {"enabled": False, "notice_acknowledged": True}
+# A group's window is closed for you on sign-out; Brave would otherwise stop and ask
+# whether all its tabs are to go, and the window stayed.
+p["brave"]["enable_window_closing_confirm"] = False
+json.dump(p, open(prefs, "w"))
+# Gone with its last window, rather than kept running in the background: the next group
+# then starts it afresh, in the theme and the font of the moment. A setting of the whole
+# profile directory, so in Local State rather than the profile's Preferences.
+local = os.path.join(os.path.dirname(os.path.dirname(prefs)), "Local State")
+try:
+    state = json.load(open(local))
+except (OSError, ValueError):
+    state = {}
+state.setdefault("background_mode", {})["enabled"] = False
+json.dump(state, open(local, "w"))
+EOF
+  font=$(desktop-font-current 2>/dev/null)
+  printf "[org/gnome/desktop/interface]\nfont-name='%s 11'\ncolor-scheme='prefer-dark'\n" "${font:-monospace}" \
+    >"$STATE/env/glib-2.0/settings/keyfile"
+}
+
+cmd_open() {
+  local name=$1 urls before after new i
+  mapfile -t urls < <(links "$name")
+  ((${#urls[@]})) || return 0
+  mkdir -p "$RUN"
+  exec 9>"$RUN/.lock"
+  flock 9
+  # Open already: left as it is.
+  if [[ -s $RUN/$name ]] && addresses | grep -qxF "$(cat "$RUN/$name")"; then
+    return 0
+  fi
+  before=$(addresses)
+  running || dress
+  # Without the lock's descriptor: a browser that kept it would hold the lock for as long
+  # as it runs, and the next group would wait for it for ever.
+  XDG_CONFIG_HOME="$STATE/env" GSETTINGS_BACKEND=keyfile setsid uwsm app -- "$(browser)" \
+    --user-data-dir="$PROFILE" --class="$CLASS" --no-first-run --no-default-browser-check \
+    --disable-features=DisableLoadExtensionCommandLineSwitch --load-extension="$STATE/theme" \
+    --new-window "${urls[@]}" >/dev/null 2>&1 9>&- &
+  # The new window, to be closed by when the group is.
+  for ((i = 0; i < 60; i++)); do
+    sleep 0.25
+    after=$(addresses)
+    new=$(comm -13 <(sort <<<"$before") <(sort <<<"$after") | head -1)
+    [[ -n $new ]] && { echo "$new" >"$RUN/$name"; return 0; }
+  done
+  echo "desktop-guis: $name's window did not appear" >&2
+  return 1
+}
+
+cmd_close() {
+  local name=$1 address
+  [[ -s $RUN/$name ]] || return 0
+  address=$(cat "$RUN/$name")
+  rm -f "$RUN/$name"
+  if addresses | grep -qxF "$address"; then
+    hyprctl dispatch "hl.dsp.window.close({ window = \"address:$address\" })" >/dev/null
+  fi
+  # The last window gone, the browser goes too. Brave keeps itself running in the
+  # background whatever the profile says; ended, the next group starts it afresh, in the
+  # theme and the font of the moment.
+  for _ in $(seq 20); do
+    [[ -z $(addresses) ]] && break
+    sleep 0.2
+  done
+  [[ -z $(addresses) ]] && pkill -TERM -f -- "--user-data-dir=$PROFILE( |$)" 2>/dev/null
+  return 0
+}
+
+cmd_list() {
+  local name state
+  while read -r name; do
+    state=closed
+    [[ -s $RUN/$name ]] && addresses | grep -qxF "$(cat "$RUN/$name")" && state=open
+    printf '%-12s %-7s %s links\n' "$name" "$state" "$(links "$name" | wc -l)"
+  done < <(groups)
+}
+
+# A Homer dashboard's sections named after a cluster -- "OCP203 | Production" -- become that
+# cluster's group, every link in it. The other groups in the file, [home] first, are kept
+# as they are; a cluster's group that was there is replaced.
+cmd_import() {
+  local url=$1 yaml
+  [[ $url == */config.yml ]] || url="${url%/}/assets/config.yml"
+  yaml=$(mktemp)
+  # Expanded now: the trap runs after this function, when its locals are gone.
+  # shellcheck disable=SC2064
+  trap "rm -f '$yaml'" EXIT
+  curl -fsSL --max-time 20 -o "$yaml" "$url" || die "could not fetch $url"
+  mkdir -p "$(dirname "$CONF")"
+  [[ -f $CONF ]] || printf '# desktop-guis: [group], then a link a line -- the URL and a name.\n\n[home]\n' >"$CONF"
+  python3 - "$CONF" "$yaml" <<'EOF' || die "could not read $url as a Homer config"
+import re, sys, yaml
+conf, source = sys.argv[1:]
+homer = yaml.safe_load(open(source)) or {}
+found = {}
+for section in homer.get("services") or []:
+    m = re.match(r"\s*([A-Za-z]+\d+)\b", section.get("name") or "")
+    if not m:
+        continue
+    lines = []
+    for item in section.get("items") or []:
+        if item.get("url"):
+            lines.append(f"{item['url']}  {item.get('name', '')}".rstrip())
+    found[m.group(1).lower()] = lines
+# The file as it is, with the clusters' groups taken out where Homer has them.
+kept, skip = [], False
+for line in open(conf).read().splitlines():
+    head = re.match(r"\s*\[([^]]+)\]", line)
+    if head:
+        skip = head.group(1) in found
+    if not skip:
+        kept.append(line)
+while kept and not kept[-1].strip():
+    kept.pop()
+out = kept
+for name in sorted(found):
+    out += ["", f"[{name}]"] + found[name]
+open(conf, "w").write("\n".join(out) + "\n")
+print(f"{len(found)} groups from Homer: {', '.join(sorted(found))}")
+EOF
+}
+
+case "${1:-}" in
+open) cmd_open "${2:?usage: desktop-guis open <group>}" ;;
+close) cmd_close "${2:?usage: desktop-guis close <group>}" ;;
+list) cmd_list ;;
+import) cmd_import "${2:?usage: desktop-guis import <homer url>}" ;;
+-h | --help | "") sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+*) die "unknown command '$1' (see desktop-guis --help)" ;;
+esac

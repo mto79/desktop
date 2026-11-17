@@ -20,4 +20,8 @@ hl.on("hyprland.start", function()
   -- Clipboard history: keeps what is copied, text and images, so SUPER+V can offer it
   -- again. Leaves alone whatever a password manager copies -- see desktop-clipboard.
   hl.exec_cmd("uwsm app -- desktop-clipboard watch")
+
+  -- The home group of web GUIs, ready on workspace 1 (desktop-guis; nothing when
+  -- ~/.config/desktop/guis.conf has no [home] links).
+  hl.exec_cmd("desktop-guis open home")
 end)

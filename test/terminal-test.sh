@@ -17,7 +17,8 @@ done
 
 # Ghostty cannot set a Wayland app id, so a launcher passing --class is silently
 # ignored and its window rule never matches.
-hits=$(grep -rn -- "--class" "$ROOT/bin" 2>/dev/null || true)
+# Only where ghostty is started: a Chromium browser does take --class (desktop-guis).
+hits=$(grep -rln ghostty "$ROOT/bin" 2>/dev/null | xargs -r grep -n -- "--class" 2>/dev/null || true)
 if [[ -z $hits ]]; then
   pass "no launcher passes --class to ghostty"
 else

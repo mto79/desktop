@@ -14,6 +14,12 @@ sandbox=$(mktemp -d)
 trap 'rm -rf "$sandbox"' EXIT
 stubs="$sandbox/stubs"
 mkdir -p "$stubs" "$sandbox/config/desktop" "$sandbox/state"
+# The web GUIs, never the real ones: written down, in a file of their own.
+cat >"$stubs/desktop-guis" <<STUB
+#!/usr/bin/env bash
+echo "desktop-guis \$*" >>"$sandbox/guis-calls"
+STUB
+chmod +x "$stubs/desktop-guis"
 log="$sandbox/calls"
 
 # kubeconfig <file>: the file a stub was pointed at.
@@ -281,7 +287,11 @@ echo "desktop-agent-layout \$*" >>"$log"
 STUB
 chmod +x "$stubs/tmux" "$stubs/desktop-agent-layout"
 printf 'context=ocp202\ncluster=x\ntoken=good\n' >"$store/ocp202.kubeconfig"
-TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
+: >"$sandbox/guis-calls"
+HYPRLAND_INSTANCE_SIGNATURE=x TMUX=/tmp/fake,1,0 run session ocp202 >/dev/null 2>&1
+sleep 0.3
+check "opening a cluster's session opens its web GUIs too, signed in already or not" \
+  grep -q "^desktop-guis open ocp202$" "$sandbox/guis-calls"
 check "a session named after the cluster is made, with a shell on it" \
   grep -q "^tmux new-session -d -s ocp202 -n shell .*desktop-cluster ocp202\$" "$sandbox/tmux-calls"
 check "its shell is the window's terminal, for prefix + t to add tabs to" \
@@ -434,15 +444,22 @@ check "and not in the browser's last window" bash -c "! grep -q '^xdg-open' '$lo
 check "that window is closed once oc is done" called 'hyprctl hl.dsp.window.close({ window = "address:0xa1" })'
 check "and no other" test "$(grep -c window.close "$log")" = 1
 check "signed in all the same" grep -q token=good "$store/web.kubeconfig"
+settle_guis() { for _ in $(seq 20); do grep -q "$1" "$sandbox/guis-calls" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+check "a sign-in opens the cluster's web GUIs on workspace 1" settle_guis "^desktop-guis open web$"
 touch "$sandbox/refuse"; : >"$log"
 HYPRLAND_INSTANCE_SIGNATURE=x run login web >/dev/null 2>&1
 rm -f "$sandbox/refuse"
 check "a sign-in that fails closes it too" called 'address:0xa1'
 : >"$log"
-run logout web >/dev/null 2>&1
+: >"$sandbox/guis-calls"
+HYPRLAND_INSTANCE_SIGNATURE=x run logout web >/dev/null 2>&1
+check "a sign-out closes them" settle_guis "^desktop-guis close web$"
+: >"$sandbox/guis-calls"
 HYPRLAND_INSTANCE_SIGNATURE= run login web >/dev/null 2>&1
 check "off the desktop, oc opens it as it always did" called "xdg-open https://oauth-openshift.apps.web.example"
 check "and nothing is closed" bash -c "! grep -q window.close '$log'"
+sleep 0.5
+check "nor any GUIs opened, off the desktop" test ! -s "$sandbox/guis-calls"
 
 # A sign-in window closed before signing in, or never used: oc is not left waiting for ever,
 # and nor is the tmux window the sidebar opened for it.

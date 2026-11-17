@@ -12,6 +12,7 @@ and stays there; these pages are the map between them.
 | [shell.md](shell.md) | The Quickshell shell: bar, panels, launcher, notifications, dashboard, and how to drive it from a terminal. |
 | [agents-and-tmux.md](agents-and-tmux.md) | Coding agents, their state on the bar, tmux sessions, and tasks in worktrees. |
 | [clusters.md](clusters.md) | OpenShift, RKE2, Talos and Kubernetes clusters through `ocl`: one kubeconfig each, the dashboard, menu and voice. |
+| [guis.md](guis.md) | The web GUIs of what you work on: a browser window per cluster on workspace 1, opened on sign-in, closed on sign-out. |
 | [system.md](system.md) | Backups, the security check, network, storage, audio and Bluetooth. |
 | [voice.md](voice.md) | Dictation, voice commands, speech, and meeting capture. |
 | [themes.md](themes.md) | What a theme is made of and what switching one touches. |

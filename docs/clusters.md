@@ -66,6 +66,10 @@ At the prompt, `kubectl` and `oc` are fish functions that run them through kubec
 shell; desktop-cluster and every script call the command itself. kubecolor runs oc rather
 than kubectl when `KUBECTL_COMMAND=oc`, which the `oc` function sets.
 
+Signing in to a cluster, or opening its session, also opens its web GUIs -- console, Argo
+CD, Grafana -- as one browser window ready on workspace 1, and `ocl logout` closes it: see
+[guis.md](guis.md).
+
 `ocl logout` also closes the cluster's tmux session. Everything in it held a copy of the
 token the sign-out revokes, so it had all stopped working while still looking signed in.
 

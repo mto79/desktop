@@ -95,6 +95,7 @@ plymouth
 plymouth-plugin-*
 power-profiles-daemon
 pulseaudio-utils
+python3-pyyaml
 remmina
 rhtlc
 ruby
