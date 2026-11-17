@@ -152,6 +152,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- The Tokyo Night wallpapers no longer carry the wallpaper site's label in their bottom
+  right corner.
 - The pipelines tooltip is in colour: each status mark as the bar draws it -- red failed,
   amber waiting, green passed -- and the titles quieter than the names under them.
 - The login screen fills the laptop's screen rather than a corner of it, in the desktop's
