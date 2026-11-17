@@ -227,6 +227,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A tap on the touchpad clicks at the login screen too, as it does once you are logged in:
+  the login button could only be pressed by pushing the touchpad down.
 - Workspace 1 has one home at login again when last session ended with home open: the
   browser's restored home is used, rather than a second one opened beside it.
 - opencode's tokens show in the AI panel's last seven days again: newer opencode keeps a

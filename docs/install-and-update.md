@@ -34,6 +34,11 @@ screen it is on, with its font size following the screen's height, in Tokyo Nigh
 JetBrains Mono. SDDM runs its greeter as its own user, which reads no one's home, so the
 font is the system's `jetbrains-mono-fonts`, not the Nerd Font under `~/.local/share/fonts`.
 
+The greeter is drawn by Weston (`weston --shell=kiosk`), not Hyprland, and Weston leaves a
+touchpad's tap-to-click off where Hyprland turns it on: a tap on the login button did
+nothing. `sddm.sh` installs `default/sddm/weston.ini`, which turns it on, to `/etc/sddm/`,
+and `default/sddm/weston.conf` to `/etc/sddm.conf.d/` so SDDM starts Weston with it.
+
 ## Update
 
 `desktop-update` runs, in order:

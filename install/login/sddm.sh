@@ -31,6 +31,11 @@ sudo tee /etc/sddm.conf.d/theme.conf >/dev/null <<EOF
 Current=$THEME_NAME
 EOF
 
+# Tap-to-click at the login screen: SDDM draws it in Weston, which leaves a touchpad's
+# taps off where Hyprland turns them on. See default/sddm/weston.ini.
+sudo install -D -m 0644 "$DESKTOP_PATH/default/sddm/weston.ini" /etc/sddm/weston.ini
+sudo install -D -m 0644 "$DESKTOP_PATH/default/sddm/weston.conf" /etc/sddm.conf.d/weston.conf
+
 # Clean up temporary files
 echo "Cleaning up..."
 rm -rf "$TEMP_DIR"
