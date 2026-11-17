@@ -104,6 +104,7 @@ shift 2  # app --
 case "$1" in
 brave-browser) exec fake-app brave-browser "$@" ;;
 ghostty) exec fake-app com.mitchellh.ghostty "$@" ;;
+keepassxc) exec fake-app org.keepassxc.KeePassXC "$@" ;;
 esac
 STUB
 cat >"$stubs/desktop-launch-webapp" <<'STUB'
@@ -111,7 +112,6 @@ cat >"$stubs/desktop-launch-webapp" <<'STUB'
 host=${1#https://}
 exec fake-app "brave-${host%%/*}__-Default" "$@"
 STUB
-printf '#!/usr/bin/env bash\nexec fake-app org.keepassxc.KeePassXC keepassxc\n' >"$sandbox/.local/bin/KeePassXC.AppImage"
 printf '#!/usr/bin/env bash\nexec fake-app md.obsidian.Obsidian obsidian\n' >"$sandbox/.local/bin/Obsidian.AppImage"
 printf '#!/usr/bin/env bash\necho "$*" >>"$TMUX_LOG"\n[[ $1 != has-session ]]\n' >"$stubs/tmux"
 # Not a noop: what matters is that the login lays the llm-wiki session out, and with

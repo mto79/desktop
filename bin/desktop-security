@@ -341,7 +341,7 @@ check_filesystem() {
 check_processes() {
   local hits exe target mount
   # AppImages are the exception: they mount themselves under /tmp/.mount_* and run from
-  # there by design -- Obsidian and KeePassXC do on this machine. The mount says which.
+  # there by design -- Obsidian does on this machine. The mount says which.
   local appimages
   appimages=$(findmnt -rno TARGET,SOURCE -t fuse 2>/dev/null; findmnt -rno TARGET,SOURCE 2>/dev/null | awk '$2 ~ /\.AppImage$/')
   hits=$(for exe in /proc/[0-9]*/exe; do

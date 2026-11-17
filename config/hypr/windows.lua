@@ -1,9 +1,9 @@
 -- Add custom window config in this file.
 
--- KeePassXC and Obsidian are AppImages, and each re-execs into its own systemd scope:
--- the process Hyprland spawns is not the one that ends up owning the window, so an exec
--- rule placing it on a workspace has nothing to match. desktop-workspace-start places
--- them at login; matching the window's own class keeps them there when opened later.
+-- KeePassXC and Obsidian are placed by their window's class. Obsidian is an AppImage and
+-- re-execs into its own systemd scope, so the process Hyprland spawns is not the one that
+-- ends up owning the window and an exec rule has nothing to match. desktop-workspace-start
+-- places them at login; the class keeps them there when opened later.
 hl.window_rule({ match = { class = "^(org\\.keepassxc\\.KeePassXC)$" }, workspace = "4 silent" })
 hl.window_rule({ match = { class = "^(md\\.obsidian\\.Obsidian)$" }, workspace = "5 silent" })
 

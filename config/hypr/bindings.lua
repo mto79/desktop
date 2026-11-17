@@ -1,6 +1,6 @@
 -- Application bindings
 local terminal = "uwsm app -- $TERMINAL"
-local passwordmanager = "~/.local/bin/KeePassXC.AppImage"
+local passwordmanager = "uwsm app -- keepassxc"
 
 hl.bind("SUPER + return", hl.dsp.exec_cmd("desktop-launch-terminal"), { description = "Terminal" })
 hl.bind("SUPER + E", hl.dsp.exec_cmd("uwsm app -- nautilus --new-window"), { description = "File Explorer" })

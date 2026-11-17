@@ -65,10 +65,9 @@ BarWidget {
   //
   //   {"id": "tray", "glyphs": {"keepassxc": "\uf084", "nm-applet": "\uf1eb"}}
   //
-  // A rescue, not a restyle. Two icons on this machine genuinely cannot be resolved --
-  // keepassxc-locked, because KeePassXC is an AppImage and only its main icon was copied
-  // out, and nm-no-connection-secure -- and both would otherwise be Qt's magenta
-  // checkerboard. Everything that does resolve keeps the icon the application shipped,
+  // A rescue, not a restyle. nm-no-connection-secure genuinely cannot be resolved on this
+  // machine, and would otherwise be Qt's magenta checkerboard -- as keepassxc-locked was
+  // while KeePassXC was an AppImage with only its main icon copied out. Everything that does resolve keeps the icon the application shipped,
   // in the colours it shipped it in, because a tray of identical monochrome glyphs is
   // harder to read at a glance than a row of icons you already recognise by shape and
   // colour from every other desktop you have used.

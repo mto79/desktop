@@ -7,8 +7,8 @@
 #
 # Filesystems come from df, grouped by device: on btrfs / and /home are one volume with
 # two mount points, and listing it twice would count its space twice. Pseudo filesystems
-# and FUSE mounts are left out -- an AppImage is a filesystem too, and KeePassXC alone
-# mounts two. Each one carries what lsblk knows of the disk under it, through any LUKS
+# and FUSE mounts are left out -- an AppImage is a filesystem too, and Obsidian's mounts
+# one. Each one carries what lsblk knows of the disk under it, through any LUKS
 # or LVM layer: its model, whether it is encrypted, whether it can be unplugged.
 #
 # --usage measures the folders that grow without anyone deciding they should: downloads,

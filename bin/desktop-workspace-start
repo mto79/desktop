@@ -98,7 +98,7 @@ desktop-tmux-restore restore >/dev/null 2>&1 &
   open_on 2 brave-teams.microsoft.com__-Default desktop-launch-webapp "https://teams.microsoft.com"
 } &
 open_on 3 com.mitchellh.ghostty uwsm app -- ghostty -e tmux attach-session -t home &
-open_on 4 org.keepassxc.KeePassXC "$HOME/.local/bin/KeePassXC.AppImage" &
+open_on 4 org.keepassxc.KeePassXC uwsm app -- keepassxc &
 open_on 5 md.obsidian.Obsidian "$HOME/.local/bin/Obsidian.AppImage" &
 wait
 

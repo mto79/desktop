@@ -147,6 +147,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- KeePassXC is Fedora's package rather than an AppImage in your home folder: updated with
+  the rest of the system, out of reach of anything running as you, and with the
+  fingerprint unlock as before. `desktop-update` makes the change and removes the AppImage.
 - On a bar short of room the memory widget keeps its number, as the CPU keeps its percentage;
   the disk gives way first instead.
 - The tmux sidebar is in sections that fold -- repositories, clusters, agents -- under a
