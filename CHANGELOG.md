@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- The web GUI windows on workspace 1 are one Hyprland group, a tab per cluster -- home,
+  ocp202, ocp203 -- put together when you go there, never pulling you there. Grouped
+  windows' tabs are drawn like tmux's, in the theme's colours and the desktop font.
 - Brave, Chromium and Firefox are in the desktop's theme -- the tab strip the bar's colour,
   the toolbar the theme's background -- and switch with it, each at its next start. Firefox
   has the desktop font for its tabs and menus too.

@@ -15,7 +15,8 @@ mkdir -p "$stubs" "$sandbox/config/desktop" "$sandbox/theme" "$sandbox/run"
 cat >"$stubs/hyprctl" <<STUB
 #!/usr/bin/env bash
 case "\$1" in
--j) touch "$sandbox/windows"; jq -R '{class: "desktop-guis", address: .}' "$sandbox/windows" | jq -s . ;;
+-j) [[ \$2 == activeworkspace ]] && { echo '{"id": 3}'; exit; }
+  touch "$sandbox/windows"; jq -R '{class: "desktop-guis", address: ., workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
 dispatch) echo "dispatch \$2" >>"$sandbox/calls"
   gone=\$(sed -nE 's/.*address:([^"]+).*/\1/p' <<<"\$2")
   [[ -n \$gone ]] && sed -i "/^\$gone\$/d" "$sandbox/windows" ;;
@@ -55,7 +56,7 @@ guis() {
 : >"$sandbox/calls"
 guis open ocp203 >/dev/null
 check "a group opens as one browser window, its links the tabs, commented ones left out" \
-  grep -qE -- '--new-window https://console.ocp203.example/ https://argocd.ocp203.example/ ' "$sandbox/calls"
+  grep -qE -- '--new-window --window-name=ocp203 https://console.ocp203.example/ https://argocd.ocp203.example/ ' "$sandbox/calls"
 check "  in a profile of its own, with the class the workspace 1 rule matches" \
   grep -qE -- "--user-data-dir=$sandbox/state/desktop/guis/browser --class=desktop-guis " "$sandbox/calls"
 check "  dressed in the theme: a theme generated from shell.json" \
@@ -67,11 +68,19 @@ check "  which the browser is pointed at" \
   grep -qE "CONFIG=$sandbox/state/desktop/guis/env BACKEND=keyfile$" "$sandbox/calls"
 check "  dark, and not bringing back the windows of last time" \
   test "$(jq -c '[.browser.theme.color_scheme2, .session.restore_on_startup]' "$sandbox/state/desktop/guis/browser/Default/Preferences")" = '[2,5]'
+check "  named after its group, the name its tab in the group bar shows" \
+  grep -qE -- '--window-name=ocp203 ' "$sandbox/calls"
 check "the window it made is remembered" test "$(cat "$sandbox/run/desktop/guis/ocp203")" = 0xnew0
 : >"$sandbox/calls"
 guis open ocp203 >/dev/null
 check "opened again while its window is there, nothing more is opened" lacks browser "$sandbox/calls"
 check "a group with no links opens nothing" test -z "$(guis open nope; grep browser "$sandbox/calls")"
+
+: >"$sandbox/calls"
+guis arrange
+check "arranging off workspace 1 touches nothing: nothing is pulled anywhere" lacks dispatch "$sandbox/calls"
+check "  and going to workspace 1 is what arranges it, in the Lua config" \
+  grep -q 'workspace.id == 1' "$ROOT/default/hypr/apps/guis.lua"
 
 # --- closed
 guis close ocp203

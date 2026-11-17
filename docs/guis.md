@@ -2,8 +2,9 @@
 
 The web GUIs of what you are working on, ready on workspace 1: a cluster's console, its
 Argo CDs, Grafana and the rest, as tabs in one browser window per cluster, opened when you
-sign in to the cluster and closed when you sign out. A home window, with whatever you
-always want, opens at login and is the first on the workspace.
+sign in to the cluster and closed when you sign out. On workspace 1 they are one Hyprland
+group, a tab each. A home window, with whatever you always want, opens at login and is the
+first tab.
 
     desktop-guis open <group>     a browser window with the group's links as tabs
     desktop-guis close <group>    that window closed
@@ -34,12 +35,24 @@ first, are kept as they are; run it again when the dashboard changes.
 
 The file is never in the repository: it names hosts, and the repository is public.
 
-## Why a browser window, and not Hyprland's groups
+## One group on workspace 1
 
-Hyprland groups windows as tabs, but in 0.56 a window can only be moved into a group by
-focusing it: building a group means going to it, which is the opposite of having it ready.
-The `invade` rule and `group:auto_group` do not add a window to a group on another
-workspace either. So each group is one browser window, its links the tabs.
+Each group is a browser window of its own, named after the group (`--window-name`), and on
+workspace 1 they are one Hyprland group: a tab bar reading `home | ocp202 | ocp203`, in the
+theme's colours and the desktop font (`group.groupbar` in `looknfeel.lua`, its colours in
+each theme's `hyprland.lua`), drawn as tmux draws its tabs.
+
+Hyprland moves a window into a group only by focusing it -- `window = ...` is ignored for
+`into_group`, and the `invade` rule and `group:auto_group` add nothing to a group on another
+workspace. So the windows are put together when you arrive on workspace 1, where the focus
+is going anyway: `guis.lua` runs `desktop-guis arrange` on `workspace.active` for workspace
+1, and `open` runs it when workspace 1 is on screen. Until you look, they wait there side by
+side; arranging never pulls you anywhere, and gives the focus back to the window that had
+it. The order is guis.conf's, home first.
+
+`hl.dsp.group.lock` is Hyprland's lock on every group at once (`lockgroups`), not one
+group's: set, nothing can join any group, and every `into_group` answers "ok" and does
+nothing.
 
 The windows come from a browser profile of their own (`~/.local/state/desktop/guis/browser`),
 started with the class `desktop-guis`. A window rule (`default/hypr/apps/guis.lua`) puts

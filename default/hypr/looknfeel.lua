@@ -96,3 +96,25 @@ hl.animation({ leaf = "fadeLayersIn", enabled = true, speed = 1.79, bezier = "al
 hl.animation({ leaf = "fadeLayersOut", enabled = true, speed = 1.39, bezier = "almostLinear" })
 -- Workspace switches are instant.
 hl.animation({ leaf = "workspaces", enabled = false })
+
+-- Grouped windows -- the web GUIs on workspace 1 (desktop-guis) -- as a row of tabs, drawn
+-- like tmux's: filled, square, in the desktop font. "monospace" is the fontconfig alias
+-- desktop-font-set points at the desktop font, so a font switch reaches the tabs too. The
+-- colours are the theme's (each theme's hyprland.lua).
+hl.config({
+  group = {
+    groupbar = {
+      font_family = "monospace",
+      font_size = 11,
+      height = 22,
+      gradients = true,
+      rounding = 0,
+      gradient_rounding = 0,
+      indicator_height = 0,
+      gaps_in = 2,
+      gaps_out = 0,
+      keep_upper_gap = false,
+      render_titles = true,
+    },
+  },
+})
