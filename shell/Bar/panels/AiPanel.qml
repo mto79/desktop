@@ -25,6 +25,11 @@ Popup {
   property var tokens: null
   property bool available: false
 
+  // Codex's plan, beside Claude's: its own limits, from desktop-status-codex. Shown only
+  // once there is an answer, so a machine without Codex has no empty heading.
+  property string codexPlan: ""
+  property var codexLimits: []
+
   property var agents: []
 
   // One entry per Claude Code session that reports its state through the hooks, needing
@@ -217,6 +222,29 @@ Popup {
     }
   }
 
+  Process {
+    id: codexReport
+
+    command: ["desktop-status-codex"]
+
+    function reload() {
+      if (!running)
+        running = true;
+    }
+
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var data = JSON.parse(text);
+          root.codexPlan = data.plan || "";
+          root.codexLimits = data.available ? (data.limits || []) : [];
+        } catch (e) {
+          root.codexLimits = [];
+        }
+      }
+    }
+  }
+
   // The count on the bar is a number; here it is worth naming which tools they are.
   Process {
     id: agentProbe
@@ -315,12 +343,60 @@ Popup {
     triggeredOnStart: true
     onTriggered: {
       report.reload();
+      codexReport.reload();
       agentProbe.reload();
       tokenReport.reload();
       if (!sayStatus.running)
         sayStatus.running = true;
       if (!voiceList.running)
         voiceList.running = true;
+    }
+  }
+
+  // One limit: its name, how full and when it resets, and a meter. Claude's and Codex's
+  // alike, so the two read the same.
+  Component {
+    id: limitRow
+
+    Item {
+      required property var modelData
+
+      width: column.width
+      height: 42
+
+      Text {
+        id: limitName
+
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.top: parent.top
+        anchors.topMargin: 4
+        text: parent.modelData.name
+        color: Color.popupText
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize
+      }
+
+      Text {
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.baseline: limitName.baseline
+        text: parent.modelData.percent + "%" + (parent.modelData.resets ? "  ·  resets " + parent.modelData.resets : "")
+        color: Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: Style.fontSize - 2
+      }
+
+      PanelMeter {
+        anchors.left: parent.left
+        anchors.leftMargin: 6
+        anchors.right: parent.right
+        anchors.rightMargin: 6
+        anchors.top: limitName.bottom
+        anchors.topMargin: 7
+        value: parent.modelData.percent / 100
+        fillColor: root.tone(parent.modelData.severity, parent.modelData.percent)
+      }
     }
   }
 
@@ -378,47 +454,19 @@ Popup {
 
     Repeater {
       model: root.limits
+      delegate: limitRow
+    }
 
-      delegate: Item {
-        required property var modelData
+    PanelSection {
+      title: "Codex"
+      value: root.codexPlan !== "" ? root.codexPlan + " plan" : ""
+      rule: true
+      visible: root.codexLimits.length > 0
+    }
 
-        width: column.width
-        height: 42
-
-        Text {
-          id: limitName
-
-          anchors.left: parent.left
-          anchors.leftMargin: 6
-          anchors.top: parent.top
-          anchors.topMargin: 4
-          text: parent.modelData.name
-          color: Color.popupText
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize
-        }
-
-        Text {
-          anchors.right: parent.right
-          anchors.rightMargin: 6
-          anchors.baseline: limitName.baseline
-          text: parent.modelData.percent + "%" + (parent.modelData.resets ? "  ·  resets " + parent.modelData.resets : "")
-          color: Color.popupMuted
-          font.family: Style.fontFamily
-          font.pixelSize: Style.fontSize - 2
-        }
-
-        PanelMeter {
-          anchors.left: parent.left
-          anchors.leftMargin: 6
-          anchors.right: parent.right
-          anchors.rightMargin: 6
-          anchors.top: limitName.bottom
-          anchors.topMargin: 7
-          value: parent.modelData.percent / 100
-          fillColor: root.tone(parent.modelData.severity, parent.modelData.percent)
-        }
-      }
+    Repeater {
+      model: root.codexLimits
+      delegate: limitRow
     }
 
     // Money, not tokens, which is why it sits under its own heading rather than in the

@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+
+"""Codex's plan limits, for the AI panel, beside Claude's.
+
+    desktop-status-codex          the limits as JSON: plan, each limit, how full, when it resets
+
+The numbers come from the endpoint the Codex CLI's own /status reads, on chatgpt.com,
+authenticated with the token Codex keeps in ~/.codex/auth.json -- read at the moment of
+the call, never written down, sent nowhere but to OpenAI. An expired token is left alone:
+refreshing it is Codex's job, and asking anyway buys a 401.
+
+A plan has a window or two -- five hours and a week on the paid plans, thirty days on the
+free one -- each named here by its length. The answer is cached in the runtime directory
+for five minutes, as Claude's is: the panel asks every thirty seconds while open, and the
+endpoint is nobody's to hammer. A failed call answers from the cache at any age.
+"""
+
+import base64
+import json
+import os
+import sys
+import time
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+USAGE_URL = os.environ.get("DESKTOP_CODEX_USAGE_URL", "https://chatgpt.com/backend-api/wham/usage")
+CACHE_SECONDS = 300
+REQUEST_TIMEOUT = 8
+
+
+def codex_home():
+    return Path(os.environ.get("CODEX_HOME", "~/.codex")).expanduser()
+
+
+def cache_file():
+    return Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / "desktop" / "codex-usage.json"
+
+
+def credentials():
+    """The access token and account, or (None, None) when there is none or it expired."""
+    try:
+        with (codex_home() / "auth.json").open() as handle:
+            tokens = json.load(handle).get("tokens") or {}
+    except (OSError, ValueError, AttributeError):
+        return None, None
+    token = tokens.get("access_token")
+    if not isinstance(token, str) or not token:
+        return None, None
+    try:
+        payload = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        if isinstance(claims.get("exp"), (int, float)) and claims["exp"] < time.time():
+            return None, None
+    except (IndexError, ValueError):
+        pass  # Not a JWT we can read: let the endpoint decide.
+    return token, tokens.get("account_id")
+
+
+def cached(max_age):
+    path = cache_file()
+    try:
+        if max_age is not None and time.time() - path.stat().st_mtime > max_age:
+            return None
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def store(data):
+    path = cache_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
+            json.dump(data, handle)
+    except OSError:
+        pass
+
+
+def fetch(token, account):
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": "codex-cli", "Accept": "application/json"}
+    if account:
+        headers["ChatGPT-Account-Id"] = account
+    try:
+        with urllib.request.urlopen(urllib.request.Request(USAGE_URL, headers=headers),
+                                    timeout=REQUEST_TIMEOUT) as response:
+            return json.load(response)
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
+def usage():
+    fresh = cached(CACHE_SECONDS)
+    if fresh is not None:
+        return fresh
+    token, account = credentials()
+    if token:
+        answer = fetch(token, account)
+        if isinstance(answer, dict):
+            store(answer)
+            return answer
+    return cached(None)
+
+
+def window_name(seconds):
+    if not isinstance(seconds, (int, float)) or seconds <= 0:
+        return "Limit"
+    hours = seconds / 3600
+    if hours <= 24:
+        return "Session" if round(hours) == 5 else f"{round(hours)} hours"
+    days = round(hours / 24)
+    return {7: "Weekly", 30: "Monthly"}.get(days, f"{days} days")
+
+
+def until(reset_at):
+    """"in 2h35m" inside the day, a weekday and time inside the week, a date beyond."""
+    if not isinstance(reset_at, (int, float)):
+        return ""
+    seconds = int(reset_at - time.time())
+    if seconds <= 0:
+        return "now"
+    moment = datetime.fromtimestamp(reset_at, timezone.utc).astimezone()
+    if seconds < 24 * 3600:
+        hours, minutes = divmod(seconds // 60, 60)
+        return f"in {hours}h{minutes:02d}m" if hours else f"in {minutes}m"
+    if seconds < 7 * 24 * 3600:
+        return moment.strftime("%a %H:%M")
+    return moment.strftime("%-d %b")
+
+
+def severity(percent, reached):
+    if reached or percent >= 90:
+        return "critical"
+    return "warning" if percent >= 75 else "normal"
+
+
+def build():
+    report = usage()
+    if not isinstance(report, dict):
+        return {"plan": "", "limits": [], "available": False, "severity": "normal"}
+    rate = report.get("rate_limit") or {}
+    reached = bool(rate.get("limit_reached"))
+    limits = []
+    for key in ("primary_window", "secondary_window"):
+        window = rate.get(key)
+        if not isinstance(window, dict) or not isinstance(window.get("used_percent"), (int, float)):
+            continue
+        percent = int(round(window["used_percent"]))
+        reset = window.get("reset_at")
+        if not isinstance(reset, (int, float)) and isinstance(window.get("reset_after_seconds"), (int, float)):
+            reset = time.time() + window["reset_after_seconds"]
+        limits.append({
+            "kind": key.split("_")[0],
+            "name": window_name(window.get("limit_window_seconds")),
+            "percent": percent,
+            "resets": until(reset),
+            "severity": severity(percent, reached and percent >= 100),
+        })
+    limits.sort(key=lambda entry: -entry["percent"])
+    rank = {"normal": 0, "warning": 1, "critical": 2}
+    worst = max((entry["severity"] for entry in limits), key=rank.get, default="normal")
+    return {"plan": report.get("plan_type") or "", "limits": limits, "available": True, "severity": worst}
+
+
+def main():
+    print(json.dumps(build()))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

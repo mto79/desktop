@@ -72,7 +72,7 @@ tray) or runs a `desktop-*` command and reads its JSON:
 
 | Shell side | Command |
 |---|---|
-| AI widget and panel | `desktop-status-ai`, `desktop-agent-sessions`, `desktop-agent-tokens` |
+| AI widget and panel | `desktop-status-ai`, `desktop-agent-sessions`, `desktop-agent-tokens`, `desktop-status-codex` |
 | Backup panel | `desktop-backup status --json` |
 | Security widget and panel | `desktop-security check --json` |
 | Network and VPN panels | `desktop-network-details`, `desktop-network-traffic`, `desktop-vpn-details` |

@@ -348,7 +348,14 @@ own. A crash in the first five seconds, or a fourth one within ten minutes, is n
 restarted and gets the notification.
 
 `desktop-agent-tokens` counts tokens per local day per agent from what each one leaves on
-disk. `desktop-status-claude` reports Claude Code's usage limits.
+disk: Claude Code's transcripts, Codex's sessions, opencode's database -- its message ids
+in a column of their own since late 2026, no longer in the message. `desktop-status-claude`
+reports Claude Code's usage limits, and `desktop-status-codex` Codex's: the windows of
+your ChatGPT plan, from the endpoint the Codex CLI's `/status` reads, with the token in
+`~/.codex/auth.json` and the answer kept five minutes in `$XDG_RUNTIME_DIR/desktop/`. The
+AI panel shows both, Codex's under a heading of its own, each limit with its meter and its
+reset. opencode has no plan here -- it runs on the organisation's own models -- so what it
+used is its chart under "Last 7 days".
 
 Both are on the top bar of each AI column, behind `desktop-tmux-cached 30`. tmux runs a
 `#()` once per client per `status-interval`, so with a dozen tabs attached the two Python

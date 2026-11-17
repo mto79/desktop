@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Codex's plan limits in the AI panel, under Claude's: each window of your ChatGPT plan
+  with how full it is and when it resets.
 - A GitLab mark on the bar for the CI of your own open merge requests, in the colour of
   the worst -- failed, running, waiting, passed -- and a popup the moment one of their
   pipelines finishes, a click away from the pipeline.
