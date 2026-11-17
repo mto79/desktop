@@ -85,5 +85,18 @@ function threads(rows) {
   return out;
 }
 
+// What opening a notification from the keyboard runs, given its actions' identifiers: what
+// a click on the toast runs, "default", and failing that its first button -- a screenshot's
+// Open, a review's View. Not the Settings Chromium hangs on every web notification. "" when
+// there is nothing to open, and the notification is only put away.
+function opening(identifiers, fromBrowser) {
+  if (identifiers.indexOf("default") !== -1)
+    return "default";
+  for (var i = 0; i < identifiers.length; i++)
+    if (!(fromBrowser && identifiers[i] === "settings"))
+      return identifiers[i];
+  return "";
+}
+
 if (typeof module !== "undefined")
-  module.exports = { originSplit: originSplit, browser: browser, chatHost: chatHost, kept: kept, sender: sender, thread: thread, threads: threads };
+  module.exports = { originSplit: originSplit, browser: browser, chatHost: chatHost, kept: kept, sender: sender, thread: thread, threads: threads, opening: opening };

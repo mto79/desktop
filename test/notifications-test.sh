@@ -148,6 +148,15 @@ if command -v node >/dev/null; then
   check "the chat's site is read from chat.conf" test "$(host 'CHAT_URL="https://chat.example.com/team"')" = chat.example.com
   check "with a port" test "$(host "CHAT_URL='https://chat.example.com:8065'")" = chat.example.com
   check "and none is none" test -z "$(host '# CHAT_URL="https://chat.example.com"')"
+
+  # --- opening the newest from the keyboard
+  # SUPER + ALT + COMMA does what a click on the toast does, and failing that presses its
+  # first button -- but never the Settings Chromium hangs on every web notification.
+  opening() { node -e "console.log(JSON.stringify(require('$KEPT').opening($1)))"; }
+  check "the toast's own click comes first" test "$(opening '["open", "default"], false')" = '"default"'
+  check "and then its first button" test "$(opening '["open", "folder"], false')" = '"open"'
+  check "but not a browser's Settings" test "$(opening '["settings"], true')" = '""'
+  check "nothing to open is nothing" test "$(opening '[], false')" = '""'
 fi
 
 check "a new message puts its conversation's earlier toast away" grep -q 'root.collapse(notification);' "$QML"
@@ -167,4 +176,16 @@ check "ones kept before the rule existed are dropped when the file is read" \
 # every chat message in it dropped at each restart.
 check "the saved list is read only once the chat's site is known" \
   grep -q 'path: root.chatRead ? root.storePath : ""' "$QML"
+# A close button on hover. The toast's own MouseArea stops being hovered once the pointer
+# is on the button, so the button has to stay up for its own hover as well.
+check "a toast's close button stays up while it is pointed at" \
+  grep -q 'shown: hover.containsMouse || closeMouse.containsMouse' "$QML"
+check "and dismisses, as a right click does" grep -q 'onClicked: toast.notification.dismiss()' "$QML"
+
+# The key's way in, in both binding files.
+for bindings in default/hypr/bindings/utilities.lua default/hypr/bindings/utilities.conf; do
+  check "$bindings opens the newest notification" grep -q 'desktop-shell shell openNotification' "$ROOT/$bindings"
+done
+check "and the shell answers it" grep -q 'function openNotification(): string' "$ROOT/shell/shell.qml"
+
 finish

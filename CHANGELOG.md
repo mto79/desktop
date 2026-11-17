@@ -12,6 +12,10 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- SUPER + ALT + COMMA opens the newest notification as a click would -- the chat, the
+  screenshot, the review -- or its first button, and dismisses it when there is nothing to
+  open.
+- A close button in the corner of a notification while the pointer is over it.
 - The toast for a finished screen recording names the file and has Open and Folder
   buttons, like the screenshot's; clicking the toast opens the recording.
 - Codex's plan limits in the AI panel, under Claude's: each window of your ChatGPT plan

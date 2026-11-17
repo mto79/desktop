@@ -177,6 +177,12 @@ ShellRoot {
       notifications.dismissLatest();
     }
 
+    // Open what the newest notification is about, as a click on it would: "opened",
+    // "dismissed" when there was nothing to open, or "none" when no toast is up.
+    function openNotification(): string {
+      return notifications.openLatest();
+    }
+
     // How many notifications are waiting: "2 live, 3 kept from before".
     function notificationCounts(): string {
       return notifications.counts();

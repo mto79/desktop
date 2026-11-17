@@ -348,6 +348,25 @@ Item {
       showing[0].dismiss();
   }
 
+  // The keyboard's click on the newest toast: what it is about opened -- the chat, the
+  // screenshot, the review -- or, with nothing to open, the toast put away. Says which.
+  function openLatest() {
+    if (showing.length === 0)
+      return "none";
+    var notification = showing[0];
+    var actions = notification.actions;
+    var ids = [];
+    for (var i = 0; i < actions.length; i++)
+      ids.push(actions[i].identifier);
+    var id = Kept.opening(ids, Kept.browser(notification.desktopEntry));
+    if (id === "") {
+      notification.dismiss();
+      return "dismissed";
+    }
+    actions[ids.indexOf(id)].invoke();
+    return "opened";
+  }
+
   function dismissAll() {
     var all = server.trackedNotifications ? server.trackedNotifications.values.slice() : [];
     for (var i = 0; i < all.length; i++)
@@ -582,6 +601,52 @@ Item {
           }
         }
         toast.notification.dismiss();
+      }
+    }
+
+    // A close button in the corner while the pointer is over the toast: a right click
+    // does the same, but nothing on screen says so. Over the toast's own MouseArea, which
+    // stops being hovered once the pointer is on this one -- hence both.
+    Rectangle {
+      id: close
+
+      readonly property bool shown: hover.containsMouse || closeMouse.containsMouse
+
+      anchors.top: parent.top
+      anchors.right: parent.right
+      anchors.topMargin: 8
+      anchors.rightMargin: 8
+      width: closeLabel.implicitHeight + 4
+      height: width
+      radius: width / 2
+      z: 2
+      opacity: shown ? 1 : 0
+      visible: opacity > 0
+      color: closeMouse.containsMouse ? Color.popupHover : Color.popupBackground
+
+      Behavior on opacity {
+        NumberAnimation {
+          duration: Style.motionQuick
+        }
+      }
+
+      Text {
+        id: closeLabel
+
+        anchors.centerIn: parent
+        text: "\u00d7"
+        color: closeMouse.containsMouse ? Color.popupText : Color.popupMuted
+        font.family: Style.fontFamily
+        font.pixelSize: root.fontSize
+      }
+
+      MouseArea {
+        id: closeMouse
+
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+        onClicked: toast.notification.dismiss()
       }
     }
 

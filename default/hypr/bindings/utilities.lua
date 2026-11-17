@@ -26,6 +26,7 @@ hl.bind("SUPER + BACKSPACE", hl.dsp.window.set_prop({ prop = "opaque", value = "
 
 -- Notifications
 hl.bind("SUPER + COMMA", hl.dsp.exec_cmd("desktop-shell shell dismissNotification >/dev/null 2>&1 || makoctl dismiss"), { description = "Dismiss last notification" })
+hl.bind("SUPER + ALT + COMMA", hl.dsp.exec_cmd("desktop-shell shell openNotification"), { description = "Open last notification" })
 hl.bind("SUPER + SHIFT + COMMA", hl.dsp.exec_cmd("desktop-shell shell clearNotifications >/dev/null 2>&1 || makoctl dismiss --all"), { description = "Dismiss all notifications" })
 hl.bind("SUPER + CTRL + COMMA", hl.dsp.exec_cmd("desktop-shell shell toggleDoNotDisturb >/dev/null 2>&1 || makoctl mode -t do-not-disturb"), { description = "Toggle silencing notifications" })
 

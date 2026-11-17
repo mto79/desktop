@@ -176,6 +176,12 @@ notification the site named on the first line of the body. The chat's site comes
 `notifications.remember` in `shell.json` replaces the built-in list, and the chat's site
 is still added to it.
 
+A toast shows a × in its corner while the pointer is over it; a right click dismisses it
+too. From the keyboard, `SUPER + COMMA` dismisses the newest toast and `SUPER + ALT + COMMA`
+opens it: what a click on it runs, or else its first button (a screenshot's Open, a
+review's View), or, with nothing to open, it is dismissed. `SUPER + SHIFT + COMMA` clears
+them all and `SUPER + CTRL + COMMA` silences them.
+
 What the centre keeps is saved to `~/.local/state/desktop/notifications.json` and read
 back on restart, filtered by the same rule.
 
