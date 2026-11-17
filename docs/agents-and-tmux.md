@@ -438,3 +438,21 @@ what it already showed is kept; only a host that answered can say a request is g
 first check of a host gives one popup with the number already waiting and a link to the
 list, and more than five new requests at once are one popup as well. What has been shown
 is kept per host under `~/.local/state/desktop/reviews/`.
+
+## Your pipelines
+
+`desktop-pipelines` follows the CI of your own open merge requests on every GitLab host
+glab is logged in to: one GraphQL question per host, every minute
+(`desktop-pipelines.timer`), for your merge requests and each one's head pipeline. The
+answer goes to `$XDG_RUNTIME_DIR/desktop/pipelines.json`, and the bar's GitLab mark,
+beside the security shield, watches that file: red with the number failed, blue with
+the number running, amber while one waits to start or for a manual job, green when all
+passed, and gone when you have nothing open. A click opens the pipeline that matters most,
+a right click your merge requests; the tooltip lists them all.
+
+A pipeline that was waiting or running and has finished -- passed, failed or cancelled --
+is a popup, urgent when it failed, and a click on it opens the pipeline. Asked of the
+merge request rather than the pipeline, so one that ran and finished between two checks
+after a new push is told as well. The first check after a boot has nothing to compare
+with and says nothing. A host off the VPN keeps what it last said, and the mark goes
+muted rather than empty. `desktop-pipelines --list` asks now and prints them host by host.

@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A GitLab mark on the bar for the CI of your own open merge requests, in the colour of
+  the worst -- failed, running, waiting, passed -- and a popup the moment one of their
+  pipelines finishes, a click away from the pipeline.
 - A notification when a cluster goes unreachable, loses a node or is signed out, and when
   it comes back: every cluster is asked every two minutes, and the sidebar shows the answer
   without waiting to be redrawn.

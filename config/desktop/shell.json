@@ -185,6 +185,9 @@
               "id": "security"
             },
             {
+              "id": "pipelines"
+            },
+            {
               "id": "backup",
               "type": "command",
               "exec": "desktop-backup status --bar",

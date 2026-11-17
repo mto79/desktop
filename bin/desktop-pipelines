@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+
+# desktop-pipelines: the CI of your own open merge requests, in the bar, and a popup the
+# moment one of their pipelines finishes.
+#
+#   desktop-pipelines            ask every GitLab host, write the state, notify what finished
+#   desktop-pipelines --list     your merge requests and their pipelines, host by host
+#   desktop-pipelines --json     the state the bar reads, as last written
+#
+# The hosts are every GitLab instance glab is logged in to, as for desktop-reviews. One
+# GraphQL question per host -- your open merge requests with their head pipeline -- where
+# the REST API would take one call per merge request.
+#
+# The state goes to $XDG_RUNTIME_DIR/desktop/pipelines.json, which the bar's icon watches:
+# red when a pipeline failed, blue while one runs, amber while one waits (to start, or for
+# a manual job), green when all passed, and hidden when you have nothing open. A host that
+# does not answer -- off the VPN -- keeps what it last said, marked as such, rather than
+# its merge requests vanishing from the bar until you are back.
+#
+# A popup when a pipeline that was waiting or running has finished: passed, failed or
+# cancelled. Clicking it opens the pipeline. The first check -- after a boot -- has
+# nothing to compare with and says nothing.
+#
+# Run by desktop-pipelines.timer every minute.
+
+set -uo pipefail
+
+GLAB_CONFIG="${GLAB_CONFIG_DIR:-$HOME/.config/glab-cli}/config.yml"
+OUT="${XDG_RUNTIME_DIR:-/tmp}/desktop/pipelines.json"
+WAIT=20
+
+case ":$PATH:" in
+*":$HOME/.local/bin:"*) ;;
+*) PATH="$HOME/.local/bin:$PATH" ;;
+esac
+
+# The keys directly under "hosts:" in glab's config that have a token.
+gitlab_hosts() {
+  [[ -n ${DESKTOP_PIPELINES_GITLAB+x} ]] && { tr ' ' '\n' <<<"$DESKTOP_PIPELINES_GITLAB" | grep .; return; }
+  command -v glab >/dev/null 2>&1 && [[ -f $GLAB_CONFIG ]] || return 0
+  awk '/^hosts:/ {in_hosts = 1; next}
+       /^[^ ]/ {in_hosts = 0}
+       in_hosts && /^    [^ ].*:$/ {sub(/^ +/, ""); sub(/:$/, ""); host = $0}
+       in_hosts && host != "" && /^        token: ./ {print host; host = ""}' "$GLAB_CONFIG"
+}
+
+# Answers at all: a name that does not resolve off the VPN is the cheap no.
+reachable() {
+  [[ -n ${DESKTOP_PIPELINES_OFFLINE:-} && " $DESKTOP_PIPELINES_OFFLINE " == *" $1 "* ]] && return 1
+  [[ -n ${DESKTOP_PIPELINES_GITLAB+x} ]] && return 0
+  getent hosts "$1" >/dev/null 2>&1
+}
+
+QUERY='query {
+  currentUser {
+    username
+    authoredMergeRequests(state: opened, first: 50, sort: UPDATED_DESC) {
+      nodes {
+        iid title webUrl draft
+        project { fullPath }
+        headPipeline { id status path }
+      }
+    }
+  }
+}'
+
+# A host's merge requests as a JSON array, the shape the bar reads. Fails when the host
+# does not answer, which is different from answering with nothing.
+requests() {
+  local host=$1 answer
+  answer=$(timeout "$WAIT" glab api graphql --hostname "$host" -f query="$QUERY" 2>/dev/null) || return 1
+  jq -ce --arg host "$host" '
+    .data.currentUser.authoredMergeRequests.nodes // error("no answer")
+    | map({host: $host, ref: "\(.project.fullPath)!\(.iid)", title, url: .webUrl, draft,
+           pipeline: (.headPipeline.id // "" | tostring),
+           pipelineUrl: (if .headPipeline.path then "https://\($host)\(.headPipeline.path)" else .webUrl end),
+           status: ((.headPipeline.status // "none") | ascii_downcase
+             | if . == "success" then "success"
+               elif . == "failed" then "failed"
+               elif . == "running" then "running"
+               elif . == "canceled" or . == "skipped" then "canceled"
+               elif . == "none" then "none"
+               else "pending" end)})' <<<"$answer" 2>/dev/null
+}
+
+# toast <url> <summary> <body>: a popup whose click opens the url. notify-send waits for
+# the click, so it runs as a unit of its own: the timer's oneshot would otherwise take the
+# waiting popup down with it when it finishes.
+toast() {
+  if [[ -n ${DESKTOP_PIPELINES_SEND:-} ]]; then
+    printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$DESKTOP_PIPELINES_SEND"
+    return
+  fi
+  systemd-run --user --quiet --collect --unit="desktop-pipeline-$(date +%s%N)" \
+    "$0" --toast "$@" >/dev/null 2>&1 || setsid -f "$0" --toast "$@" </dev/null >/dev/null 2>&1
+  return 0
+}
+
+show() {
+  local url=$1 summary=$2 body=$3 urgency=normal chosen
+  [[ $summary == *failed* ]] && urgency=critical
+  chosen=$(timeout 1d notify-send --app-name=GitLab --icon=vcs-merge-request --urgency="$urgency" \
+    --action=default=Open --wait "$summary" "$body")
+  [[ $chosen == default && -n $url ]] && exec xdg-open "$url"
+}
+
+check() {
+  local host list all="[]" hosts="[]" state before="" line
+  mkdir -p "$(dirname "$OUT")"
+  [[ -s $OUT ]] && before=$(cat "$OUT")
+  while read -r host; do
+    [[ -n $host ]] || continue
+    if reachable "$host" && list=$(requests "$host"); then
+      state=ok
+    else
+      state=unreachable
+      # What it said last, kept and marked: the VPN going down is not every pipeline gone.
+      list=$(jq -c --arg host "$host" '[.requests[]? | select(.host == $host) | .stale = true]' <<<"${before:-null}" 2>/dev/null) ||
+        list="[]"
+    fi
+    all=$(jq -c --argjson more "$list" '. + $more' <<<"$all")
+    hosts=$(jq -c --arg host "$host" --arg state "$state" '. + [{host: $host, state: $state}]' <<<"$hosts")
+  done < <(gitlab_hosts)
+
+  # A draft colours the mark only when its pipeline runs or failed: an old one's pipeline
+  # waiting for a manual job nobody will start would otherwise keep it amber for good.
+  jq -n --argjson requests "$all" --argjson hosts "$hosts" --argjson now "$(date +%s)" '
+    ($requests | map(.counts = ((.draft | not) or .status == "failed" or .status == "running"))) as $requests
+    | {checked: $now, hosts: $hosts, requests: $requests,
+     worst: ([$requests[] | select(.counts) | .status] as $s
+       | if any($s[]; . == "failed") then "failed"
+         elif any($s[]; . == "running") then "running"
+         elif any($s[]; . == "pending") then "pending"
+         elif any($s[]; . == "success") then "success"
+         else "none" end)}' >"$OUT.$$" && mv -f "$OUT.$$" "$OUT"
+
+  [[ -n $before ]] || return 0
+  # Finished since last time: was waiting or running, is now done. Asked of the merge
+  # request, not the pipeline: one that ran and finished between two checks, after a new
+  # push, has finished all the same.
+  while IFS=$'\t' read -r url summary body; do
+    [[ -n $url ]] && toast "$url" "$summary" "$body"
+  done < <(jq -r --argjson was "$before" '
+    ($was.requests // [] | map({key: "\(.host) \(.ref)", value: .status}) | from_entries) as $then
+    | .requests[] | select(.stale | not)
+    | select(($then["\(.host) \(.ref)"] // "") as $b | ($b == "running" or $b == "pending"))
+    | select(.status == "success" or .status == "failed" or .status == "canceled")
+    | [.pipelineUrl,
+       (if .status == "success" then "Pipeline passed" elif .status == "failed" then "Pipeline failed"
+        else "Pipeline cancelled" end) + ": \(.ref)",
+       .title] | @tsv' "$OUT")
+}
+
+list() {
+  local any="" state
+  check
+  while read -r host; do
+    [[ -n $host ]] || continue
+    any=1
+    state=$(jq -r --arg host "$host" '.hosts[] | select(.host == $host) | .state' "$OUT")
+    [[ $state == ok ]] || echo "$host  not reachable (VPN off?) -- as it was last seen"
+    [[ $state == ok ]] && echo "$host"
+    jq -r --arg host "$host" '
+      [.requests[] | select(.host == $host)] as $r
+      | if ($r | length) == 0 then "  no merge requests of yours open" else
+          $r[] | "  \(.status | . + " " * (9 - length)) \(.ref)  \(.title)\n            \(.pipelineUrl)"
+        end' "$OUT"
+  done < <(gitlab_hosts)
+  [[ -n $any ]] || echo "No GitLab host to ask: log in with glab auth login."
+  return 0
+}
+
+case "${1:-}" in
+--toast) shift; show "$@" ;;
+--list) list ;;
+--json) cat "$OUT" 2>/dev/null || echo '{"requests": [], "worst": "none"}' ;;
+"") check ;;
+-h | --help) sed -n '3,25s/^# \{0,1\}//p' "$0" ;;
+*) echo "usage: desktop-pipelines [--list | --json]" >&2; exit 2 ;;
+esac

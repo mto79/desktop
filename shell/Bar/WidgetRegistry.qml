@@ -29,6 +29,7 @@ QtObject {
       "cpu": cpu,
       "battery": battery,
       "security": security,
+      "pipelines": pipelines,
       "notifications": notificationBell
     })
 
@@ -66,6 +67,9 @@ QtObject {
 
   property Component security: Component {
     Security {}
+  }
+  property Component pipelines: Component {
+    Pipelines {}
   }
   property Component notificationBell: Component {
     NotificationBell {}
