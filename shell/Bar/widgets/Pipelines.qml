@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "pipelines.js" as Layout
 
 // Pipelines: the CI of your own open merge requests, as one mark in the colour of the
 // worst -- failed, then running, then waiting, then passed.
@@ -55,26 +56,9 @@ BarItem {
   command: first ? ["xdg-open", first.pipelineUrl] : null
   rightCommand: first ? ["xdg-open", "https://" + first.host + "/dashboard/merge_requests"] : null
 
-  readonly property var words: ({
-      "failed": "failed",
-      "running": "running",
-      "pending": "waiting",
-      "success": "passed",
-      "canceled": "cancelled",
-      "none": "no pipeline"
-    })
-
-  tooltip: {
-    var lines = ["Pipelines" + (stale ? "  ·  GitLab not reachable, as last seen" : "")];
-    for (var i = 0; i < Math.min(requests.length, 8); i++) {
-      var r = requests[i];
-      lines.push(words[r.status] + "  " + r.ref + "  " + r.title);
-    }
-    if (requests.length > 8)
-      lines.push("and " + (requests.length - 8) + " more");
-    lines.push("", "Click for the " + (first ? words[first.status] : "") + " pipeline  ·  right-click for your merge requests");
-    return lines.join("\n");
-  }
+  // A title line with the counts, the merge requests with a pipeline most urgent first --
+  // project and number, the title under it -- and what a click does last. See pipelines.js.
+  tooltip: Layout.tooltip(requests, first, stale)
 
   IconLabel {
     id: content
