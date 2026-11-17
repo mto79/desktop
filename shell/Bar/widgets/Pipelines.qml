@@ -58,7 +58,16 @@ BarItem {
 
   // A title line with the counts, the merge requests with a pipeline most urgent first --
   // project and number, the title under it -- and what a click does last. See pipelines.js.
-  tooltip: Layout.tooltip(requests, first, stale)
+  tooltip: Layout.tooltip(requests, first, stale, {
+    "failed": Color.barUrgent,
+    "running": Color.barAccent,
+    "pending": Color.barAttention,
+    "success": Color.barGood,
+    "canceled": Color.barMuted,
+    "muted": Color.popupMuted
+  })
+  // Each status mark in the colour the bar's mark takes for it; see pipelines.js.
+  tooltipStyled: true
 
   IconLabel {
     id: content

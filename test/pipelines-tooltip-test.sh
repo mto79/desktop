@@ -14,7 +14,8 @@ tip() {
   node -e "
     const p = require('$ROOT/shell/Bar/widgets/pipelines.js');
     const rs = JSON.parse(process.argv[1]);
-    console.log(p.tooltip(rs, rs.find(r => r.status === 'failed') || rs[0], process.argv[2] === 'stale'));" "$1" "${2:-}"
+    const colours = process.argv[2] === 'styled' ? { failed: '#f00', success: '#0f0', muted: '#888' } : undefined;
+    console.log(p.tooltip(rs, rs.find(r => r.status === 'failed') || rs[0], process.argv[2] === 'stale', colours));" "$1" "${2:-}"
 }
 
 requests='[
@@ -38,5 +39,16 @@ check "  and not listed" lacks "tools-and-scripts" <<<"$out"
 check "  what a click does, last" test "$(tail -1 <<<"$out")" = "Click: failed  ·  right-click: all MRs"
 check "GitLab out of reach is said under the title" \
   test "$(sed -n 2p <<<"$(tip "$requests" stale)")" = "GitLab not reachable, as last seen"
+
+# Styled, for the tooltip's StyledText: the marks in the bar's colours, and nothing a
+# title says taken for markup.
+styled=$(tip "$requests" styled)
+check "styled, a failed mark is drawn in the failed colour" grep -qF '<font color="#f00">󰅙&nbsp;&nbsp;</font>' <<<"$styled"
+check "  a passed one in the passed colour" grep -qF '<font color="#0f0">󰗠&nbsp;&nbsp;</font>' <<<"$styled"
+check "  the titles quieter than the names" grep -qF '<font color="#888">&nbsp;&nbsp;&nbsp;Feature:' <<<"$styled"
+check "  lines broken with <br>, StyledText's" test "$(grep -o '<br>' <<<"$styled" | wc -l)" -ge 6
+lt=$(tip '[{"status":"failed","ref":"g/p!1","title":"a <b>bold</b> & claim"}]' styled)
+check "  a < in a title is escaped, never markup" grep -qF 'a&nbsp;&lt;b&gt;bold&lt;/b&gt;&nbsp;&amp;&nbsp;claim' <<<"$lt"
+check "  and no colour at all when none are given: plain text" lacks '<font' <<<"$out"
 
 finish

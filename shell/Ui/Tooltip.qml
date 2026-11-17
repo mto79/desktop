@@ -13,6 +13,8 @@ PopupWindow {
 
   property Item anchorItem: null
   property string text: ""
+  // StyledText instead of plain: set by the widget that asks (BarItem.tooltipStyled).
+  property bool styled: false
   // The key for the same action, on a line of its own under the text.
   property string shortcut: ""
 
@@ -51,7 +53,7 @@ PopupWindow {
         visible: root.text !== ""
         width: Math.min(implicitWidth, Style.tooltipMaxWidth)
         text: root.text
-        textFormat: Text.PlainText
+        textFormat: root.styled ? Text.StyledText : Text.PlainText
         color: Color.tooltipText
         font.family: Style.fontFamily
         font.pixelSize: Style.fontSize

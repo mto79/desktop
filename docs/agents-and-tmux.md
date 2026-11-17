@@ -455,7 +455,9 @@ answer goes to `$XDG_RUNTIME_DIR/desktop/pipelines.json`, and the bar's GitLab m
 beside the security shield, watches that file: red with the number failed, blue with
 the number running, amber while one waits to start or for a manual job, green when all
 passed, and gone when you have nothing open. A click opens the pipeline that matters most,
-a right click your merge requests; the tooltip lists them all.
+a right click your merge requests. The tooltip counts each outcome in its title and lists
+the ones with a pipeline, most urgent first, each mark in its colour on the bar, the
+project and number with the title under it; those without a pipeline are counted.
 
 A pipeline that was waiting or running and has finished -- passed, failed or cancelled --
 is a popup, urgent when it failed, and a click on it opens the pipeline. Asked of the

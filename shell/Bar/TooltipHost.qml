@@ -16,16 +16,19 @@ Item {
   property Item pending: null
   property string pendingText: ""
   property string pendingShortcut: ""
+  property bool pendingStyled: false
 
   // Called from BarItem on hover. Re-requesting for the widget already showing just
   // updates the text, so a tooltip over a ticking clock does not flicker. A widget with no
   // text but a shortcut still gets a tooltip: the key is worth knowing on its own.
-  function request(item, text, shortcut) {
+  function request(item, text, shortcut, styled) {
     shortcut = shortcut || "";
+    styled = styled === true;
     if (!item || (text === "" && shortcut === ""))
       return;
 
     if (current === item) {
+      tooltip.styled = styled;
       tooltip.text = text;
       tooltip.shortcut = shortcut;
       return;
@@ -34,6 +37,7 @@ Item {
     pending = item;
     pendingText = text;
     pendingShortcut = shortcut;
+    pendingStyled = styled;
     // Once one tooltip is up, moving along the bar should not re-serve the delay.
     delayTimer.interval = current ? 0 : Style.tooltipDelay;
     delayTimer.restart();
@@ -63,6 +67,7 @@ Item {
 
       var item = root.pending;
       root.pending = null;
+      tooltip.styled = root.pendingStyled;
       tooltip.text = root.pendingText;
       tooltip.shortcut = root.pendingShortcut;
 

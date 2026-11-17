@@ -23,6 +23,10 @@ BarWidget {
   property var scrollDownCommand: null
 
   property bool hoverEnabled: true
+  // The tooltip as Qt's StyledText -- <font color>, <br>, entities -- rather than plain
+  // text. Off unless a widget builds its text for it and escapes what it did not write:
+  // plain, a "<" in a window or merge request title can never be taken for markup.
+  property bool tooltipStyled: false
   property color hoverColor: Color.barHover
 
   signal clicked
@@ -61,16 +65,16 @@ BarWidget {
     if (!tooltips)
       return;
     if (hovered)
-      tooltips.request(root, root.tooltip, root.shortcut);
+      tooltips.request(root, root.tooltip, root.shortcut, root.tooltipStyled);
     else
       tooltips.release(root);
   }
 
   // Keep the text current while the pointer sits still on a widget whose reading moves.
   onTooltipChanged: if (tooltips && hovered)
-    tooltips.request(root, root.tooltip, root.shortcut)
+    tooltips.request(root, root.tooltip, root.shortcut, root.tooltipStyled)
   onShortcutChanged: if (tooltips && hovered)
-    tooltips.request(root, root.tooltip, root.shortcut)
+    tooltips.request(root, root.tooltip, root.shortcut, root.tooltipStyled)
 
   // Nearly every widget is one IconLabel, so going compact is handled here rather than
   // in each of them: the label directly inside is the one that sheds its text. A widget

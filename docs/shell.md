@@ -397,6 +397,10 @@ new.
 - **One handler per signal.** A second `onNotification` fails the whole file.
 - **A new `Ui/` component or `Commons/` singleton needs a line in that directory's `qmldir`.**
 - **Sizes come from `Style.qml` and colours from `Color.qml`**, never hardcoded.
+- **A tooltip is plain text unless the widget sets `tooltipStyled`**, and then it is Qt's
+  StyledText: `<font color>`, `<br>`, `&nbsp;`. A widget that sets it escapes everything
+  it did not write itself -- a `<` in a title is otherwise markup. The pipelines tooltip
+  (`pipelines.js`) is the one that does.
 - **Logic worth testing goes in a plain `.js` file** beside the QML (`lowbattery.js`,
   `calc.js`, `holidays.js`) so a test can run it with node.
 
