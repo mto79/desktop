@@ -103,6 +103,10 @@ hl.animation({ leaf = "workspaces", enabled = false })
 -- colours are the theme's (each theme's hyprland.lua).
 hl.config({
   group = {
+    -- Only a drop onto a group's tab bar groups windows. The default, 1, groups a window
+    -- dragged onto any tiled one, which is how a stray group turned up on workspace 2.
+    -- desktop-guis is unaffected: it groups with into_group, not by dragging.
+    drag_into_group = 2,
     groupbar = {
       font_family = "monospace",
       font_size = 11,

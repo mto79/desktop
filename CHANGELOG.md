@@ -152,6 +152,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- A window dragged onto another no longer joins it as a group: only a drop onto a
+  group's tab bar does, so groups are made on purpose rather than by a drag gone wide.
 - KeePassXC is Fedora's package rather than an AppImage in your home folder: updated with
   the rest of the system, out of reach of anything running as you, and with the
   fingerprint unlock as before. `desktop-update` makes the change and removes the AppImage.
