@@ -170,8 +170,8 @@ check "  the copy without the _metadata a loaded folder may not have" \
     ! -e "$sandbox/state/desktop/guis/keepassxc-browser/1.10.4_0/_metadata"
 check "  and the original left whole, the Store's checksums in it" \
   test -f "$brave/Default/Extensions/oboonakemofpalcgghocfoadofidjkkk/1.10.4_0/_metadata/verified_contents.json"
-check "  and KeePassXC's host is there for it in the profile" \
-  test "$(readlink "$sandbox/state/desktop/guis/browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json")" = "$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
+check "  and KeePassXC's host is there for it, under the XDG_CONFIG_HOME the browser is given" \
+  test "$(readlink "$sandbox/state/desktop/guis/env/BraveSoftware/Brave-Browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json")" = "$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
 guis close ocp203
 rm -rf "$sandbox/config/BraveSoftware"
 

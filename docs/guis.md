@@ -89,10 +89,12 @@ Before the browser starts, `desktop-guis`:
   `--load-extension`. Never your browser's own folder: loading a folder as an extension
   deletes its `_metadata`, the Web Store's signed checksums, and your own browser then
   calls the extension corrupted and turns it off. The manifest keeps the Store's key, so
-  the copy has the Store's ID, the one KeePassXC's native-messaging host lets in; the
-  host's manifest is linked into the profile's `NativeMessagingHosts`, where a browser
-  with a `--user-data-dir` of its own looks. Connecting it to your database is asked
-  once, the first time it is used there;
+  the copy has the Store's ID, the one KeePassXC's native-messaging host lets in. The
+  host's manifest is linked where the browser looks for it: not in the `--user-data-dir`
+  but in its default one under `XDG_CONFIG_HOME` -- which for these windows is
+  `guis/env`, the font's -- so `guis/env/BraveSoftware/Brave-Browser/NativeMessagingHosts`
+  for Brave. Connecting it to your database is asked once, the first time it is used
+  there;
 - sets the profile dark, opening nothing of the last session, without Brave's analytics
   notice, and without asking whether to close a window with several tabs -- the window is
   closed for you on sign-out, and would otherwise stay.

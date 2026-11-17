@@ -142,15 +142,16 @@ EOF
 # as an extension deletes its _metadata, the Web Store's signed checksums, and your own
 # browser then took the extension for corrupted and turned it off. The manifest keeps the
 # Store's key, so the copy has the Store's ID, the one KeePassXC's native-messaging host
-# lets in; the host's manifest is linked into the profile, where a browser with a
-# --user-data-dir of its own looks for it. Nothing when your browser has no
-# KeePassXC-Browser. Connecting it to KeePassXC is asked once, the first time it is used
+# lets in. The host's manifest is linked where the browser looks for it: not in the
+# --user-data-dir, but in its default one, under XDG_CONFIG_HOME -- which for these
+# windows is $STATE/env, the font's (dress), so the link goes there. Nothing when your
+# browser has no KeePassXC-Browser. Connecting it to KeePassXC is asked once, the first time it is used
 # in this profile.
 KEEPASSXC_BROWSER=oboonakemofpalcgghocfoadofidjkkk
 keepassxc_browser() {
-  local root dir copy host=org.keepassxc.keepassxc_browser.json
-  for root in BraveSoftware/Brave-Browser google-chrome chromium microsoft-edge vivaldi; do
-    root="${XDG_CONFIG_HOME:-$HOME/.config}/$root"
+  local name root dir copy host=org.keepassxc.keepassxc_browser.json
+  for name in BraveSoftware/Brave-Browser google-chrome chromium microsoft-edge vivaldi; do
+    root="${XDG_CONFIG_HOME:-$HOME/.config}/$name"
     dir=$(printf '%s\n' "$root"/*/Extensions/"$KEEPASSXC_BROWSER"/*/manifest.json 2>/dev/null |
       grep -v '\*' | sort -V | tail -1)
     [[ -n $dir ]] || continue
@@ -163,8 +164,8 @@ keepassxc_browser() {
       cp -r "$dir" "$copy.tmp" && rm -rf "$copy.tmp/_metadata" && mv "$copy.tmp" "$copy" || return 1
     fi
     if [[ -f $root/NativeMessagingHosts/$host ]]; then
-      mkdir -p "$PROFILE/NativeMessagingHosts"
-      ln -sfn "$root/NativeMessagingHosts/$host" "$PROFILE/NativeMessagingHosts/$host"
+      mkdir -p "$STATE/env/$name/NativeMessagingHosts"
+      ln -sfn "$root/NativeMessagingHosts/$host" "$STATE/env/$name/NativeMessagingHosts/$host"
     fi
     echo "$copy"
     return 0

@@ -204,6 +204,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- KeePassXC-Browser in the clusters' web GUIs reaches KeePassXC rather than saying it
+  cannot connect: the browser now finds KeePassXC's connector where it looks for it.
 - Opening a cluster's web GUIs no longer turns off KeePassXC-Browser in your own browser:
   they load a copy of it, and your browser no longer finds its own copy changed and
   takes it for corrupted.
