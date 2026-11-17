@@ -31,10 +31,38 @@ start_screenrecording() {
 stop_screenrecording() {
   pkill -x wf-recorder
 
-  notify-send "Screen recording saved to $OUTPUT_DIR" -t 2000
-
   sleep 1 # ensures the process is actually dead before we check
   toggle_screenrecording_indicator
+
+  local file
+  file=$(newest_recording)
+  if [[ -z $file ]]; then
+    notify-send -t 3000 "Screen recording stopped" "Nothing was saved in $OUTPUT_DIR"
+    return
+  fi
+  # In the background, so the stop returns at once while the toast waits for a button.
+  (announce_recording "$file") </dev/null &>/dev/null &
+  disown
+}
+
+# The start has long exited by the time of the stop, so the recording is found rather
+# than remembered: the newest one in the folder is the one just finished.
+newest_recording() {
+  find "$OUTPUT_DIR/" -maxdepth 1 -name 'screenrecording-*.mp4' -printf '%T@ %p\n' 2>/dev/null |
+    sort -rn | head -n1 | cut -d' ' -f2-
+}
+
+# Like the screenshot's toast: open it, or find it in its folder. Clicking the toast
+# itself opens it. notify-send --wait holds on until a button or the toast's end.
+announce_recording() {
+  local file="$1" chosen
+  chosen=$(timeout 1m notify-send --app-name="Screen recording" -t 8000 --wait \
+    --action=default=Open --action=open=Open --action=folder=Folder \
+    "Screen recording saved" "$(basename "$file")")
+  case $chosen in
+  default | open) exec setsid xdg-open "$file" ;;
+  folder) exec setsid nautilus --select "$file" ;;
+  esac
 }
 
 toggle_screenrecording_indicator() {

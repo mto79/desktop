@@ -21,9 +21,10 @@ hl.config({
 -- promises to expand a ~ in it.
 hl.env("XCOMPOSEFILE", os.getenv("HOME") .. "/.XCompose")
 
--- Don't show update on first launch
+-- Don't show the update news on first launch, nor the donation popup after an upgrade
 hl.config({
   ecosystem = {
     no_update_news = true,
+    no_donation_nag = true,
   },
 })

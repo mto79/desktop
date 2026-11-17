@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- The toast for a finished screen recording names the file and has Open and Folder
+  buttons, like the screenshot's; clicking the toast opens the recording.
 - Codex's plan limits in the AI panel, under Claude's: each window of your ChatGPT plan
   with how full it is and when it resets.
 - A GitLab mark on the bar for the CI of your own open merge requests, in the colour of
@@ -152,6 +154,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- Hyprland's donation popup no longer appears after an upgrade, as its update news
+  already did not.
 - The Tokyo Night wallpapers no longer carry the wallpaper site's label in their bottom
   right corner.
 - Clicking the bar's GitLab mark opens a pipelines panel, as the security shield and the
@@ -227,6 +231,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- A new terminal opens at home when the focused window is not a terminal, instead of
+  in whatever folder that app's first helper process happened to be in.
 - A tap on the touchpad clicks at the login screen too, as it does once you are logged in:
   the login button could only be pressed by pushing the touchpad down.
 - Workspace 1 has one home at login again when last session ended with home open: the

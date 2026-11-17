@@ -58,4 +58,22 @@ for bindings in config/hypr/bindings.conf config/hypr/bindings.lua; do
     fail "$bindings opens the terminal through desktop-launch-terminal"
   fi
 done
+# A new terminal opens where the focused terminal's shell is, and at home when the focused
+# window is anything else: a browser's first child is one of its helpers, often in /.
+work=$sandbox/work
+mkdir -p "$work"
+(cd "$work" && exec sleep 30) &
+child=$!
+cat >"$sandbox/bin/hyprctl" <<'STUB'
+#!/usr/bin/env bash
+echo "{\"class\":\"$CLASS\",\"pid\":1}"
+STUB
+printf '#!/usr/bin/env bash\necho %s\n' "$child" >"$sandbox/bin/pgrep"
+chmod +x "$sandbox/bin/"*
+cwd() { CLASS="$1" HOME=/home/me PATH="$sandbox/bin:$PATH" bash "$ROOT/bin/desktop-cmd-terminal-cwd"; }
+check "from a terminal, a new one opens where its shell is" test "$(cwd com.mitchellh.ghostty)" = "$work"
+check "from a browser, it opens at home" test "$(cwd brave-browser)" = /home/me
+check "with nothing focused, it opens at home" test "$(cwd "")" = /home/me
+kill "$child" 2>/dev/null
+
 finish
