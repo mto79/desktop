@@ -304,9 +304,27 @@ active_workspace() { hyprctl -j activeworkspace 2>/dev/null | jq -r '.id // empt
 # A window's group, as the addresses in it; empty when it is in none.
 group_of() { hyprctl -j clients 2>/dev/null | jq -r --arg a "$1" '.[] | select(.address == $a) | .grouped[]'; }
 
+# The window that has the focus; empty when none has.
+active_window() { hyprctl -j activewindow 2>/dev/null | jq -r '.address // empty'; }
+
+# The window focused, as a step of arranging -- only while you are still on workspace 1,
+# and only if it took. Arranging is done by focus, and a focus sent after you had moved on
+# took you back there: passing through workspace 1 as a cluster's window waited to join
+# flickered back and forth. And a focus that did not take -- the window gone meanwhile --
+# left the next into_group to move whatever else had the focus, wherever it was.
+step_to() {
+  [[ $(active_workspace) == 1 ]] || return 1
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$1\" })" >/dev/null
+  [[ $(active_window) == "$1" ]]
+}
+
+# Still where arranging left it: the window focused, on workspace 1, before each move of it.
+still_at() { [[ $(active_workspace) == 1 && $(active_window) == "$1" ]]; }
+
 # The GUI windows on workspace 1 as one group: the first in guis.conf's order -- home --
-# heads it and the rest join in that order. Only while workspace 1 is on screen, and the
-# focus is given back to the window that had it.
+# heads it and the rest join in that order. Only while workspace 1 is on screen: leave it
+# and arranging stops where it is, to be taken up the next time you are there. The focus
+# is given back to the window that had it.
 cmd_arrange() {
   local order=() name address head focus joined d
   [[ $(active_workspace) == 1 ]] || return 0
@@ -314,8 +332,10 @@ cmd_arrange() {
   exec 8>"$RUN/.arrange"
   flock -n 8 || return 0
   ARRANGING=1
-  # Workspace 1 starts with home, whatever was closed meanwhile.
-  is_open home || cmd_open home
+  # Workspace 1 starts with home, whatever was closed meanwhile -- opened beside this rather
+  # than waited for: a browser takes seconds to start, and a group put together after you had
+  # gone pulled you back. Its own open arranges again once it is there.
+  is_open home || setsid "$0" open home </dev/null >/dev/null 2>&1 8>&- &
   while read -r name; do
     [[ -s $RUN/$name ]] || continue
     address=$(cat "$RUN/$name")
@@ -323,7 +343,7 @@ cmd_arrange() {
       order+=("$address")
   done < <(echo home; groups | grep -vx home)
   ((${#order[@]})) || return 0
-  focus=$(hyprctl -j activewindow 2>/dev/null | jq -r '.address // empty')
+  focus=$(active_window)
   # The head: one already in a group, else the first.
   head=""
   for address in "${order[@]}"; do
@@ -331,18 +351,20 @@ cmd_arrange() {
   done
   if [[ -z $head ]]; then
     head=${order[0]}
-    hyprctl dispatch "hl.dsp.focus({ window = \"address:$head\" })" >/dev/null
+    step_to "$head" && still_at "$head" || return 0
     hyprctl dispatch "hl.dsp.group.toggle()" >/dev/null
   fi
   for address in "${order[@]}"; do
     group_of "$head" | grep -qxF "$address" && continue
-    hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null
+    step_to "$address" || return 0
     joined=false
     for d in left right up down; do
+      still_at "$address" || return 0
       hyprctl dispatch "hl.dsp.window.move({ into_group = \"$d\" })" >/dev/null
       if group_of "$head" | grep -qxF "$address"; then joined=true; break; fi
       # Into some other group that was in the way: out again, and on to the next way.
-      [[ -n $(group_of "$address") ]] && hyprctl dispatch 'hl.dsp.window.move({ out_of_group = true })' >/dev/null
+      [[ -n $(group_of "$address") ]] && still_at "$address" &&
+        hyprctl dispatch 'hl.dsp.window.move({ out_of_group = true })' >/dev/null
     done
     $joined || echo "desktop-guis: could not put $address into the group" >&2
   done
@@ -350,14 +372,16 @@ cmd_arrange() {
   if is_open home; then
     address=$(cat "$RUN/home")
     if [[ $(group_of "$address" | head -1) != "$address" ]]; then
-      hyprctl dispatch "hl.dsp.focus({ window = \"address:$address\" })" >/dev/null
+      step_to "$address" || return 0
       for _ in $(seq "$(group_of "$address" | wc -l)"); do
         [[ $(group_of "$address" | head -1) == "$address" ]] && break
+        still_at "$address" || return 0
         hyprctl dispatch 'hl.dsp.group.move_window({ forward = false })' >/dev/null
       done
     fi
   fi
-  [[ -n $focus ]] && hyprctl dispatch "hl.dsp.focus({ window = \"address:$focus\" })" >/dev/null
+  # Given back only while you are still here: from anywhere else it would take you back.
+  [[ -n $focus && $(active_workspace) == 1 ]] && hyprctl dispatch "hl.dsp.focus({ window = \"address:$focus\" })" >/dev/null
   return 0
 }
 

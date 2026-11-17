@@ -15,10 +15,18 @@ mkdir -p "$stubs" "$sandbox/config/desktop" "$sandbox/theme" "$sandbox/run"
 cat >"$stubs/hyprctl" <<STUB
 #!/usr/bin/env bash
 case "\$1" in
--j) [[ \$2 == activeworkspace ]] && { echo "{\"id\": \$(cat "$sandbox/ws" 2>/dev/null || echo 3)}"; exit; }
+-j) # The workspace on screen: ws-seq's lines one a question, as you move, then ws's.
+  if [[ \$2 == activeworkspace ]]; then
+    if [[ -s "$sandbox/ws-seq" ]]; then ws=\$(head -1 "$sandbox/ws-seq"); sed -i 1d "$sandbox/ws-seq"
+    else ws=\$(cat "$sandbox/ws" 2>/dev/null || echo 3); fi
+    echo "{\"id\": \$ws}"; exit
+  fi
+  [[ \$2 == activewindow ]] && { echo "{\"address\": \"\$(cat "$sandbox/active" 2>/dev/null)\"}"; exit; }
   touch "$sandbox/windows"
   jq -R 'split("\t") | {address: .[0], class: (.[1] // "desktop-guis"), title: (.[2] // ""), workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
 dispatch) echo "dispatch \$2" >>"$sandbox/calls"
+  focused=\$(sed -nE 's/^hl\.dsp\.focus.*address:([^"]+).*/\1/p' <<<"\$2")
+  [[ -n \$focused ]] && echo "\$focused" >"$sandbox/active"
   gone=\$(sed -nE 's/^hl\.dsp\.window\.close.*address:([^"]+).*/\1/p' <<<"\$2")
   [[ -n \$gone ]] && sed -i "/^\$gone\t/d" "$sandbox/windows" ;;
 esac
@@ -157,6 +165,27 @@ check "  and KeePassXC's host is there for it in the profile" \
   test "$(readlink "$sandbox/state/desktop/guis/browser/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json")" = "$brave/NativeMessagingHosts/org.keepassxc.keepassxc_browser.json"
 guis close ocp203
 rm -rf "$sandbox/config/BraveSoftware"
+
+# --- arranging only while you are there
+printf '0xa\tdesktop-guis\tocp202\n0xb\tdesktop-guis\tocp203\n' >"$sandbox/windows"
+mkdir -p "$sandbox/run/desktop/guis"
+echo 0xa >"$sandbox/run/desktop/guis/home"
+echo 0xb >"$sandbox/run/desktop/guis/ocp203"
+echo 0xother >"$sandbox/active"
+# On workspace 1 as arranging starts, gone by its first focus.
+printf '1\n' >"$sandbox/ws-seq"
+: >"$sandbox/calls"
+guis arrange
+check "leaving workspace 1 while it is arranged, nothing is focused: you are not pulled back" \
+  lacks dispatch "$sandbox/calls"
+# There for the first focus, gone before the window is moved into the group.
+printf '1\n1\n' >"$sandbox/ws-seq"
+: >"$sandbox/calls"
+guis arrange
+check "  gone partway, nothing is moved and the focus is not given back from there" \
+  test "$(grep -c dispatch "$sandbox/calls")" = 1
+rm -f "$sandbox/ws-seq" "$sandbox/run/desktop/guis/home" "$sandbox/run/desktop/guis/ocp203"
+: >"$sandbox/windows"
 
 # --- filled from Homer
 mkdir -p "$sandbox/homer"

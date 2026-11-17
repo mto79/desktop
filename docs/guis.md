@@ -57,7 +57,9 @@ workspace. So the windows are put together when you arrive on workspace 1, where
 is going anyway: `guis.lua` runs `desktop-guis arrange` on `workspace.active` for workspace
 1, and `open` runs it when workspace 1 is on screen. Until you look, they wait there side by
 side; arranging never pulls you anywhere, and gives the focus back to the window that had
-it. The order is guis.conf's, and home is moved to the front however late it joined
+it. Each focus is sent only while workspace 1 is still on screen, and each move only once
+that focus has taken: leave mid-way and arranging stops, to be taken up the next time you
+are there. A missing home is opened beside it rather than waited for. The order is guis.conf's, and home is moved to the front however late it joined
 (`hl.dsp.group.move_window`, a place at a time).
 
 `hl.dsp.group.lock` is Hyprland's lock on every group at once (`lockgroups`), not one

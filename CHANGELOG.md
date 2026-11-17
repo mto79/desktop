@@ -204,6 +204,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Passing through workspace 1 no longer flickers back to it: the web GUIs are put into
+  their group only while you are there, and home is opened beside that rather than waited
+  for, so nothing focuses a window there after you have moved on.
 - The clusters' web GUIs on workspace 1 have KeePassXC-Browser, the one your own browser
   has, connected to KeePassXC: passwords fill there as they do in your own browser.
 - Starting up, workspace 1 has one browser, home, rather than two: the window the browser
