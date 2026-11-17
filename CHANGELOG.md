@@ -12,8 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
-- Workspace 1 always starts with a home tab in front of the clusters' GUIs: a page of every
-  group's links in the theme's colours, then home's own links. Opened at login, and again
+- Workspace 1 always starts with a home tab in front of the clusters' GUIs: your own browser,
+  with your bookmarks, and home's own links if you give it any. Opened at login, and again
   on going to workspace 1 if it was closed.
 - The web GUI windows on workspace 1 are one Hyprland group, a tab per cluster -- home,
   ocp202, ocp203 -- put together when you go there, never pulling you there. Grouped

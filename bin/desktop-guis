@@ -82,7 +82,20 @@ addresses() {
   hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class == $c) | .address'
 }
 
+# Is the window a group opened still there? Home's is your own browser's, of any class.
+is_open() {
+  [[ -s $RUN/$1 ]] || return 1
+  hyprctl -j clients 2>/dev/null | jq -e --arg a "$(cat "$RUN/$1")" 'any(.[]; .address == $a)' >/dev/null
+}
+
 running() { pgrep -f -- "--user-data-dir=$PROFILE( |$)" >/dev/null 2>&1; }
+
+# Your own browser running already: a main process -- no --type=, which its helpers have --
+# with no profile of its own, which the GUIs' has.
+own_running() {
+  pgrep -a -x 'brave|chrome|chromium|chromium-browser|msedge|vivaldi-bin' 2>/dev/null |
+    grep -v -e '--type=' -e '--user-data-dir=' | grep -q .
+}
 
 # What the profile is dressed in, written before it starts: Chromium reads both only then.
 dress() {
@@ -123,69 +136,51 @@ EOF
     >"$STATE/env/glib-2.0/settings/keyfile"
 }
 
-# The home tab's own page: every group's links, in the theme's colours and the desktop's
-# font, so home is there with something on it before [home] has a link of its own. Written
-# again each time home opens, from guis.conf as it is then.
-home_page() {
-  local font
-  font=$(desktop-font-current 2>/dev/null)
-  mkdir -p "$STATE"
-  python3 - "$CONF" "$THEME_DIR/shell.json" "${font:-monospace}" "$STATE/home.html" <<'EOF'
-import html, json, re, sys
-conf, shell, font, out = sys.argv[1:]
-try:
-    t = json.load(open(shell))
-except (OSError, ValueError):
-    t = {}
-bar = t.get("bar", {})
-bg, fg = t.get("background", "#1a1b26"), t.get("foreground", "#c0caf5")
-muted, accent = t.get("muted", "#565f89"), t.get("accent", "#7aa2f7")
-raised = bar.get("raised", bg)
-groups, current = [], None
-try:
-    lines = open(conf).read().splitlines()
-except OSError:
-    lines = []
-for line in lines:
-    head = re.match(r"\s*\[([^]]+)\]", line)
-    if head:
-        current = (head.group(1), [])
-        groups.append(current)
-        continue
-    # A comment starts a line or follows a space: a URL's own # -- Kasten's #/ -- is no comment.
-    line = re.sub(r"(^|\s)#.*", "", line).strip()
-    if current and line:
-        url, _, name = line.partition(" ")
-        current[1].append((url, name.strip() or url))
-cards = []
-for name, items in groups:
-    if not items:
-        continue
-    links = "".join(f'<a href="{html.escape(u)}">{html.escape(n)}</a>' for u, n in items)
-    cards.append(f"<section><h2>{html.escape(name)}</h2>{links}</section>")
-body = "".join(cards) or '<p class="empty">No links yet: add them to ~/.config/desktop/guis.conf.</p>'
-style = f"""
-body {{ background: {bg}; color: {fg}; font-family: "{html.escape(font)}", monospace; margin: 2rem; }}
-main {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr)); gap: 1rem; }}
-section {{ background: {raised}; padding: 0.8rem 1rem; }}
-h2 {{ color: {accent}; font-size: 1rem; margin: 0 0 0.5rem; }}
-a {{ display: block; color: {fg}; text-decoration: none; padding: 0.15rem 0; }}
-a:hover {{ color: {accent}; }}
-.empty {{ color: {muted}; }}
-"""
-open(out, "w").write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>home</title>'
-                     f"<style>{style}</style></head><body><main>{body}</main></body></html>\n")
-EOF
+# Home is your own browser -- your profile, your bookmarks -- not the GUIs' profile: a window
+# of it named home, the first tab on workspace 1, with [home]'s links if it has any. A
+# window of your own browser has no class to be sent to workspace 1 by, so it is opened only
+# while workspace 1 is on screen, where it then opens: at login, and on arriving there.
+open_home() {
+  local urls before after new i theme
+  [[ $(active_workspace) == 1 ]] || return 0
+  is_open home && return 0
+  # One at a time, and asked again once it is this one's turn: at login the start of the
+  # session and the arrival on workspace 1 both open home, and each made one.
+  mkdir -p "$RUN"
+  exec 9>"$RUN/.lock"
+  flock 9
+  is_open home && return 0
+  mapfile -t urls < <(links home)
+  # In the theme your browser's launcher gives it (desktop-browser-theme), should this be
+  # what starts it.
+  theme="${XDG_STATE_HOME:-$HOME/.local/state}/desktop/browser-theme/chromium"
+  [[ -f $theme/manifest.json ]] || DESKTOP_THEME_DIR="$THEME_DIR" desktop-browser-theme chromium "$theme"
+  mkdir -p "$RUN"
+  before=$(hyprctl -j clients 2>/dev/null | jq -r '.[].address' | sort)
+  # The theme only for a browser this starts: handed to one already running, those switches
+  # make it pass over --window-name too, and home would be named after its page.
+  local flags=(--disable-features=DisableLoadExtensionCommandLineSwitch --load-extension="$theme")
+  own_running && flags=()
+  setsid uwsm app -- "$(browser)" "${flags[@]}" --new-window --window-name=home "${urls[@]}" \
+    >/dev/null 2>&1 8>&- 9>&- &
+  for ((i = 0; i < 60; i++)); do
+    sleep 0.25
+    after=$(hyprctl -j clients 2>/dev/null | jq -r --arg c "$CLASS" '.[] | select(.class != $c) | .address' | sort)
+    new=$(comm -13 <(echo "$before") <(echo "$after") | head -1)
+    [[ -n $new ]] && { echo "$new" >"$RUN/home"; flock -u 9; return 0; }
+  done
+  echo "desktop-guis: home's window did not appear" >&2
+  return 1
 }
 
 cmd_open() {
   local name=$1 urls before after new i
-  mapfile -t urls < <(links "$name")
-  # Home is always there, its own page first: a tab even before it has links of its own.
   if [[ $name == home ]]; then
-    home_page
-    urls=("file://$STATE/home.html" "${urls[@]}")
+    open_home || return 1
+    [[ -z ${ARRANGING:-} ]] && cmd_arrange
+    return 0
   fi
+  mapfile -t urls < <(links "$name")
   ((${#urls[@]})) || return 0
   mkdir -p "$RUN"
   exec 9>"$RUN/.lock"
@@ -241,7 +236,7 @@ cmd_arrange() {
     address=$(cat "$RUN/$name")
     hyprctl -j clients | jq -e --arg a "$address" '.[] | select(.address == $a and .workspace.id == 1)' >/dev/null 2>&1 &&
       order+=("$address")
-  done < <(groups)
+  done < <(echo home; groups | grep -vx home)
   ((${#order[@]})) || return 0
   focus=$(hyprctl -j activewindow 2>/dev/null | jq -r '.address // empty')
   # The head: one already in a group, else the first.
@@ -281,16 +276,15 @@ cmd_arrange() {
   return 0
 }
 
-is_open() { [[ -s $RUN/$1 ]] && addresses | grep -qxF "$(cat "$RUN/$1")"; }
 
 cmd_close() {
   local name=$1 address
   [[ -s $RUN/$name ]] || return 0
   address=$(cat "$RUN/$name")
-  rm -f "$RUN/$name"
-  if addresses | grep -qxF "$address"; then
+  if is_open "$name"; then
     hyprctl dispatch "hl.dsp.window.close({ window = \"address:$address\" })" >/dev/null
   fi
+  rm -f "$RUN/$name"
   # The last window gone, the browser goes too. Brave keeps itself running in the
   # background whatever the profile says; ended, the next group starts it afresh, in the
   # theme and the font of the moment.
@@ -306,9 +300,9 @@ cmd_list() {
   local name state
   while read -r name; do
     state=closed
-    [[ -s $RUN/$name ]] && addresses | grep -qxF "$(cat "$RUN/$name")" && state=open
+    is_open "$name" && state=open
     printf '%-12s %-7s %s links\n' "$name" "$state" "$(links "$name" | wc -l)"
-  done < <(groups)
+  done < <(echo home; groups | grep -vx home)
 }
 
 # A Homer dashboard's sections named after a cluster -- "OCP203 | Production" -- become that

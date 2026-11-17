@@ -15,8 +15,9 @@ mkdir -p "$stubs" "$sandbox/config/desktop" "$sandbox/theme" "$sandbox/run"
 cat >"$stubs/hyprctl" <<STUB
 #!/usr/bin/env bash
 case "\$1" in
--j) [[ \$2 == activeworkspace ]] && { echo '{"id": 3}'; exit; }
-  touch "$sandbox/windows"; jq -R '{class: "desktop-guis", address: ., workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
+-j) [[ \$2 == activeworkspace ]] && { echo "{\"id\": \$(cat "$sandbox/ws" 2>/dev/null || echo 3)}"; exit; }
+  touch "$sandbox/windows"
+  jq -R 'split(" ") | {address: .[0], class: (.[1] // "desktop-guis"), workspace: {id: 1}, grouped: []}' "$sandbox/windows" | jq -s . ;;
 dispatch) echo "dispatch \$2" >>"$sandbox/calls"
   gone=\$(sed -nE 's/.*address:([^"]+).*/\1/p' <<<"\$2")
   [[ -n \$gone ]] && sed -i "/^\$gone\$/d" "$sandbox/windows" ;;
@@ -26,7 +27,10 @@ cat >"$stubs/uwsm" <<STUB
 #!/usr/bin/env bash
 shift 2
 echo "browser \$* CONFIG=\$XDG_CONFIG_HOME BACKEND=\$GSETTINGS_BACKEND" >>"$sandbox/calls"
-echo "0xnew\$(wc -l <"$sandbox/windows")" >>"$sandbox/windows"
+# The GUIs' profile makes a desktop-guis window; your own browser one of its own class.
+class=brave-browser
+[[ " \$* " == *" --class=desktop-guis "* ]] && class=desktop-guis
+echo "0xnew\$(wc -l <"$sandbox/windows") \$class" >>"$sandbox/windows"
 STUB
 printf '#!/usr/bin/env bash\necho brave-browser.desktop\n' >"$stubs/xdg-settings"
 printf '#!/usr/bin/env bash\necho "Test Font Mono"\n' >"$stubs/desktop-font-current"
@@ -79,21 +83,29 @@ guis open ocp203 >/dev/null
 check "opened again while its window is there, nothing more is opened" lacks browser "$sandbox/calls"
 check "a group with no links opens nothing" test -z "$(guis open nope; grep browser "$sandbox/calls")"
 
+# --- home: your own browser
 : >"$sandbox/calls"
 guis open home >/dev/null
-check "home's own page is its first tab, before its links" \
-  grep -qE -- "--window-name=home file://$sandbox/state/desktop/guis/home.html https://git.example/ " "$sandbox/calls"
-check "  a page of every group's links, by their names" \
-  test "$(grep -o '<a href="[^"]*">[^<]*' "$sandbox/state/desktop/guis/home.html" | tr '\n' ' ')" = \
-  '<a href="https://git.example/">GitLab <a href="https://console.ocp203.example/">OpenShift <a href="https://argocd.ocp203.example/">Argo CD <a href="https://k10.ocp203.example/k10/#/">Kasten '
-check "  in the theme's colours" grep -q 'background: #1a1b26' "$sandbox/state/desktop/guis/home.html"
+check "home is opened only while workspace 1 is on screen: your own browser goes where you are" \
+  lacks browser "$sandbox/calls"
+echo 1 >"$sandbox/ws"
+guis open home >/dev/null
+check "  on workspace 1, a window of your own browser named home, with [home]'s links" \
+  grep -qE -- "--new-window --window-name=home https://git.example/ CONFIG=" "$sandbox/calls"
+check "  your own profile, not the GUIs'" lacks -- "--window-name=home.*--user-data-dir\|--user-data-dir=.*--window-name=home" "$sandbox/calls"
+check "  and remembered, though it is not of the GUIs' class" \
+  grep -q "brave-browser" <<<"$(grep -F "$(cat "$sandbox/run/desktop/guis/home")" "$sandbox/windows")"
+: >"$sandbox/calls"
+guis open home >/dev/null
+check "  opened once" lacks browser "$sandbox/calls"
+guis close home
 printf '[ocp203]\nhttps://console.ocp203.example/ OpenShift\n' >"$sandbox/config/desktop/guis-nohome.conf"
 : >"$sandbox/calls"
-guis close home
-: >"$sandbox/calls"
 DESKTOP_GUIS="$sandbox/config/desktop/guis-nohome.conf" guis open home >/dev/null
-check "home opens with no links of its own, its page alone" \
-  grep -qE -- "--window-name=home file://$sandbox/state/desktop/guis/home.html CONFIG=" "$sandbox/calls"
+check "home opens with no links of its own, a new tab" \
+  grep -qE -- "--new-window --window-name=home CONFIG=" "$sandbox/calls"
+guis close home
+echo 3 >"$sandbox/ws"
 
 : >"$sandbox/calls"
 guis arrange

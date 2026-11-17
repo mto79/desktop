@@ -3,7 +3,7 @@
 The web GUIs of what you are working on, ready on workspace 1: a cluster's console, its
 Argo CDs, Grafana and the rest, as tabs in one browser window per cluster, opened when you
 sign in to the cluster and closed when you sign out. On workspace 1 they are one Hyprland
-group, a tab each. A home window, with whatever you always want, opens at login and is the
+group, a tab each. A home window -- your own browser, with your bookmarks -- opens at login and is the
 first tab.
 
     desktop-guis open <group>     a browser window with the group's links as tabs
@@ -23,11 +23,14 @@ name of your own (the tab shows the page's title):
     https://console-openshift-console.apps.ocp203.example/   OpenShift
     https://argocd.ocp203.example/                           System Argo CD
 
-Home is always there, the first tab: its window opens at login, and again on arriving at
-workspace 1 if it was closed. Its first tab is a page of its own, every group's links in
-the theme's colours and the desktop font, so it has something on it before `[home]` has a
-link; links of its own follow as further tabs. A comment starts a line or follows a space,
-so a URL's own `#` -- Kasten's `#/` -- is kept.
+Home is always there, the first tab: a window of your own browser -- your profile, your
+bookmarks -- named home, with `[home]`'s links as its tabs, or a new tab when it has none.
+It opens at login, and again on arriving at workspace 1 if it was closed. A window of your
+own browser has no class of its own to be sent to workspace 1 by, so it is only ever
+opened while workspace 1 is on screen, and lands there. The theme's switches go with it
+only when this is what starts your browser: handed to one already running, they make it
+pass over `--window-name` too. A comment starts a line or follows a space, so a URL's own
+`#` -- Kasten's `#/` -- is kept.
 
 A group named after a cluster in `clusters.conf` is opened by `ocl` when you sign in to it
 and when its session is opened (`prefix + K`, Enter in the sidebar), and closed by
