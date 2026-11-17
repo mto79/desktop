@@ -26,6 +26,14 @@ Config that carries machine state cannot be copied over. Claude Code's `settings
 holds authentication next to its configuration, so `desktop-agent-hooks` merges the hooks
 (and the Remote Control switch) into it instead and leaves the rest alone.
 
+The login screen is an SDDM theme in a repository of its own,
+[mto79/desktop_sddm](https://github.com/mto79/desktop_sddm), installed by
+`install/login/sddm.sh` into `/usr/share/sddm/themes/tokyo-night-sddm` -- replaced whole
+each time, so a file the theme dropped does not stay behind. It takes the size of the
+screen it is on, with its font size following the screen's height, in Tokyo Night and
+JetBrains Mono. SDDM runs its greeter as its own user, which reads no one's home, so the
+font is the system's `jetbrains-mono-fonts`, not the Nerd Font under `~/.local/share/fonts`.
+
 ## Update
 
 `desktop-update` runs, in order:

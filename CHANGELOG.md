@@ -154,6 +154,8 @@ Add a line under the current month in the same commit as the change it describes
 
 - The pipelines tooltip is in colour: each status mark as the bar draws it -- red failed,
   amber waiting, green passed -- and the titles quieter than the names under them.
+- The login screen fills the laptop's screen rather than a corner of it, in the desktop's
+  colours and font, on the astronaut without the wallpaper site's label in its corner.
 - The pipelines tooltip reads like the bar's other tooltips: the counts in its title, each
   merge request with a pipeline as a status mark and its project and number, the title
   under it, most urgent first, and those without a pipeline counted rather than listed.

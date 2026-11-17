@@ -6,14 +6,20 @@ TEMP_DIR="/tmp/$THEME_NAME"
 SDDM_GIT_URL="https://github.com/mto79/desktop_sddm.git"
 SDDM_THEME_DIR="/usr/share/sddm/themes"
 
-# Clone the repo to a temporary directory
+# Clone the repo to a temporary directory -- afresh, so a copy left by an earlier run
+# does not make the clone fail.
 echo "Cloning SDDM theme..."
+rm -rf "$TEMP_DIR"
 git clone --depth 1 "$SDDM_GIT_URL" "$TEMP_DIR"
 
-# Copy the theme to SDDM themes directory
-echo "Installing theme to /usr/share/sddm/themes..."
-sudo mkdir -p "/usr/share/sddm/themes/$THEME_NAME"
-sudo cp -r "$TEMP_DIR/." "/usr/share/sddm/themes/$THEME_NAME/"
+# Copy the theme to SDDM themes directory, replacing what was there rather than copying
+# over it: a file the theme dropped -- the old background -- would otherwise stay. Its git
+# history is no part of the theme.
+echo "Installing theme to $SDDM_THEME_DIR..."
+sudo rm -rf "${SDDM_THEME_DIR:?}/$THEME_NAME"
+sudo mkdir -p "$SDDM_THEME_DIR/$THEME_NAME"
+sudo cp -r "$TEMP_DIR/." "$SDDM_THEME_DIR/$THEME_NAME/"
+sudo rm -rf "$SDDM_THEME_DIR/$THEME_NAME/.git"
 
 # Create SDDM config directory if it doesn't exist
 sudo mkdir -p /etc/sddm.conf.d
