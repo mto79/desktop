@@ -72,6 +72,27 @@ add ssh-exposed warn "SSH is open" "port 22"
 add ssh-exposed warn "SSH is open" "port 22 again, over IPv6"
 check "one finding per id, however many sockets report it" test ${#findings[@]} = 1
 
+# Secure Boot's advice follows the machine: the NVIDIA driver here is built by DKMS and
+# signed with its key, and the advice was once akmods', which signed nothing.
+mkdir -p "$sandbox/mok"
+printf 'key' >"$sandbox/dkms-mok.pub"
+cat >"$sandbox/mok/mokutil" <<STUB
+#!/usr/bin/env bash
+cat "$sandbox/mok-state" 2>/dev/null
+STUB
+chmod +x "$sandbox/mok/mokutil"
+sbfix() { DKMS_MOK=$sandbox/dkms-mok.pub PATH="$sandbox/mok:$PATH" secure_boot_fix; }
+echo "$sandbox/dkms-mok.pub is not enrolled" >"$sandbox/mok-state"
+check "Secure Boot: the DKMS key, not yet enrolled, is imported first" \
+  grep -q "sudo mokutil --import $sandbox/dkms-mok.pub" <<<"$(sbfix)"
+check "  and not akmods' key, which signs nothing here" lacks kmodgenca <<<"$(sbfix)"
+echo "$sandbox/dkms-mok.pub is already in the enrollment request" >"$sandbox/mok-state"
+check "  waiting to be enrolled, the next step is the reboot into MokManager" \
+  grep -q "^Reboot: MokManager" <<<"$(sbfix)"
+echo "$sandbox/dkms-mok.pub is already enrolled" >"$sandbox/mok-state"
+check "  enrolled, all that is left is the firmware switch" \
+  grep -q "^Turn Secure Boot on in the firmware setup: the key" <<<"$(sbfix)"
+
 mkdir -p "$sandbox/bin"
 printf '#!/usr/bin/env bash\necho "$*" >>"%s/notified.log"\n' "$sandbox" >"$sandbox/bin/notify-send"
 chmod +x "$sandbox/bin/notify-send"

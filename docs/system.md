@@ -67,6 +67,22 @@ Security tab; see [shell.md](shell.md).
     desktop-security-events --json              # the last 24 hours
     desktop-security-events --json --hours 72
 
+Secure Boot is off on a machine with the NVIDIA driver because the driver is a module of
+its own, and Secure Boot refuses a module not signed with a key it trusts. The driver here
+comes from NVIDIA's repository and is built by DKMS, which signs every build -- for every
+kernel, on every update -- with its key in `/var/lib/dkms/mok.pub`. Turning Secure Boot on
+is three steps, and `desktop-security check` says which one you are at:
+
+    sudo mokutil --import /var/lib/dkms/mok.pub    # choose a one-time password
+    # reboot: MokManager -- Enroll MOK, Continue, Yes, that password
+    # firmware setup (F2 on a Dell): Secure Boot on
+
+Booting needs nothing more: Fedora's shim is signed with Microsoft's third-party CA, which
+the firmware trusts. With Secure Boot on the kernel is in lockdown -- no unsigned modules,
+no hibernation, no writing to `/dev/mem` or CPU registers -- none of which this desktop
+uses. Turned off again in the firmware, everything is as before. The disk is unlocked with
+a passphrase, not the TPM, so the change in what the TPM measures locks nothing out.
+
 `desktop-reboot-check` answers a different question: will this machine come back up? It
 runs after every update.
 

@@ -176,7 +176,33 @@ check_secure_boot() {
   [[ -d /sys/module/nvidia ]] && nvidia=" The NVIDIA driver is loaded as an unsigned module, which Secure Boot would refuse unless it is signed with an enrolled key -- the usual reason it is off."
   add secure-boot warn "Secure Boot is off" \
     "Anything that gets root can replace the kernel or bootloader, and it would still boot.$nvidia" \
-    "Enroll a key for akmods (sudo kmodgenca; sudo mokutil --import /etc/pki/akmods/certs/public_key.der), then enable Secure Boot in the firmware"
+    "$(secure_boot_fix)"
+}
+
+# The way to Secure Boot from where this machine is. The NVIDIA driver here comes from
+# NVIDIA's repository, built by DKMS, which signs every build with its own key; the key
+# has to be enrolled in shim's list (MOK) before Secure Boot is turned on, or the driver
+# is refused and the desktop comes up without it. The advice used to be akmods' -- RPM
+# Fusion's way, a different key -- which signed nothing here. mokutil --test-key says,
+# without root, whether a key is enrolled or waiting to be at the next boot.
+DKMS_MOK=${DESKTOP_DKMS_MOK:-/var/lib/dkms/mok.pub}
+secure_boot_fix() {
+  local state
+  if [[ -r $DKMS_MOK ]]; then
+    state=$(mokutil --test-key "$DKMS_MOK" 2>/dev/null)
+    case $state in
+    *"already enrolled"*)
+      echo "Turn Secure Boot on in the firmware setup: the key DKMS signs the NVIDIA driver with is enrolled" ;;
+    *"enrollment request"*)
+      echo "Reboot: MokManager asks to enroll the DKMS key -- Enroll MOK, Continue, Yes, the password you chose -- then turn Secure Boot on in the firmware setup" ;;
+    *)
+      echo "Enroll the key DKMS signs the NVIDIA driver with (sudo mokutil --import $DKMS_MOK, a one-time password), reboot and enroll it in MokManager, then turn Secure Boot on in the firmware setup" ;;
+    esac
+  elif command -v kmodgenca >/dev/null 2>&1; then
+    echo "Enroll a key for akmods (sudo kmodgenca; sudo mokutil --import /etc/pki/akmods/certs/public_key.der), then turn Secure Boot on in the firmware setup"
+  else
+    echo "Turn Secure Boot on in the firmware setup"
+  fi
 }
 
 check_encryption() {

@@ -204,6 +204,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The security check's way to Secure Boot is this machine's: enroll the key DKMS signs
+  the NVIDIA driver with, rather than akmods' key, which signed nothing here -- and it says
+  which step you are at, the key waiting for MokManager or enrolled.
 - KeePassXC-Browser in the clusters' web GUIs reaches KeePassXC rather than saying it
   cannot connect: the browser now finds KeePassXC's connector where it looks for it.
 - Opening a cluster's web GUIs no longer turns off KeePassXC-Browser in your own browser:
