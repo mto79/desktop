@@ -63,6 +63,14 @@ includes its file through that path, so nothing has to be rewritten to switch.
 - `hyprctl reload`
 - the next background
 
+The wallpaper is drawn by swaybg, started by `desktop-wallpaper` -- at login, on the next
+background, and by `desktop-monitors-watch` whenever a screen is plugged in or out. A
+screen shaped like the picture gets `fill`, cropped to it. One more than a fifth off --
+the portrait 4K, the 21:9 ultrawide -- gets `fit`, all of the picture with the rest in the
+colour of its edge, when that edge is one colour: on the astronaut the bars are its own
+near-black and cannot be seen. A photograph has no such edge and stays on `fill`.
+`desktop-wallpaper --plan` says which each screen gets.
+
 A program with no include mechanism gets a wrapper: `desktop-gdu` builds gdu's config from
 the theme each time it runs.
 

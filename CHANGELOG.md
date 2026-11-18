@@ -238,6 +238,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The wallpaper is whole on the portrait 4K and the ultrawide rather than cropped to them:
+  a screen shaped nothing like the picture shows all of it, its edge colour around it.
 - The login screen has a pointer again, sized to be seen on the 3840x2400 panel.
 - The boot menu is readable again on the laptop's 3840x2400 panel with Secure Boot on:
   GRUB draws it at half the resolution, or the nearest smaller size the firmware offers,

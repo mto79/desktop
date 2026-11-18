@@ -8,7 +8,8 @@ hl.on("hyprland.start", function()
   -- hl.exec_cmd("uwsm app -- waybar")
   hl.exec_cmd("uwsm app -- desktop-launch-shell")
   hl.exec_cmd("uwsm app -- fcitx5")
-  hl.exec_cmd("uwsm app -- swaybg -i ~/.config/desktop/current/background -m fill")
+  -- The wallpaper, filling each screen or fitting it as its shape needs (desktop-wallpaper).
+  hl.exec_cmd("desktop-wallpaper")
   -- hl.exec_cmd("uwsm app -- swayosd-server")
   hl.exec_cmd("systemctl --user enable --now hyprpolkitagent.service")
 

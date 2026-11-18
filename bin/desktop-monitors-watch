@@ -25,6 +25,7 @@ import sys
 DEBOUNCE = 0.5
 TRIGGERS = ("monitoradded", "monitorremoved")
 SWITCH = "desktop-cmd-monitors-switch"
+WALLPAPER = "desktop-wallpaper"
 
 # Named so the test can point us at a socket of its own; in a session Hyprland's is the
 # only one that makes sense.
@@ -46,6 +47,10 @@ def apply_layout():
     # Failure is the compositor's to report -- desktop-cmd-monitors-switch already
     # notifies -- and is never a reason to stop watching.
     subprocess.run([SWITCH], check=False)
+    # And the wallpaper again, for the screens there now: whether a picture fills a screen
+    # or fits it depends on the screen's shape, and a screen plugged in after swaybg started
+    # would otherwise have the crop meant for none in particular.
+    subprocess.run([WALLPAPER], check=False)
 
 
 def main():

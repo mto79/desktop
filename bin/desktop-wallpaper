@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+# desktop-wallpaper: the current background on every monitor, in proportion on each.
+#
+#   desktop-wallpaper          (re)start swaybg for the monitors connected now
+#   desktop-wallpaper --plan   what it would run, one monitor a line, and start nothing
+#
+# swaybg's "fill" keeps a picture's proportions by cropping it to the monitor's shape. On a
+# monitor shaped like the picture that is right; on one shaped nothing like it, it throws
+# half the picture away -- the astronaut on the portrait 4K blown up with its words cut off
+# at both sides, and its last line cut off along the bottom of the 21:9 ultrawide.
+#
+# "fit" shows all of the picture and fills the rest of the screen with a colour. So a
+# monitor whose shape is more than a fifth off the picture's gets "fit" -- but only for a
+# picture whose edges are one colour, which then fills the bars and they cannot be seen.
+# A photograph has no such edge, and stays on "fill", cropped, rather than framed in bars.
+#
+# Run at login, by desktop-theme-bg-next, and when a monitor is plugged in (autostart.lua).
+
+set -uo pipefail
+
+LINK="${DESKTOP_BACKGROUND:-$HOME/.config/desktop/current/background}"
+
+# The picture's width/height, the colour of its edge, and whether that edge is one colour:
+# "1.7778 070101 1". The edge is the four strips along the sides of a small copy; one colour
+# is a spread under 0.03 -- the themes' plain-edged pictures measure 0 to 0.002, their
+# photographs 0.09 and up.
+picture() {
+  magick "$1" -format '%[fx:w/h] ' info: 2>/dev/null
+  magick "$1" -resize 64x64! \( -clone 0 -crop 64x3+0+0 \) \( -clone 0 -crop 64x3+0+61 \) \
+    \( -clone 0 -crop 3x64+0+0 -rotate 90 \) \( -clone 0 -crop 3x64+61+0 -rotate 90 \) -delete 0 +repage \
+    -append -format '%[hex:p{0,0}] %[fx:standard_deviation < 0.03 ? 1 : 0]' info: 2>/dev/null
+}
+
+# name width height, one monitor a line, as it is turned: a portrait 4K is 2160x3840.
+monitors() {
+  hyprctl -j monitors 2>/dev/null |
+    jq -r '.[] | [.name, (if .transform % 2 == 1 then .height else .width end),
+                  (if .transform % 2 == 1 then .width else .height end)] | @tsv'
+}
+
+# The swaybg arguments, and the plan they come from.
+plan() {
+  local ratio colour plain name w h mode
+  read -r ratio colour plain < <(picture "$LINK")
+  [[ -n ${ratio:-} ]] || return 1
+  ARGS=(-o '*' -i "$LINK" -m fill)
+  while IFS=$'\t' read -r name w h; do
+    [[ -n $name ]] || continue
+    mode=fill
+    if [[ $plain == 1 ]] && awk -v a="$ratio" -v b="$w/$h" -v w="$w" -v h="$h" \
+      'BEGIN { s = w / h; d = (s > a ? s / a : a / s); exit !(d > 1.2) }'; then
+      mode=fit
+      ARGS+=(-o "$name" -i "$LINK" -m fit -c "#${colour:0:6}")
+    fi
+    printf '%s\t%sx%s\t%s\n' "$name" "$w" "$h" "$mode"
+  done < <(monitors)
+}
+
+if [[ ! -e $LINK ]]; then
+  [[ ${1:-} == --plan ]] && { echo "no background: plain black"; exit 0; }
+  pkill -x swaybg
+  setsid uwsm app -- swaybg --color '#000000' >/dev/null 2>&1 &
+  exit 0
+fi
+
+if [[ ${1:-} == --plan ]]; then
+  plan
+  exit
+fi
+
+plan >/dev/null || ARGS=(-i "$LINK" -m fill)
+pkill -x swaybg
+setsid uwsm app -- swaybg "${ARGS[@]}" >/dev/null 2>&1 &
