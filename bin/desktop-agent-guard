@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+# desktop-agent-guard: keep coding agents out of the places that hold keys and tokens.
+#
+#   desktop-agent-guard            # add the deny rules that are missing, change nothing else
+#   desktop-agent-guard --check    # exit 1 if any is missing
+#   desktop-agent-guard --list     # the paths, one per line
+#
+# The paths are in default/agents/private-paths. For each, Claude Code is denied Read and
+# Edit of it (permissions.deny in ~/.claude/settings.json) and opencode read and edit
+# (permission in ~/.config/opencode/opencode.json). Rules are only added: one there already,
+# and anything else in either file, is kept. Both files hold more than this -- Claude's its
+# hooks and its state, opencode's its providers -- so they are merged into, never copied.
+#
+# What this does not do: these are rules for an agent's own file tools. A command it runs
+# is a process of yours and reads what you can, which is how git, gh and oc go on working.
+# Claude's sandbox, opencode's lack of one and Codex's -- which writes only in its project
+# but reads everywhere, and takes no list of paths -- are in docs/agents-and-tmux.md.
+
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LIST="${DESKTOP_AGENT_PRIVATE:-$ROOT/default/agents/private-paths}"
+CLAUDE="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+OPENCODE="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
+
+paths() { grep -vE '^[[:space:]]*(#|$)' "$LIST"; }
+
+# Claude Code's rules take the paths as they are written: ~/ is home, ** any depth.
+claude_merge() {
+  jq --argjson paths "$(paths | jq -R . | jq -sc .)" '
+    .permissions.deny = ((.permissions.deny // [])
+      + [$paths[] | "Read(\(.))", "Edit(\(.))"] | unique)' "$1"
+}
+
+# opencode's patterns have a single * for any run of characters, slashes included.
+opencode_merge() {
+  jq --argjson paths "$(paths | sed -E 's#/\*\*$#/*#; s#\*\*/\*#*#g; s#\*\*/#*#g' | jq -R . | jq -sc .)" '
+    .permission.read = ((.permission.read // {"*": "allow"})
+      | if type == "string" then {"*": .} else . end
+      | . + ($paths | map({key: ., value: "deny"}) | from_entries))
+    | .permission.edit = ((.permission.edit // {"*": "allow"})
+      | if type == "string" then {"*": .} else . end
+      | . + ($paths | map({key: ., value: "deny"}) | from_entries))' "$1"
+}
+
+# merge <file> <function> <name>: write the merged file when it changed; 1 under --check.
+merge() {
+  local file=$1 how=$2 name=$3 merged
+  mkdir -p "$(dirname "$file")"
+  [[ -f $file ]] || echo '{}' >"$file"
+  # A file that does not parse is left alone: it holds more than this, and a broken file
+  # is yours to see, not this script's to quietly replace.
+  if ! jq -e . "$file" >/dev/null 2>&1; then
+    echo "desktop-agent-guard: $file is not valid JSON; not touching it" >&2
+    return 1
+  fi
+  merged=$("$how" "$file") || return 1
+  [[ $merged == "$(jq . "$file")" ]] && return 0
+  [[ ${CHECK:-} ]] && return 1
+  printf '%s\n' "$merged" >"$file.$$" && mv -f "$file.$$" "$file"
+  echo "$name: denied the $(paths | wc -l) private places"
+}
+
+case "${1:-}" in
+--list) paths ;;
+--check)
+  CHECK=1
+  status=0
+  merge "$CLAUDE" claude_merge "Claude Code" || status=1
+  [[ -d ${OPENCODE%/*} ]] && { merge "$OPENCODE" opencode_merge opencode || status=1; }
+  exit $status
+  ;;
+"")
+  merge "$CLAUDE" claude_merge "Claude Code"
+  # opencode only where it is set up: no config of its own made for a tool not installed.
+  [[ -d ${OPENCODE%/*} ]] && merge "$OPENCODE" opencode_merge opencode
+  exit 0
+  ;;
+*) echo "usage: desktop-agent-guard [--check | --list]" >&2; exit 2 ;;
+esac

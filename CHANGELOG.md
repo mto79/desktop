@@ -12,6 +12,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Coding agents are kept out of the places that hold keys and tokens -- SSH, GPG, keyrings,
+  kubeconfigs, CLI tokens, browser profiles, password databases -- by deny rules for Claude
+  Code's and opencode's file tools; git, gh and oc go on working as before.
 - SUPER + ALT + COMMA opens the newest notification as a click would -- the chat, the
   screenshot, the review -- or its first button, and dismisses it when there is nothing to
   open.

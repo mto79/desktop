@@ -418,6 +418,23 @@ OpenShell is not needed for this and is not installed by `install/`. The page al
 OpenShell needs here. Codex differs from the others: its commands run in a sandbox of its own,
 though Codex's own process has none.
 
+### Places kept out of reach
+
+`default/agents/private-paths` lists the places that hold keys and tokens: SSH and GPG
+keys, the keyrings, KeePassXC databases, kubeconfigs, the tokens gh, glab, tea and the
+cloud tools keep, the agents' own logins, the desktop's backup password and the browsers'
+profiles. `desktop-agent-guard`, run by the install and a migration, denies Claude Code
+`Read` and `Edit` of each (`permissions.deny`) and opencode `read` and `edit`
+(`permission`), merged into their settings and adding only what is missing.
+
+These are rules for the agents' own file tools, and that is the point of them: a command
+an agent runs is still a process of yours, so git over SSH, gh, glab and oc go on working
+with the secrets they read for themselves, while the agent cannot open the files and copy
+what is in them. A shell command that reads one directly -- `cat ~/.ssh/id_ed25519` -- is
+not stopped by these rules; Claude Code asks or its auto mode decides, and only its sandbox
+(as in a cluster's folder) holds it to them in the kernel. Codex takes no list of paths:
+its sandbox writes only in the project it was started in, and reads everywhere.
+
 ## Review requests
 
 `desktop-reviews` pops up a notification when a merge request or pull request starts

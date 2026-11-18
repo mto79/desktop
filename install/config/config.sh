@@ -28,3 +28,7 @@ CLAUDE_SETTINGS="$HOME/.config/claude/settings.json"
 mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
 [ -f "$CLAUDE_SETTINGS" ] || echo '{}' >"$CLAUDE_SETTINGS"
 CLAUDE_CONFIG_DIR="$(dirname "$CLAUDE_SETTINGS")" ~/.local/share/desktop/bin/desktop-agent-hooks
+
+# And the places that hold keys and tokens kept out of the agents' reach -- Claude Code's and
+# opencode's file tools -- merged in the same way. See default/agents/private-paths.
+CLAUDE_CONFIG_DIR="$(dirname "$CLAUDE_SETTINGS")" ~/.local/share/desktop/bin/desktop-agent-guard

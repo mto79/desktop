@@ -1,0 +1,51 @@
+# Places a coding agent has no business reading or editing, whatever it is working on.
+#
+# desktop-agent-guard turns each line into deny rules for Claude Code (Read and Edit, in
+# ~/.claude/settings.json) and opencode (read and edit, in ~/.config/opencode/opencode.json).
+# What they deny is the agent's own file tools: the commands it runs still work -- git over
+# SSH, gh and glab with their tokens, oc with a kubeconfig -- since those read their secrets
+# themselves. The agent can use them, not lift what is in them.
+#
+# A line is a path under the home directory, ~ first. "/**" at the end is the folder and
+# everything in it; "**" before a name is that name at any depth.
+
+# Keys, and what unlocks them
+~/.ssh/**
+~/.gnupg/**
+~/.local/share/keyrings/**
+~/.pki/**
+~/**/*.kdbx
+~/.config/keepassxc/**
+~/.config/Bitwarden CLI/**
+~/.ansible/vault_pass.sh
+
+# Clusters: their kubeconfigs, and the talos ones
+~/.kube/**
+~/.talos/**
+~/.local/state/desktop/clusters/**
+
+# Tokens the command-line tools keep
+~/.config/gh/hosts.yml
+~/.config/glab-cli/config.yml
+~/.config/tea/**
+~/.aws/**
+~/.netrc
+~/.git-credentials
+~/.docker/config.json
+~/.config/containers/auth.json
+
+# The agents' own logins, and the organisation's model key
+~/.claude/.credentials.json
+~/.codex/auth.json
+~/.local/share/opencode/auth.json
+~/.config/opencode/*.key
+
+# The desktop's own secrets
+~/.config/desktop/restic-password
+~/.config/desktop/chat.conf
+
+# Browsers: cookies and saved passwords are signed-in sessions
+~/.config/BraveSoftware/**
+~/.config/google-chrome/**
+~/.mozilla/**
+~/.local/state/desktop/guis/browser/**
