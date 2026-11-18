@@ -25,6 +25,7 @@
 #   - wake anything up. The keyring is asked only when already on the bus, without
 #     activation: a page that started it would be measuring itself.
 
+import fnmatch
 import glob
 import grp
 import json
@@ -223,6 +224,30 @@ def connections():
             continue
         found.extend((int(pid), peer) for pid in re.findall(r"pid=(\d+)", line))
     return found
+
+
+# --- what each agent's own rules keep its file tools out of ---------------------------------
+def deny_patterns(key):
+    """The paths an agent's own settings deny its file tools, ~ first: Claude Code's
+    Read(...) rules, opencode's read patterns set to deny. desktop-agent-guard writes both."""
+    if key == "claude":
+        rules = (read_json(os.path.join(HOME, ".claude/settings.json")).get("permissions") or {}).get("deny") or []
+        return [rule[5:-1] for rule in rules if isinstance(rule, str) and rule.startswith("Read(") and rule.endswith(")")]
+    if key == "opencode":
+        read = (read_json(os.path.join(HOME, ".config/opencode/opencode.json")).get("permission") or {}).get("read")
+        if isinstance(read, dict):
+            return [pattern for pattern, verdict in read.items() if verdict == "deny"]
+    return []
+
+
+def guarded(place, patterns):
+    """Whether a place -- "~/.ssh", a folder, or a file -- is denied by one of the patterns,
+    the folder itself or everything in it. ** and * both stand for any run of characters."""
+    for pattern in patterns:
+        shape = pattern.replace("**", "*")
+        if fnmatch.fnmatchcase(place, shape) or fnmatch.fnmatchcase(place + "/x", shape):
+            return True
+    return False
 
 
 # --- the account ----------------------------------------------------------------------------
@@ -457,6 +482,14 @@ def rights_of(agent, processes, opened, reached, groups, ours):
         row("filesystem", "caution", f"Its commands read {readable} of {len(reached)} sensitive places, and write only {where}")
     else:
         row("filesystem", "danger", f"Reads {readable} of {len(reached)} sensitive places, writes {writable}")
+
+    # Its own rules, which the kernel knows nothing of: they keep its file tools out, and
+    # what it runs can still read what you can. Worth saying, as a promise, not a boundary.
+    patterns = deny_patterns(key)
+    kept = [place["path"] for place in reached if place["read"] and guarded(place["path"], patterns)]
+    if kept:
+        row("filesystem", "caution",
+            f"Its own rules keep its file tools out of {len(kept)} of them; its commands are not")
 
     if sandboxed:
         row("landlock", "good", "Its processes run under a sandbox")

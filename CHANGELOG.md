@@ -164,6 +164,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- The dashboard's Rights cards say how many sensitive places each agent's own rules keep it
+  out of; Chromium's profile and the shell history are among those places now.
 - Hyprland's donation popup no longer appears after an upgrade, as its update news
   already did not.
 - The Tokyo Night wallpapers no longer carry the wallpaper site's label in their bottom

@@ -433,7 +433,10 @@ with the secrets they read for themselves, while the agent cannot open the files
 what is in them. A shell command that reads one directly -- `cat ~/.ssh/id_ed25519` -- is
 not stopped by these rules; Claude Code asks or its auto mode decides, and only its sandbox
 (as in a cluster's folder) holds it to them in the kernel. Codex takes no list of paths:
-its sandbox writes only in the project it was started in, and reads everywhere.
+its sandbox writes only in the project it was started in, and reads everywhere. The
+dashboard's Rights cards count it under Files: how many of the sensitive places an agent's
+own rules keep its file tools out of, beside how many its commands can still read -- a
+promise and a boundary, kept apart there as they are here.
 
 ## Review requests
 

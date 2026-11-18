@@ -46,7 +46,7 @@ STUB
 printf '#!/bin/sh\nexit 1\n' >"$stubs/systemctl"
 chmod +x "$stubs"/*
 
-printf '{"permissions":{"deny":["Read(x)"]},"env":{"ANTHROPIC_BASE_URL":"https://llm.example/v1"}}' >"$home/.claude/settings.json"
+printf '{"permissions":{"deny":["Read(x)","Read(~/.ssh/**)"]},"env":{"ANTHROPIC_BASE_URL":"https://llm.example/v1"}}' >"$home/.claude/settings.json"
 printf 'secret' >"$home/.claude/.credentials.json"
 printf '[projects."%s"]\ntrust_level = "trusted"\n' "$home" >"$home/.codex/config.toml"
 printf '{"provider":{"local":{"options":{"baseURL":"http://host.example:11434/v1"}}}}' >"$home/.config/opencode/opencode.json"
@@ -92,6 +92,10 @@ check "a place is tested, and a missing one is left out" test "$(of '[.places[] 
 check "what cannot be read says so" test "$(of '.places[] | select(.label == "System password hashes") | .read')" = false
 
 # A failed sudo -n is a line in the journal the Security tab reads, once a minute.
+check "an agent's own rules keeping its file tools out of a place are counted, as rules" \
+  grep -qx "Its own rules keep its file tools out of 1 of them; its commands are not" <<<"$(row claude filesystem)"
+check "  and an agent with no such rules has no such line" lacks "Its own rules" <<<"$(row codex filesystem)"
+
 check "it never tries sudo" lacks -E '"sudo"[, ]+"-n"|sudo -n .*run\(|run\("sudo"' "$RIGHTS"
 check "it never starts the keyring by asking" grep -q -- '--auto-start=no' "$RIGHTS"
 check "it only reads" lacks -E "open\([^)]*['\"][wa]b?['\"]|os\.remove|shutil\.rm" "$RIGHTS"

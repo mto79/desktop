@@ -48,4 +48,9 @@
 ~/.config/BraveSoftware/**
 ~/.config/google-chrome/**
 ~/.mozilla/**
+~/.config/chromium/**
 ~/.local/state/desktop/guis/browser/**
+
+# Shell history: a token or password typed on a command line stays in it
+~/.local/share/fish/fish_history
+~/.bash_history
