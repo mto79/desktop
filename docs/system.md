@@ -131,6 +131,14 @@ one. A device heard only by name is matched by its IP to the MAC it had before. 
 scan of a network only records. The log stays in `~/.local/state/desktop/netscan`, readable
 by you alone, at most 1000 lines.
 
+### A message on joining a network
+
+`desktop-wifi-watch`, started with the session, follows NetworkManager and, on joining a
+network named in `~/.config/desktop/wifi.conf`, shows that network's message and says it
+through `desktop-say` -- once per connection. One network a line, its name, ` = ` and the
+message: `my-home-network = Welcome home`. The file is yours alone, never in the
+repository, since it names your networks; `desktop-wifi-watch --once` tries it now.
+
 ## Storage
 
 `desktop-storage-details` lists filesystems and snapshots and what fills them.

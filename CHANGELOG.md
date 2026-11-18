@@ -12,6 +12,7 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- A message, shown and said aloud, on joining a Wi-Fi network you name in `wifi.conf`.
 - A printer in the bar for the printers within reach, with their ink in its tooltip: red
   when one is out of paper or jammed, amber when ink runs low, and a popup when one needs you.
 - Coding agents are kept out of the places that hold keys and tokens -- SSH, GPG, keyrings,

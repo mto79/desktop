@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+
+# desktop-wifi-watch: a message, shown and said, on connecting to a Wi-Fi network you named.
+#
+#   desktop-wifi-watch           follow NetworkManager for the rest of the session
+#   desktop-wifi-watch --once    the current network's message now, if it has one
+#
+# The networks and what to say are in ~/.config/desktop/wifi.conf, one a line:
+#
+#   mto-home = Welcome home
+#
+# The name before " = " is the network's, as the network panel shows it, spaces and all.
+# The message is a notification and is said aloud through desktop-say, which keeps its own
+# sense of when not to talk -- muted, do-not-disturb, a call. Once per connection: a
+# network that drops and comes back says it again, staying connected says nothing more.
+#
+# Started at login by autostart.lua, like desktop-monitors-watch. Never in the repository:
+# the file names your networks.
+
+set -uo pipefail
+
+CONF="${DESKTOP_WIFI_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/desktop/wifi.conf}"
+
+# The network connected to now, or nothing.
+current() { nmcli -t -f ACTIVE,SSID dev wifi 2>/dev/null | sed -n 's/^yes://p' | head -1; }
+
+# What wifi.conf says for a network, or nothing.
+message() {
+  [[ -f $CONF ]] || return 0
+  awk -v ssid="$1" '
+    /^[[:space:]]*(#|$)/ { next }
+    { i = index($0, " = "); if (!i) next
+      name = substr($0, 1, i - 1); sub(/^[[:space:]]+/, "", name); sub(/[[:space:]]+$/, "", name)
+      if (name == ssid) { print substr($0, i + 3); exit } }' "$CONF"
+}
+
+LAST=""
+announce() {
+  local ssid text
+  ssid=$(current)
+  [[ -n $ssid && $ssid != "$LAST" ]] || { [[ -z $ssid ]] && LAST=""; return 0; }
+  LAST=$ssid
+  text=$(message "$ssid")
+  [[ -n $text ]] || return 0
+  if [[ -n ${DESKTOP_WIFI_SEND:-} ]]; then
+    printf '%s\t%s\n' "$ssid" "$text" >>"$DESKTOP_WIFI_SEND"
+    return 0
+  fi
+  notify-send -a Wi-Fi -i network-wireless "$text" "Connected to $ssid" 2>/dev/null || true
+  setsid -f desktop-say "$text" </dev/null >/dev/null 2>&1
+}
+
+if [[ ${1:-} == --once ]]; then
+  announce
+  exit 0
+fi
+
+# Already connected at login: that is a connection too.
+announce
+# nmcli monitor says "<device>: connected" and "<device>: disconnected" among much else;
+# either is a moment to look again.
+nmcli monitor 2>/dev/null | while read -r line; do
+  case $line in
+  *": connected"* | *": disconnected"* | *"unavailable"*) announce ;;
+  esac
+done
