@@ -24,11 +24,18 @@ sudo rm -rf "$SDDM_THEME_DIR/$THEME_NAME/.git"
 # Create SDDM config directory if it doesn't exist
 sudo mkdir -p /etc/sddm.conf.d
 
-# Set sddm theme
+# Set sddm theme -- and the pointer, named and sized for the panel: the login screen showed
+# none. Left to itself the greeter, running as sddm, was given no cursor theme, and at
+# 3840x2400 a 24-pixel pointer is a speck besides. Twice that on a panel wider than 2560.
 echo "Setting the default SDDM theme..."
+CURSOR_SIZE=24
+[[ $(cat /sys/class/drm/card*-eDP-*/modes 2>/dev/null | head -1) =~ ^([0-9]+)x ]] &&
+  ((BASH_REMATCH[1] > 2560)) && CURSOR_SIZE=48
 sudo tee /etc/sddm.conf.d/theme.conf >/dev/null <<EOF
 [Theme]
 Current=$THEME_NAME
+CursorTheme=Adwaita
+CursorSize=$CURSOR_SIZE
 EOF
 
 # Tap-to-click at the login screen: SDDM draws it in Weston, which leaves a touchpad's

@@ -235,6 +235,7 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The login screen has a pointer again, sized to be seen on the 3840x2400 panel.
 - The boot menu is readable again on the laptop's 3840x2400 panel with Secure Boot on:
   GRUB draws it at half the resolution, so every character is twice the size.
 - A new terminal opens at home when the focused window is not a terminal, instead of

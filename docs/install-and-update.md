@@ -33,6 +33,9 @@ each time, so a file the theme dropped does not stay behind. It takes the size o
 screen it is on, with its font size following the screen's height, in Tokyo Night and
 JetBrains Mono. SDDM runs its greeter as its own user, which reads no one's home, so the
 font is the system's `jetbrains-mono-fonts`, not the Nerd Font under `~/.local/share/fonts`.
+The pointer is named for it too (`CursorTheme=Adwaita` in `/etc/sddm.conf.d/theme.conf`):
+given none, the greeter showed no pointer at all. `CursorSize` is 48 on a panel wider than
+2560, where 24 would be a speck.
 
 The greeter is drawn by Weston (`weston --shell=kiosk`), not Hyprland, and Weston leaves a
 touchpad's tap-to-click off where Hyprland turns it on: a tap on the login button did
