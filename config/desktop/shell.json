@@ -188,6 +188,9 @@
               "id": "pipelines"
             },
             {
+              "id": "printers"
+            },
+            {
               "id": "backup",
               "type": "command",
               "exec": "desktop-backup status --bar",

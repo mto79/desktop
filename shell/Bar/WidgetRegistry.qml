@@ -30,6 +30,7 @@ QtObject {
       "battery": battery,
       "security": security,
       "pipelines": pipelines,
+      "printers": printers,
       "notifications": notificationBell
     })
 
@@ -70,6 +71,9 @@ QtObject {
   }
   property Component pipelines: Component {
     Pipelines {}
+  }
+  property Component printers: Component {
+    Printers {}
   }
   property Component notificationBell: Component {
     NotificationBell {}

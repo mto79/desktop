@@ -187,6 +187,20 @@ otherwise be one device gone and another new.
 calls. `desktop-battery-monitor` runs from a systemd timer and warns when the battery is
 low; `desktop-battery-details` supplies the facts UPower does not carry.
 
+## Printers
+
+`desktop-printers`, every two minutes from `desktop-printers.timer`, finds the printers
+within reach -- what CUPS was given, and what announces itself on the network, added or
+not -- and asks each over IPP (`ipptool`) for its state, what is wrong and its ink or toner
+levels: the printer's own figures, not what CUPS last heard. The bar's printer reads the
+result from `$XDG_RUNTIME_DIR/desktop/printers.json`: red when one is out of paper, jammed,
+open or offline, the accent while one prints, amber when an ink is under 15%, muted when
+all are idle, and not there at all with no printer on this network. Its tooltip has each
+printer's inks; a click opens the printer's own web page, a right click CUPS's.
+
+A popup when a printer has a problem it did not have before, and when an ink falls under
+15%, once each. `desktop-printers --list` asks now and prints it all.
+
 ## Screen and camera
 
 The NVIDIA driver's `nvidia-settings-load` autostart is turned off by a `Hidden=true`

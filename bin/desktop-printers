@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+
+"""The printers within reach, for the bar: state, ink, queue, and a popup when one needs you.
+
+    desktop-printers           ask every printer, write the state, notify what is new
+    desktop-printers --list    the same, as text
+
+The printers are what CUPS has been given (lpstat -v) and what announces itself on the
+network (ippfind): a network printer is printed to whether or not it was ever added, so it
+is shown whether or not it was. Each is asked directly over IPP (ipptool) for its state,
+the reasons for it and its ink or toner levels -- the printer's own figures, current, not
+what CUPS last heard during a print job.
+
+The state goes to $XDG_RUNTIME_DIR/desktop/printers.json, which the bar's printer watches.
+A popup when a printer has a problem it did not have the last time -- out of paper, a jam,
+a door open, offline -- and when an ink or toner falls under 15%, once each. The first
+check after a boot has nothing to compare with and says nothing.
+
+Run by desktop-printers.timer every two minutes. A printer that is not on this network --
+away from home -- is simply not found, and the bar has nothing to show.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from urllib.parse import urlparse
+
+OUT = os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "desktop", "printers.json")
+LOW = 15
+WAIT = 6
+
+# printer-state-reasons that are a problem, said as a person would; -report and -warning
+# suffixes are the printer being chatty, -error the real thing.
+PROBLEMS = {
+    "media-empty": "out of paper", "media-needed": "out of paper", "media-jam": "paper jam",
+    "door-open": "a door is open", "cover-open": "the cover is open", "offline": "offline",
+    "marker-supply-empty": "out of ink", "toner-empty": "out of toner",
+    "input-tray-missing": "a tray is missing", "output-tray-missing": "the output tray is missing",
+    "connecting-to-device": "not answering", "shutdown": "switched off", "stopped": "stopped",
+}
+
+
+def run(command, timeout=WAIT):
+    try:
+        return subprocess.run(command, capture_output=True, text=True, timeout=timeout).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def uris():
+    """{uri: queue name or ""}: what CUPS was given, and what the network announces."""
+    found = {}
+    for line in run(["lpstat", "-v"]).splitlines():
+        match = re.match(r"device for (\S+): (ipps?://\S+)", line)
+        if match:
+            found[match.group(2)] = match.group(1)
+    for line in run(["ippfind", "-T", "3"], timeout=WAIT).splitlines():
+        line = line.strip()
+        if line.startswith(("ipp://", "ipps://")):
+            same = [u for u in found if urlparse(u).hostname == urlparse(line).hostname]
+            if not same:
+                found[line] = ""
+    return found
+
+
+def attributes(uri):
+    """The printer's own answer to Get-Printer-Attributes, as {name: [values]}."""
+    text = run(["ipptool", "-T", str(WAIT), "-tv", uri, "get-printer-attributes.test"], timeout=WAIT + 2)
+    found = {}
+    for line in text.splitlines():
+        match = re.match(r"\s+([a-z0-9-]+) \([^)]*\) = (.*)$", line)
+        if match:
+            # ipptool escapes some characters in what it prints: "\[130BA6]".
+            found[match.group(1)] = re.sub(r"\\(.)", r"\1", match.group(2))
+    return found
+
+
+def split(value):
+    return [part.strip() for part in value.split(",")] if value else []
+
+
+def ink_name(name, colour):
+    name = re.sub(r"\s*(ink|toner|cartridge)$", "", name.strip(), flags=re.I) or name
+    return name
+
+
+def printer(uri, queue):
+    attrs = attributes(uri)
+    if not attrs:
+        return None
+    reasons = [r for r in split(attrs.get("printer-state-reasons", "none")) if r != "none"]
+    problems = []
+    for reason in reasons:
+        if reason.endswith("-report"):
+            continue
+        base = re.sub(r"-(error|warning)$", "", reason)
+        if base in PROBLEMS and (reason.endswith("-error") or not reason.endswith("-warning")):
+            problems.append(PROBLEMS[base])
+    names, levels, colours = (split(attrs.get(k, "")) for k in ("marker-names", "marker-levels", "marker-colors"))
+    inks = []
+    for i, name in enumerate(names):
+        try:
+            level = int(levels[i])
+        except (IndexError, ValueError):
+            continue
+        if level < 0:  # -1, -2, -3: unknown, or not reported
+            continue
+        inks.append({"name": ink_name(name, colours[i] if i < len(colours) else ""), "level": level,
+                     "colours": re.findall(r"#[0-9A-Fa-f]{6}", colours[i] if i < len(colours) else "")})
+    host = urlparse(uri).hostname or ""
+    jobs = 0
+    try:
+        jobs = int(attrs.get("queued-job-count", "0"))
+    except ValueError:
+        pass
+    if queue:
+        jobs = max(jobs, len([l for l in run(["lpstat", "-o", queue]).splitlines() if l.strip()]))
+    state = attrs.get("printer-state", "idle")
+    return {
+        "name": attrs.get("printer-info") or attrs.get("printer-make-and-model") or queue or host,
+        "model": attrs.get("printer-make-and-model", ""),
+        "queue": queue, "uri": uri,
+        "web": attrs.get("printer-more-info") or (f"http://{host}/" if host else ""),
+        "state": state, "problems": problems, "inks": inks, "jobs": jobs,
+        "low": [ink["name"] for ink in inks if ink["level"] < LOW],
+    }
+
+
+def worst(printers):
+    if any(p["problems"] for p in printers):
+        return "error"
+    if any(p["state"] == "processing" or p["jobs"] for p in printers):
+        return "printing"
+    if any(p["low"] for p in printers):
+        return "low"
+    return "idle" if printers else "none"
+
+
+def notify(summary, body, urgency):
+    if os.environ.get("DESKTOP_PRINTERS_SEND"):
+        with open(os.environ["DESKTOP_PRINTERS_SEND"], "a") as handle:
+            handle.write(f"{urgency}\t{summary}\t{body}\n")
+        return
+    subprocess.run(["notify-send", "-a", "Printer", "-i", "printer", "-u", urgency, summary, body],
+                   check=False, capture_output=True)
+
+
+def news(before, now):
+    """A popup for each problem and each low ink a printer has now and did not before."""
+    old = {p["uri"]: p for p in before.get("printers", [])}
+    for p in now["printers"]:
+        was = old.get(p["uri"])
+        if was is None:
+            continue
+        for problem in p["problems"]:
+            if problem not in was.get("problems", []):
+                notify(f"{p['name']}: {problem}", "The printer needs you.", "critical")
+        for ink in p["low"]:
+            if ink not in was.get("low", []):
+                level = next(i["level"] for i in p["inks"] if i["name"] == ink)
+                notify(f"{p['name']}: {ink} low", f"{level}% left.", "normal")
+
+
+def check():
+    try:
+        with open(OUT) as handle:
+            before = json.load(handle)
+    except (OSError, ValueError):
+        before = None
+    printers = [p for p in (printer(u, q) for u, q in uris().items()) if p]
+    now = {"checked": int(time.time()), "printers": printers, "worst": worst(printers)}
+    os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    with open(OUT + ".part", "w") as handle:
+        json.dump(now, handle)
+    os.replace(OUT + ".part", OUT)
+    if before is not None:
+        news(before, now)
+    return now
+
+
+def main():
+    now = check()
+    if "--list" in sys.argv[1:]:
+        if not now["printers"]:
+            print("No printer within reach.")
+        for p in now["printers"]:
+            state = ", ".join(p["problems"]) or p["state"]
+            print(f"{p['name']}  {state}" + (f"  {p['jobs']} queued" if p["jobs"] else ""))
+            for ink in p["inks"]:
+                print(f"  {ink['name']:<12} {ink['level']:>3}%" + ("  low" if ink["level"] < LOW else ""))
+            if p["web"]:
+                print(f"  {p['web']}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
