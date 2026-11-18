@@ -30,6 +30,17 @@ check "an ultrawide is fitted, not cropped" grep -qx $'DP-7\t3440x1440\tfit' <<<
 check "a screen turned on its side counts as portrait, and is fitted" grep -qx $'DP-8\t2160x3840\tfit' <<<"$out"
 check "a photograph is filled everywhere: no bars around it" \
   test "$(plan "$sandbox/photo.png" | cut -f3 | sort -u)" = fill
+# A screen that wakes is missing from Hyprland's list for a moment: the layout still names it.
+printf 'hl.monitor({ output = "DP-8", mode = "3840x2160@60", position = "0x0", scale = 1, transform = 1 })\n' >"$sandbox/monitors.lua"
+cat >"$sandbox/stubs/hyprctl" <<'STUB'
+#!/usr/bin/env bash
+echo '[{"name": "eDP-1", "width": 3840, "height": 2400, "transform": 0}]'
+STUB
+out=$(env PATH="$sandbox/stubs:$PATH" DESKTOP_BACKGROUND="$sandbox/plain.png" DESKTOP_MONITORS_LAYOUT="$sandbox/monitors.lua" \
+  bash "$ROOT/bin/desktop-wallpaper" --plan)
+check "a screen the layout names is settled while Hyprland does not list it, turned as it will be" \
+  grep -qx $'DP-8\t2160x3840\tfit' <<<"$out"
+
 check "every start goes through it, none straight to swaybg" \
   test -z "$(grep -rln 'swaybg -i' "$ROOT/bin" "$ROOT/default")"
 check "and a screen plugged in starts it again" grep -q 'WALLPAPER = "desktop-wallpaper"' "$ROOT/bin/desktop-monitors-watch"

@@ -33,10 +33,21 @@ picture() {
 }
 
 # name width height, one monitor a line, as it is turned: a portrait 4K is 2160x3840.
+#
+# What Hyprland has, disabled ones too, and every monitor the layout names besides
+# (monitors.lua, written by desktop-cmd-monitors-switch): a screen that wakes or comes back
+# is missing from Hyprland's list for a moment, and the run that caught that moment gave
+# the Samsung and the LG a plain "fill" until the next. swaybg takes settings for screens
+# that are not there, so a screen the layout knows is settled in advance, however it comes.
 monitors() {
-  hyprctl -j monitors 2>/dev/null |
-    jq -r '.[] | [.name, (if .transform % 2 == 1 then .height else .width end),
-                  (if .transform % 2 == 1 then .width else .height end)] | @tsv'
+  {
+    hyprctl -j monitors all 2>/dev/null |
+      jq -r '.[] | [.name, (if .transform % 2 == 1 then .height else .width end),
+                    (if .transform % 2 == 1 then .width else .height end)] | @tsv'
+    sed -nE 's/.*output = "([^"]+)", mode = "([0-9]+)x([0-9]+)[^"]*"(.*transform = ([0-9]+))?.*/\1 \2 \3 \5/p' \
+      "${DESKTOP_MONITORS_LAYOUT:-${XDG_CONFIG_HOME:-$HOME/.config}/hypr/monitors.lua}" 2>/dev/null |
+      awk '{ t = ($4 == "" ? 0 : $4); if (t % 2 == 1) print $1 "\t" $3 "\t" $2; else print $1 "\t" $2 "\t" $3 }'
+  } | awk -F'\t' '!seen[$1]++'
 }
 
 # The swaybg arguments, and the plan they come from.
@@ -69,6 +80,12 @@ if [[ ${1:-} == --plan ]]; then
   exit
 fi
 
+# One at a time: a screen coming back fires several events, and two runs a second apart
+# each stopped the other's swaybg. The lock is not handed to swaybg, which would hold it
+# for as long as it runs.
+mkdir -p "${XDG_RUNTIME_DIR:-/tmp}/desktop"
+exec 9>"${XDG_RUNTIME_DIR:-/tmp}/desktop/wallpaper.lock"
+flock -w 10 9
 plan >/dev/null || ARGS=(-i "$LINK" -m fill)
 pkill -x swaybg
-setsid uwsm app -- swaybg "${ARGS[@]}" >/dev/null 2>&1 &
+setsid uwsm app -- swaybg "${ARGS[@]}" >/dev/null 2>&1 9>&- &
