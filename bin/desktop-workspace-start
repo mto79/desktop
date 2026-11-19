@@ -2,7 +2,7 @@
 
 # desktop-workspace-start: open the day's windows at login, each on its own workspace.
 #
-#   1  Brave
+#   1  Brave: home, desktop-guis's window, the one browser there
 #   2  the chat, Teams
 #   3  tmux, attached to "home", with "llm-wiki" beside it under claude
 #   4  KeePassXC
@@ -31,6 +31,10 @@ CHAT_URL=""
 chat_host=${CHAT_URL#*://}
 chat_host=${chat_host%%/*}
 
+# Seconds since this script started, which is the login to within a moment.
+START=${EPOCHREALTIME/,/.}
+since_login() { awk -v a="$START" -v b="${EPOCHREALTIME/,/.}" 'BEGIN { printf "%.1f", b - a }'; }
+
 addresses_of() {
   hyprctl clients -j | jq -r --arg class "$1" '.[] | select(.class == $class) | .address' | sort
 }
@@ -48,6 +52,9 @@ open_on() {
     address="$(comm -13 <(echo "$before") <(addresses_of "$class") | grep . | head -1 || true)"
     if [[ -n "$address" ]]; then
       hyprctl dispatch "hl.dsp.window.move({ workspace = $workspace, window = \"address:$address\", follow = false })" >/dev/null
+      # How long each window took, from the login, in the journal: what to look at when a
+      # workspace comes up slowly (journalctl --user -t desktop-workspace-start).
+      logger -t desktop-workspace-start "workspace $workspace: $class after $(since_login)s" 2>/dev/null || true
       return 0
     fi
     sleep 0.2
@@ -88,14 +95,24 @@ fi
 # seconds a window, and the terminal below should not open late for it.
 desktop-tmux-restore restore >/dev/null 2>&1 &
 
-# Every launch here has a class of its own bar the Brave ones, which share a browser
-# process, so those go in turn and the rest start together.
+# Every launch here has a class of its own, so they start together -- bar Brave, which goes
+# first, alone: started twice at once it can come up as two browsers. Once its window
+# is there the browser runs, and the two web apps -- each with a class of its own, so each
+# window is still told apart -- open together: one after the other, workspace 2 waited for
+# the chat to finish loading before Teams even started.
+#
+# Workspace 1's browser is home, and home is desktop-guis's to open: autostart asks for it
+# too, and the two take turns, so this waits for that one rather than starting another.
+# A Brave of its own here as well was a second window beside home on every login.
 {
-  open_on 1 brave-browser uwsm app -- brave-browser
+  desktop-guis open home >/dev/null 2>&1 ||
+    echo "desktop-workspace-start: home did not open on workspace 1" >&2
+  logger -t desktop-workspace-start "workspace 1: home after $(since_login)s" 2>/dev/null || true
   if [[ -n $CHAT_URL ]]; then
-    open_on 2 "brave-${chat_host}__-Default" desktop-launch-webapp "$CHAT_URL"
+    open_on 2 "brave-${chat_host}__-Default" desktop-launch-webapp "$CHAT_URL" &
   fi
-  open_on 2 brave-teams.microsoft.com__-Default desktop-launch-webapp "https://teams.microsoft.com"
+  open_on 2 brave-teams.microsoft.com__-Default desktop-launch-webapp "https://teams.microsoft.com" &
+  wait
 } &
 open_on 3 com.mitchellh.ghostty uwsm app -- ghostty -e tmux attach-session -t home &
 open_on 4 org.keepassxc.KeePassXC uwsm app -- keepassxc &
@@ -114,6 +131,8 @@ hyprctl --batch "dispatch hl.dsp.focus({ workspace = 5 }) ; dispatch hl.dsp.focu
 # waiting, said while the dashboard shows the same. Not waited for, and desktop-say keeps
 # quiet by itself when it is switched off or do-not-disturb is on.
 desktop-brief --welcome >/dev/null 2>&1 &
+
+logger -t desktop-workspace-start "every window in place after $(since_login)s" 2>/dev/null || true
 
 # The late askers get a moment to ask and be ignored before asking counts again.
 sleep "${DESKTOP_WORKSPACE_START_SETTLE:-3}"

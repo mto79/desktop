@@ -164,6 +164,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Changed
 
+- Workspace 2 is ready sooner at login: the chat and Teams open together once Brave is up,
+  rather than Teams waiting for the chat. Each window's time to appear is logged.
 - The dashboard's Rights cards say how many sensitive places each agent's own rules keep it
   out of; Chromium's profile and the shell history are among those places now.
 - Hyprland's donation popup no longer appears after an upgrade, as its update news
@@ -243,6 +245,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Notifications at login are the shell's again: the Wi-Fi greeting waits for it, where it
+  had woken the fallback notifier, which then kept the shell from showing any.
 - The wallpaper is whole on the portrait 4K and the ultrawide rather than cropped to them:
   a screen shaped nothing like the picture shows all of it, its edge colour around it.
 - The login screen has a pointer again, sized to be seen on the 3840x2400 panel.

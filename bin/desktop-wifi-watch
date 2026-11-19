@@ -55,7 +55,13 @@ if [[ ${1:-} == --once ]]; then
   exit 0
 fi
 
-# Already connected at login: that is a connection too.
+# Already connected at login: that is a connection too -- said once the shell is up. Sent
+# before it, the notification woke mako, the fallback, which then held the notification
+# service, and the shell could not take it for the first minutes of the session.
+for _ in $(seq 60); do
+  [[ $(desktop-shell shell ping 2>/dev/null) == ok ]] && break
+  sleep 0.5
+done
 announce
 # nmcli monitor says "<device>: connected" and "<device>: disconnected" among much else;
 # either is a moment to look again.
