@@ -35,8 +35,11 @@ only when this is what starts your browser: handed to one already running, they 
 pass over `--window-name` too. When this is what starts your browser, it starts it bare
 first and waits for its session restore: a home of last time comes back named home, and
 is taken as home, tabs and all, rather than a second asked for beside it. Only when none
-came back is home asked of the browser then running; its empty New Tab window is closed
-either way. A comment starts a line or follows a space, so a URL's own
+came back is home asked of the browser then running. Either way, whatever else of your
+browser's own came up on workspace 1 is closed -- its empty New Tab, and the other windows
+of last time -- so the workspace has the one browser; Ctrl+Shift+T or the history has
+them back. A web app restored with it is left. `desktop-workspace-start` waits for home
+rather than starting your browser itself. A comment starts a line or follows a space, so a URL's own
 `#` -- Kasten's `#/` -- is kept.
 
 A group named after a cluster in `clusters.conf` is opened by `ocl` when you sign in to it

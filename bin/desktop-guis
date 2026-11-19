@@ -222,16 +222,23 @@ adopt_home() {
   return 1
 }
 
-# What else the browser opened as it started, on workspace 1 beside home: an empty New Tab
-# window is closed, so the workspace has the one browser. A window with pages in it -- the
-# session restored -- is yours and is left.
+# What else the browser opened as it started, on workspace 1 beside home, is closed, so the
+# workspace has the one browser: the empty New Tab it opens, and the other windows its
+# session restore brings back. Those were left once, as yours -- and every login had two
+# browsers on workspace 1, home and last time's other window, which came back again the
+# next time because it was still open. Ctrl+Shift+T or the history has them back. Only
+# windows of the browser's own class: a web app restored with it -- Teams -- is left.
 close_extra() { # addresses that appeared with home
-  local address title workspace
+  local address class workspace
   while read -r address; do
     [[ -n $address && $address != "$(cat "$RUN/home")" ]] || continue
-    IFS=$'\t' read -r title workspace < <(hyprctl -j clients 2>/dev/null |
-      jq -r --arg a "$address" '.[] | select(.address == $a) | [.title, .workspace.id] | @tsv')
-    [[ $workspace == 1 && $title == "New Tab"* ]] || continue
+    IFS=$'\t' read -r class workspace < <(hyprctl -j clients 2>/dev/null |
+      jq -r --arg a "$address" '.[] | select(.address == $a) | [.class, .workspace.id] | @tsv')
+    [[ $workspace == 1 ]] || continue
+    case $class in
+    google-chrome | brave-browser | microsoft-edge | vivaldi-stable | chromium | chromium-browser) ;;
+    *) continue ;;
+    esac
     hyprctl dispatch "hl.dsp.window.close({ window = \"address:$address\" })" >/dev/null
   done
 }

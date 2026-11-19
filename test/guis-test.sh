@@ -46,6 +46,10 @@ if [[ \$class == brave-browser && ! -e "$sandbox/brave-running" ]]; then
   touch "$sandbox/brave-running"
   printf '0xstart%s\tbrave-browser\tNew Tab - Brave\n' "\$n" >>"$sandbox/windows"
   [[ -e "$sandbox/restore-home" ]] && printf '0xrestored%s\tbrave-browser\thome\n' "\$n" >>"$sandbox/windows"
+  if [[ -e "$sandbox/restore-other" ]]; then
+    printf '0xother%s\tbrave-browser\tOperator Login - Brave\n' "\$n" >>"$sandbox/windows"
+    printf '0xapp%s\tbrave-teams\tTeams\n' "\$n" >>"$sandbox/windows"
+  fi
 fi
 [[ \$class == desktop-guis || \$* == *--new-window* ]] && printf '0xnew%s\t%s\t%s\n' "\$n" "\$class" "\$name" >>"$sandbox/windows"
 exit 0
@@ -140,7 +144,15 @@ check "  the restored one, its tabs and all" grep -q '^0xrestored' "$sandbox/run
 check "  with no second home asked for" lacks -- '--window-name=home' "$sandbox/calls"
 check "  and the browser's empty window closed" lacks '^0xstart' "$sandbox/windows"
 guis close home
-rm -f "$sandbox/restore-home"; printf '%s\n' "$saved" | grep . >"$sandbox/windows"
+# And last time's other window, restored beside home with its pages: closed too -- it was
+# a second browser on workspace 1 at every login, and came back because it stayed open.
+: >"$sandbox/windows"; rm -f "$sandbox/brave-running"; touch "$sandbox/restore-other"
+guis open home >/dev/null
+check "a window of last time other than home is closed: one browser on workspace 1" \
+  lacks '^0xother' "$sandbox/windows"
+check "  a web app restored with it is left" grep -q '^0xapp' "$sandbox/windows"
+guis close home
+rm -f "$sandbox/restore-home" "$sandbox/restore-other"; printf '%s\n' "$saved" | grep . >"$sandbox/windows"
 printf '0xrestored\tbrave-browser\thome\n' >>"$sandbox/windows"
 : >"$sandbox/calls"
 guis open home >/dev/null

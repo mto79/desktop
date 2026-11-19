@@ -108,4 +108,6 @@ next. `desktop-monitors-watch` runs it on every plug and unplug.
 `~/.config/hypr/workspaces.lua`. `desktop-workspace-start` then opens the login windows
 and moves each to its workspace once it has mapped. It moves them rather than using
 `[workspace N]` exec rules, which follow the spawned process and so miss AppImages that
-re-exec and browser web apps that belong to an earlier browser process.
+re-exec and browser web apps that belong to an earlier browser process. Workspace 1's
+browser is the exception: it is home, which `desktop-guis` opens (see `guis.md`), and the
+login waits for it rather than starting a Brave of its own beside it.

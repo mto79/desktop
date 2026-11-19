@@ -112,6 +112,8 @@ cat >"$stubs/desktop-launch-webapp" <<'STUB'
 host=${1#https://}
 exec fake-app "brave-${host%%/*}__-Default" "$@"
 STUB
+# Workspace 1's browser is desktop-guis's home: written down, and when, against the web apps.
+printf '#!/usr/bin/env bash\necho "guis $*" >>"$HYPRCTL_LOG"\n' >"$stubs/desktop-guis"
 printf '#!/usr/bin/env bash\nexec fake-app md.obsidian.Obsidian obsidian\n' >"$sandbox/.local/bin/Obsidian.AppImage"
 printf '#!/usr/bin/env bash\necho "$*" >>"$TMUX_LOG"\n[[ $1 != has-session ]]\n' >"$stubs/tmux"
 # Not a noop: what matters is that the login lays the llm-wiki session out, and with
@@ -139,7 +141,11 @@ moved_to() {
   address="0x$(printf '%s' "$2" | md5sum | cut -c1-8)"
   grep -qxF "dispatch hl.dsp.window.move({ workspace = $1, window = \"address:$address\", follow = false })" "$log"
 }
-check "Brave is moved to workspace 1" moved_to 1 "brave-browser"
+check "workspace 1 is home, opened by desktop-guis" grep -qx "guis open home" "$log"
+check "  and no Brave of its own beside it: two browsers on workspace 1 at every login" \
+  lacks 'workspace = 1, window' "$log"
+check "  home first, before the web apps start the browser a second way" \
+  test "$(grep -n -e '^guis open home' -e 'workspace = 2, window' "$log" | head -1 | cut -d: -f2)" = "guis open home"
 check "tmux is moved to workspace 3" moved_to 3 "ghostty -e tmux attach-session -t home"
 check "the chat this machine names is moved to workspace 2" moved_to 2 "https://chat.example.com"
 check "Teams is moved to workspace 2" moved_to 2 "https://teams.microsoft.com"

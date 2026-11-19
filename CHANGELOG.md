@@ -245,6 +245,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Workspace 1 has one browser at login, home: the login no longer starts a Brave of its own
+  beside it, and the other windows Brave brings back from last time are closed.
 - Notifications at login are the shell's again: the Wi-Fi greeting waits for it, where it
   had woken the fallback notifier, which then kept the shell from showing any.
 - The wallpaper is whole on the portrait 4K and the ultrawide rather than cropped to them:
