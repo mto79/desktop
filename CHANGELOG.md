@@ -245,6 +245,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- At login the screens show their workspaces as soon as the windows are open, after
+  seconds rather than half a minute: the start waited for the tmux sessions to be restored.
 - Workspace 1 has one browser at login, home: the login no longer starts a Brave of its own
   beside it, and the other windows Brave brings back from last time are closed.
 - Notifications at login are the shell's again: the Wi-Fi greeting waits for it, where it

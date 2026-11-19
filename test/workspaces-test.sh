@@ -122,9 +122,13 @@ printf '#!/usr/bin/env bash\necho "$*" >>"$LAYOUT_LOG"\n' >"$stubs/desktop-agent
 # desktop-brief and desktop-tmux-restore as well: the first speaks a welcome out loud and
 # the second builds tmux sessions, and neither belongs on the machine the suite runs on --
 # the welcome was said, aloud, by this test the first time it existed.
-for noop in desktop-workspace-pin notify-send desktop-brief desktop-tmux-restore desktop-say; do
+# logger too: the timings it logs went into the journal of the machine running the suite,
+# where they read as logins that never happened.
+for noop in desktop-workspace-pin notify-send desktop-brief desktop-tmux-restore desktop-say logger; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$stubs/$noop"
 done
+# The restore, as slow as a real one with a dozen sessions: the screens are not to wait for it.
+printf '#!/usr/bin/env bash\nsleep 8\n' >"$stubs/desktop-tmux-restore"
 chmod +x "$stubs"/* "$sandbox/.local/bin"/*
 
 # Which chat is the machine's own setting: its address was in the script once, and so in a
@@ -132,9 +136,11 @@ chmod +x "$stubs"/* "$sandbox/.local/bin"/*
 mkdir -p "$sandbox/.config/desktop"
 echo 'CHAT_URL="https://chat.example.com"' >"$sandbox/.config/desktop/chat.conf"
 
+SECONDS=0
 CLIENTS="$clients" HYPRCTL_LOG="$log" TMUX_LOG="$sandbox/tmux.log" HOME="$sandbox" \
   LAYOUT_LOG="$sandbox/layout.log" \
   DESKTOP_WORKSPACE_START_TIMEOUT=5 DESKTOP_WORKSPACE_START_SETTLE=0 PATH="$stubs:$PATH" timeout 30 bash "$START"
+took=$SECONDS
 
 moved_to() {
   local address
@@ -158,6 +164,7 @@ check "the llm-wiki tmux session is created" grep -q "new-session -d -s llm-wiki
 check "llm-wiki is laid out with claude, so it is ready when you switch to it" \
   grep -qx "llm-wiki:ide claude" "$sandbox/layout.log"
 check "home is left a plain shell" lacks "^home" "$sandbox/layout.log"
+check "the screens are shown their workspaces without waiting for the tmux restore" test "$took" -lt 6
 check "the focus ends on the dashboard's workspace" grep -qF "dispatch hl.dsp.focus({ workspace = 6 })" "$log"
 # Applications ask for the focus when they have finished starting, which is after it has
 # been put where it belongs: every login used to end on workspace 5, where Obsidian is.

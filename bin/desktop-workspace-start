@@ -114,10 +114,17 @@ desktop-tmux-restore restore >/dev/null 2>&1 &
   open_on 2 brave-teams.microsoft.com__-Default desktop-launch-webapp "https://teams.microsoft.com" &
   wait
 } &
+windows=($!)
 open_on 3 com.mitchellh.ghostty uwsm app -- ghostty -e tmux attach-session -t home &
+windows+=($!)
 open_on 4 org.keepassxc.KeePassXC uwsm app -- keepassxc &
+windows+=($!)
 open_on 5 md.obsidian.Obsidian "$HOME/.local/bin/Obsidian.AppImage" &
-wait
+windows+=($!)
+# The windows, and only them. A bare `wait` waited for the tmux restore above as well,
+# which takes a few seconds a session: every window was in place after seven seconds and
+# the screens were shown their workspaces after twenty-five.
+wait "${windows[@]}"
 
 # Show the first workspace of every screen, and leave the focus on workspace 6: the day
 # starts on the dashboard, which says what is waiting before anything is opened to find
