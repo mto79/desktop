@@ -12,6 +12,8 @@
 #   ↑ ↓          the arrows, for a menu
 #   i            a line of text, then Enter: a reply to a question
 #   g            go to the agent instead, and close this
+#   Tab          the next agent, and Shift-Tab the one before: every Claude Code session,
+#                the one needing you most first, as desktop-agent-sessions orders them
 #   q, Esc       close
 #
 # Esc closes rather than being passed on, because a popup that cannot be closed with Esc is
@@ -38,18 +40,43 @@ trap 'tput cnorm 2>/dev/null; printf "\e[0m"' EXIT
 
 send() { tmux send-keys -t "$pane" "$@" 2>/dev/null; }
 
+# The agents to step through with Tab, a line each: pane, project, state. Asked again on
+# every step, so one that started or finished meanwhile is counted right.
+agents() {
+  desktop-agent-sessions --json 2>/dev/null |
+    jq -r '.sessions[] | select((.pane // "") != "") | [.pane, .project, .state] | @tsv' 2>/dev/null
+}
+
+# Where this pane is in that list, as "2/5 · project · state", or nothing when it is not in
+# it -- a codex, say, which reports no state there.
+place() {
+  agents | awk -F'\t' -v pane="$pane" '{ n++; if ($1 == pane) { at = n; what = $2 " · " $3 } }
+    END { if (at) printf "%d/%d · %s", at, n, what }'
+}
+
+# step <+1|-1>: the next agent in the list, or the previous, round the end; from a pane not
+# in it, the first.
+step() {
+  local found
+  found=$(agents | awk -F'\t' -v pane="$pane" -v by="$1" '{ p[++n] = $1; if ($1 == pane) at = n }
+    END { if (!n) exit; if (!at) at = (by > 0 ? 0 : 1); i = ((at - 1 + by) % n + n) % n + 1; print p[i] }')
+  [[ -n $found ]] && pane=$found
+}
+
 draw() {
-  local rows cols top
+  local rows cols top where
   rows=$(tput lines 2>/dev/null) cols=$(tput cols 2>/dev/null)
   rows=${rows:-24} cols=${cols:-80}
   top=$(tmux display-message -p -t "$pane" '#{session_name}:#{window_index}  #{b:pane_current_path}' 2>/dev/null) || exit 0
+  where=$(place)
+  [[ -n $where ]] && top="$where  ·  $top"
   printf '\e[H\e[0m\e[7m %s\e[K\e[0m\n' "${top:0:$((cols - 2))}"
   # The last screenful that fits under the heading and over the keys, colours and all.
   tmux capture-pane -p -e -t "$pane" 2>/dev/null | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' |
     tail -n $((rows - 2)) | while IFS= read -r line; do
       printf '%s\e[0m\e[K\n' "$line"
     done
-  printf '\e[J\e[%d;1H\e[2m 1-9 answer · Enter · ↑↓ · i type · g go there · q close\e[0m\e[K' "$rows"
+  printf '\e[J\e[%d;1H\e[2m 1-9 answer · Enter · ↑↓ · i type · Tab next · g go · q close\e[0m\e[K' "$rows"
 }
 
 while true; do
@@ -62,6 +89,7 @@ while true; do
   ((status != 0)) && exit 0
   case "$key" in
   [1-9]) send "$key" ;;
+  $'\t') step 1 ;;
   "") send Enter ;;
   q) exit 0 ;;
   g)
@@ -84,6 +112,7 @@ while true; do
     case "$rest" in
     "[A") send Up ;;
     "[B") send Down ;;
+    "[Z") step -1 ;; # Shift-Tab
     *) exit 0 ;;
     esac
     ;;

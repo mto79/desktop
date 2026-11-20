@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- Peek (`p` in the sidebar) steps through every agent with Tab and Shift-Tab, the one
+  needing you most first, so they can be read and answered one after another in one popup.
 - The tmux sidebar unfolds a session's windows under it (`w`, or `W` for every session),
   so Enter goes straight to its editor, its git or its shell.
 - The tmux sidebar finds as you type (`/`), and makes, renames and closes sessions (`n`,

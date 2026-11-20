@@ -22,6 +22,13 @@ cat >"$sandbox/path/desktop-agent-tabs" <<'STUB'
 #!/usr/bin/env bash
 echo "$*" >>"$SANDBOX/jumped"
 STUB
+# Three agents, the one needing you most first; %5 is the second.
+cat >"$sandbox/path/desktop-agent-sessions" <<'STUB'
+#!/usr/bin/env bash
+echo '{"sessions": [{"pane": "%7", "project": "infra", "state": "waiting"},
+                    {"pane": "%5", "project": "alpha", "state": "working"},
+                    {"pane": "%9", "project": "beta", "state": "done"}]}'
+STUB
 chmod +x "$sandbox/path/"*
 
 peek() { # keys
@@ -55,5 +62,13 @@ check "g goes to the agent, moving the client that asked" \
 peek '1'
 check "input that ends closes it, rather than reading as Enter for ever" \
   test "$(cat "$sandbox/sent")" = "-t %5 1"
+
+peek '\t2q'
+check "Tab moves to the next agent, and keys go to that one" test "$(cat "$sandbox/sent")" = "-t %9 2"
+check "  with where it is in the list, and what it is doing, in the heading" grep -q '3/3 · beta · done' "$sandbox/screen"
+peek '\t\t1q'
+check "  round the end of the list, to the first" test "$(cat "$sandbox/sent")" = "-t %7 1"
+peek '\e[Z1q'
+check "Shift-Tab moves to the one before" test "$(cat "$sandbox/sent")" = "-t %7 1"
 
 finish

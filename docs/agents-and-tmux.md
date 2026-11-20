@@ -216,6 +216,7 @@ again every second. In the popup:
 | `Enter`, `↑` `↓` | Passed on, for a menu |
 | `i` | Type a line of reply, sent with Enter |
 | `g` | Go to the agent and close the popup |
+| `Tab`, `Shift-Tab` | The next agent, or the one before: every Claude Code session, the one needing you most first. The heading says where you are, `2/5 · desktop · waiting` |
 | `q`, `Esc` | Close, sending the agent nothing |
 
 So a permission prompt in another session is answered without leaving the window you are
