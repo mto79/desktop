@@ -17,7 +17,7 @@ sandbox=$(mktemp -d)
 trap 'rm -rf "$sandbox"' EXIT
 stubs="$sandbox/bin"
 log="$sandbox/hyprctl.log"
-mkdir -p "$stubs" "$sandbox/.config/hypr" "$sandbox/.local/bin"
+mkdir -p "$stubs" "$sandbox/.config/hypr" "$sandbox/.local/bin" "$sandbox/Data/MTO/Documents/llm-wiki"
 
 # hyprctl answers from fixture files and records everything it is told to do.
 cat >"$stubs/hyprctl" <<'STUB'
@@ -160,7 +160,9 @@ check "Obsidian is moved to workspace 5" moved_to 5 "obsidian"
 check "a terminal that was already open is left where it is" \
   lacks "0xexisting" "$log"
 check "the home tmux session is created" grep -q "new-session -d -s home" "$sandbox/tmux.log"
-check "the llm-wiki tmux session is created" grep -q "new-session -d -s llm-wiki" "$sandbox/tmux.log"
+check "the llm-wiki tmux session is created" grep -q "new-session -ds llm-wiki" "$sandbox/tmux.log"
+check "  as a repository's, with its git window, as the sessionizer makes it" \
+  grep -q "new-window -d -t llm-wiki: -n git" "$sandbox/tmux.log"
 check "llm-wiki is laid out with claude, so it is ready when you switch to it" \
   grep -qx "llm-wiki:ide claude" "$sandbox/layout.log"
 check "home is left a plain shell" lacks "^home" "$sandbox/layout.log"

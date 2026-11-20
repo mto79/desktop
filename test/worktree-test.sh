@@ -249,6 +249,14 @@ TMUX_SESSIONIZER_CONFIG_FILE="$sandbox/sessionizer-dirs" bash "$ROOT/config/tmux
 check "the sessionizer offers tasks under their repository" grep -qx "$projects/repo.worktrees/listed" "$sandbox/fzf-input"
 check "and not the directory that holds them" lacks -x "$projects/repo.worktrees" "$sandbox/fzf-input"
 
+# A repository listed by itself (the desktop, llm-wiki) used to offer its bin/ and .git/.
+printf '%s\n%s\n' "$projects" "$repo" >"$sandbox/sessionizer-dirs"
+TMUX_SESSIONIZER_CONFIG_FILE="$sandbox/sessionizer-dirs" bash "$ROOT/config/tmux/bin/tmux-sessionizer.sh"
+check "a listed repository is offered as itself" grep -qx "$repo" "$sandbox/fzf-input"
+check "  and not its insides" lacks -x "$repo/.git" "$sandbox/fzf-input"
+check "home is offered, first" test "$(head -1 "$sandbox/fzf-input")" = "$HOME"
+printf '%s\n' "$projects" >"$sandbox/sessionizer-dirs"
+
 # A name typed at a prompt is typed as words, and "tmux bar" used to be refused outright.
 in_repo "$repo" new "two words" >/dev/null
 check "a name with a space becomes a branch with a dash" \

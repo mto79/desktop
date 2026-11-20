@@ -1134,6 +1134,11 @@ def repo_named(name):
     except OSError:
         return None
     for root in roots:
+        # A listed directory that is a repository is that repository, not a folder of them.
+        if os.path.isdir(os.path.join(root, ".git")):
+            if os.path.basename(root.rstrip("/")).replace(".", "_").replace(":", "_") == name:
+                return root
+            continue
         candidate = os.path.join(root, name)
         if os.path.isdir(os.path.join(candidate, ".git")):
             return candidate

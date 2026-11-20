@@ -10,8 +10,9 @@ sandbox=$(mktemp -d)
 real=$(PATH=/usr/bin:/bin command -v tmux)
 rt() { env -u TMUX TMUX_TMPDIR="$sandbox/tmux" "$real" "$@"; }
 trap 'rt kill-server 2>/dev/null; rm -rf "$sandbox"' EXIT
-mkdir -p "$sandbox/tmux" "$sandbox/bin" "$sandbox/repos/gitops/.git" "$sandbox/home"
-echo "$sandbox/repos" >"$sandbox/sessionizer"
+mkdir -p "$sandbox/tmux" "$sandbox/bin" "$sandbox/repos/gitops/.git" "$sandbox/home" \
+  "$sandbox/notes/wiki/.git"
+printf '%s\n' "$sandbox/repos" "$sandbox/notes/wiki" >"$sandbox/sessionizer"
 
 # A repository's session is desktop-repo-session's to make; here it makes a plain one.
 cat >"$sandbox/bin/desktop-repo-session" <<STUB
@@ -85,6 +86,8 @@ check "  and a repository's, its own way, when one of that name is in the sessio
   grep -qx "repo $sandbox/repos/gitops" "$sandbox/did"
 drive new gitops >/dev/null
 check "  one that exists is switched to, not made twice" test "$(grep -c '^repo' "$sandbox/did")" = 1
+drive new wiki >/dev/null
+check "  and one listed in them by itself" grep -qx "repo $sandbox/notes/wiki" "$sandbox/did"
 drive new a.b:c >/dev/null
 check "  a name tmux would refuse is made one it takes" rt has-session -t =a_b_c
 

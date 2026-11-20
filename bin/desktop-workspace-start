@@ -83,11 +83,9 @@ focus_on_activate false
 # Both sessions exist before the terminal attaches, so llm-wiki is one switch away --
 # and llm-wiki is the one that is always the same job, so it is laid out and has claude
 # up by the time it is switched to. home is left a plain shell; what it is for varies.
+# llm-wiki is made as any repository is, so it is the same session the sessionizer opens.
 tmux has-session -t "=home" 2>/dev/null || tmux new-session -d -s home -c "$HOME"
-if ! tmux has-session -t "=llm-wiki" 2>/dev/null; then
-  tmux new-session -d -s llm-wiki -n ide -c "$LLM_WIKI"
-  desktop-agent-layout llm-wiki:ide claude
-fi
+desktop-repo-session "$LLM_WIKI" >/dev/null || true
 
 # Then whatever else was open before the machine went down: the other repositories'
 # sessions, the tabs in each AI column, the tasks they were on. Only what is missing is

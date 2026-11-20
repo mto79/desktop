@@ -12,7 +12,12 @@ lazygit. With twenty-odd of those open, lazygit's timers are slowed in
 `config/lazygit/config.yml`: it refreshes when its window comes into view anyway, so the
 timer only covers one already in view, and it fetches every ten minutes rather than every
 minute. The sessionizer and `desktop-worktree` both go through it, so they agree on the
-name and the shape.
+name and the shape. llm-wiki's session at login is made the same way.
+
+The sessionizer (`prefix + f`) finds repositories through
+`~/.config/tmux/configs/tmux-sessionizer`. A line there is either a folder of
+repositories, each offered, or a repository itself (`~/.local/share/desktop`, llm-wiki),
+offered as one. Home is always first: the plain `home` session, a shell in `~`.
 
 Closing a session -- `prefix + q`, `exit` in its last window, the sidebar, `ocl logout` --
 moves the terminal looking at it to the most recently used session that is not an agent

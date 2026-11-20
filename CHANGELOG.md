@@ -249,6 +249,9 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The sessionizer (`prefix + f`) offers a repository listed in its folders file as that
+  repository -- llm-wiki, the desktop -- rather than its subfolders and `.git`, and offers
+  home first, the plain `home` session.
 - Closing a tmux session no longer closes the terminal: it moves to another session, not
   to the agent session behind a column, which closed right after and took the terminal along.
 - The tmux sidebar's sections hold still: one folded for want of room stays folded until

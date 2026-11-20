@@ -468,6 +468,11 @@ task_paths() {
       while read -r root; do
         root=${root/#\~/$HOME}
         [[ -d $root ]] || continue
+        # A listed repository keeps its tasks beside it, not inside the folder above.
+        if [[ -e $root/.git ]]; then
+          find "$root.worktrees" -mindepth 1 -maxdepth 1 -type d 2>/dev/null
+          continue
+        fi
         find "$root" -mindepth 2 -maxdepth 2 -type d -path '*.worktrees/*' 2>/dev/null
       done <"$config"
     fi
