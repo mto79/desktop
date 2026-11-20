@@ -76,6 +76,10 @@ Space	Space, ⏎ on a header	fold or open the section the cursor is in
 z	z	fold every section but this one
 a	a	every section back to folding by the room there is
 p	p	peek at the agent, and answer it there
+/	/	find: type to narrow the list, Esc to give it back
+n	n	new session by name, a repository's if there is one
+R	R	rename the session under the cursor
+x	x	close the session under the cursor, once you say y
 v	v	reviews and checkouts, and each agent's last prompt
 r	r	read everything again now
 q	q	close the sidebar in every window

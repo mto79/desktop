@@ -114,7 +114,7 @@ BASIC = {"red": curses.COLOR_RED, "yellow": curses.COLOR_YELLOW, "peach": curses
          "dim": -1, "text": -1, "surface": -1, "overlay": -1, "rule": -1}
 
 # The keys, pinned under everything as herdr pins its own.
-FOOTER = "⏎ go  ␣ fold  p peek  v more"
+FOOTER = "⏎ go  / find  n new  ␣ fold"
 
 # Each agent in its own colour, the one its tabs and its pane border have: the theme sets
 # them as @agent-<model>-colour. Without 256 colours to come near a theme's hex, the plain
@@ -909,7 +909,7 @@ def line_of(row, width):
     return "".join(line), 0
 
 
-def draw(screen, listed, cursor, offset, focused=True):
+def draw(screen, listed, cursor, offset, focused=True, footer=None):
     height, width = screen.getmaxyx()
     screen.erase()
     for line, row in enumerate(listed[offset:offset + max(1, height - 2)]):
@@ -936,7 +936,7 @@ def draw(screen, listed, cursor, offset, focused=True):
         except curses.error:
             pass  # The bottom right cell cannot be written; the row is drawn regardless.
     try:
-        screen.addstr(height - 1, 1, FOOTER[:max(0, width - 2)], ink("dim"))
+        screen.addstr(height - 1, 1, (footer or FOOTER)[:max(0, width - 2)], ink("accent" if footer else "dim"))
     except curses.error:
         pass
     screen.refresh()
@@ -1021,6 +1021,127 @@ def go(row, here):
     tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
 
 
+# --- filtering, and sessions made, renamed and closed from the column ------------------------
+
+
+def matching(listed, query):
+    """The rows a filter keeps: each session, cluster, view or agent whose name has the text
+    in it, with the lines that belong to it, under its section's header. Case does not
+    matter. The sections are all open while filtering (build() sees to that), so what is
+    folded away is found too."""
+    wanted = query.lower()
+    out, header, index = [], None, 0
+    while index < len(listed):
+        row = listed[index]
+        if row["kind"] == "section":
+            header, index = row, index + 1
+            continue
+        if row["kind"] not in SELECTABLE:
+            index += 1
+            continue
+        end = index + 1
+        while end < len(listed) and listed[end]["kind"] not in SELECTABLE and listed[end]["kind"] not in ("gap", "header"):
+            end += 1
+        name = f"{row.get('text') or ''} {row.get('session') or ''}".lower()
+        if wanted in name and not any(r is row for r in out):
+            if header is not None:
+                out.append(header)
+                header = None
+            out.extend(listed[index:end])
+        index = end
+    return out
+
+
+def first_choice(listed):
+    """The first row there is to go to: a session, cluster, view or agent, not a header."""
+    return next((i for i, row in enumerate(listed) if row["kind"] in SELECTABLE and row["kind"] != "section"), 0)
+
+
+def ask(screen, label, initial=""):
+    """A line typed at the foot of the column: the text, or None when Escape takes it back."""
+    text = initial
+    screen.timeout(-1)
+    try:
+        while True:
+            height, width = screen.getmaxyx()
+            try:
+                screen.move(height - 1, 0)
+                screen.clrtoeol()
+                screen.addstr(height - 1, 1, (label + text)[-max(1, width - 3):], ink("accent"))
+            except curses.error:
+                pass
+            screen.refresh()
+            key = screen.get_wch()
+            if key in ("\n", curses.KEY_ENTER):
+                return text.strip()
+            if key == "\x1b":
+                return None
+            if key in (curses.KEY_BACKSPACE, "\x7f", "\b"):
+                text = text[:-1]
+            elif isinstance(key, str) and key.isprintable():
+                text += key
+    finally:
+        screen.timeout(200)
+
+
+def session_exists(name):
+    try:
+        return subprocess.run(["tmux", "has-session", "-t", f"={name}"], capture_output=True, timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def repo_named(name):
+    """The repository of that name under the sessionizer's folders, or None."""
+    config = os.path.expanduser(os.environ.get("TMUX_SESSIONIZER_CONFIG_FILE", "~/.config/tmux/configs/tmux-sessionizer"))
+    try:
+        roots = [os.path.expanduser(line.strip()) for line in open(config) if line.strip() and not line.startswith("#")]
+    except OSError:
+        return None
+    for root in roots:
+        candidate = os.path.join(root, name)
+        if os.path.isdir(os.path.join(candidate, ".git")):
+            return candidate
+    return None
+
+
+def new_session(name, here):
+    """A session of that name, switched to: a repository's, laid out as the sessionizer lays
+    it out, when one of that name is among its folders; otherwise a shell at home. One that
+    exists is switched to, not made twice."""
+    name = name.replace(".", "_").replace(":", "_")  # neither is allowed in a session's name
+    client = client_of(here)
+    if not session_exists(name):
+        repo = repo_named(name)
+        if repo:
+            try:
+                name = subprocess.run(["desktop-repo-session", repo], capture_output=True, text=True,
+                                      timeout=20).stdout.strip() or name
+            except (OSError, subprocess.SubprocessError):
+                return
+        else:
+            tmux("new-session", "-d", "-s", name, "-c", os.path.expanduser("~"))
+    tmux("switch-client", *(["-c", client] if client else []), "-t", f"={name}")
+
+
+def elsewhere(name):
+    """The session to send a client to when this one closes: the one used most recently that
+    is not a column's helper. Left to tmux, a client went to whichever was active last -- an
+    agent column's or a terminal's tabs, which then closed too (as ocl logout once found)."""
+    sessions = tmux("list-sessions", "-F", "#{session_activity} #{session_name}")
+    candidates = sorted((line.split(" ", 1) for line in sessions.splitlines() if " " in line), reverse=True)
+    return next((s for _, s in candidates if s != name and not s.startswith(("ai-", "term-"))), None)
+
+
+def close_session(name):
+    away = elsewhere(name)
+    if away:
+        for client in tmux("list-clients", "-t", f"={name}", "-F", "#{client_tty}").splitlines():
+            if client:
+                tmux("switch-client", "-c", client, "-t", f"={away}")
+    tmux("kill-session", "-t", f"={name}")
+
+
 def view_mark():
     """When tmux last said what is on screen changed, or None when it never has."""
     try:
@@ -1058,10 +1179,19 @@ def sidebar(screen):
     chosen = folds()
     held = {}
     selected = here.split(":")[0]
+    # What / is filtering on, and whether keys are still going into it.
+    query, typing = "", False
+
     def free():
         return max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
 
     def build():
+        if query:
+            # Every section open and no rows held back for room: what a filter is for is
+            # finding what is out of sight.
+            everything = {key: "open" for key in SECTIONS}
+            return matching(compose(data, found_clusters, here, detailed, module, selected, None, everything,
+                                    found_views=found_views, held=held), query)
         return compose(data, found_clusters, here, detailed, module, selected, free(), chosen,
                        found_views=found_views, held=held)
 
@@ -1103,13 +1233,75 @@ def sidebar(screen):
         elif cursor >= offset + height:
             offset = cursor - height + 1
         if dirty:
-            draw(screen, listed, cursor, offset, focused)
+            draw(screen, listed, cursor, offset, focused, f"/{query}▏" if typing else None)
             dirty = False
 
         key = screen.getch()
         if key != -1 and key != curses.KEY_RESIZE and not focused:
             focused, dirty = True, True
-        if key == ord("q"):
+
+        # Typing a filter: letters go into it, the list narrows as they come, the arrows
+        # move over what is left, Enter goes to the row the cursor is on and Escape gives the
+        # whole list back. j and k are letters here, not moves.
+        if typing:
+            if key == -1:
+                continue
+            if key == 27:
+                query, typing = "", False
+                listed, dirty = build(), True
+                cursor = next((i for i, row in enumerate(listed) if row["current"]), first_choice(listed))
+            elif key in (ord("\n"), curses.KEY_ENTER):
+                row = listed[cursor] if listed else None
+                query, typing = "", False
+                listed, dirty = build(), True
+                if row and row["kind"] in SELECTABLE and row["kind"] != "section":
+                    go(row, here)
+                    cursor = next((i for i, r in enumerate(listed)
+                                   if r["kind"] == row["kind"] and r.get("session") == row.get("session")
+                                   and r.get("pane") == row.get("pane")), cursor)
+                cursor = min(cursor, max(0, len(listed) - 1))
+            elif key in (curses.KEY_DOWN, curses.KEY_UP):
+                cursor, dirty = step(listed, cursor, 1 if key == curses.KEY_DOWN else -1), True
+            elif key in (curses.KEY_BACKSPACE, 127, 8):
+                query = query[:-1]
+                listed, dirty = build(), True
+                cursor = first_choice(listed)
+            elif 32 <= key < 127:
+                query += chr(key)
+                listed, dirty = build(), True
+                cursor = first_choice(listed)
+            continue
+
+        if key == ord("/"):
+            query, typing, dirty = "", True, True
+        elif key == ord("n"):
+            # A session by name: a repository's when there is one of that name, laid out as
+            # the sessionizer would; otherwise a shell at home.
+            name = ask(screen, "new session: ")
+            if name:
+                new_session(name, here)
+                last = 0
+            dirty = True
+        elif key == ord("R"):
+            # Only a session of yours: a cluster's and a view's are named by what they are
+            # for, and renamed they would no longer be found.
+            row = listed[cursor] if listed else None
+            if row and row["kind"] == "session":
+                name = ask(screen, "rename: ", row["session"])
+                if name and name != row["session"]:
+                    tmux("rename-session", "-t", f"={row['session']}", name.replace(".", "_").replace(":", "_"))
+                    last = 0
+            dirty = True
+        elif key == ord("x"):
+            # Closed only once you have said yes, and anyone looking at it is moved first.
+            row = listed[cursor] if listed else None
+            if row and row["kind"] == "session":
+                answer = ask(screen, f"close {row['session']}? y/n ")
+                if answer and answer.lower().startswith("y"):
+                    close_session(row["session"])
+                    last = 0
+            dirty = True
+        elif key == ord("q"):
             # The same as the key that opened it: one column is never wanted on its own,
             # so q closes them all rather than leaving the other windows with theirs.
             toggle()
@@ -1352,6 +1544,9 @@ def on():
 
 
 if __name__ == "__main__":
+    # Escape on its own is a key here (it ends a filter); curses waits a second to tell it
+    # from the start of an arrow key unless told not to.
+    os.environ.setdefault("ESCDELAY", "25")
     argument = sys.argv[1] if len(sys.argv) > 1 else ""
     if argument == "--toggle":
         toggle()
