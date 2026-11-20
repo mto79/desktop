@@ -5,7 +5,8 @@ import qs.Commons
 import qs.Ui
 import "../widgets/pipelines.js" as Layout
 
-// Pipelines panel: the CI of your open merge requests, a section for each GitLab.
+// Merge requests panel: your open merge requests and the ones waiting for your review, a
+// section for each GitLab.
 //
 // Laid out like the security and backup panels: the state in words under the title,
 // the counts in a grid, then the detail. The detail is one section per GitLab instance
@@ -13,10 +14,11 @@ import "../widgets/pipelines.js" as Layout
 // and a merge request means little without knowing which GitLab it is on. A host off the
 // VPN keeps what it last said, and its section says so.
 //
-// A row opens its pipeline; a right click opens the merge request. Failed, running and
-// waiting rows are marked as the security panel marks its findings, in the colour the
-// bar's GitLab mark takes for them; passed ones are plain. Merge requests without a
-// pipeline are counted, and the count opens your merge requests on that GitLab.
+// Under each host: yours, every one whether it has a pipeline or not, the most urgent
+// pipeline first, each with its pipeline's state; then those waiting for your review,
+// each with who asks. A row opens the merge request; a right click opens its pipeline.
+// Failed, running and waiting pipelines of yours are marked in the colour the bar's
+// GitLab mark takes for them.
 //
 // It reads what desktop-pipelines.timer leaves behind each minute, as the bar's mark
 // does. Another GitLab is added with glab auth login, from the bottom of the panel.
@@ -28,7 +30,12 @@ Popup {
   property var info: null
 
   readonly property var sections: Layout.groups(info)
-  readonly property var requests: info && info.requests ? info.requests : []
+  readonly property var all: info && info.requests ? info.requests : []
+  readonly property var requests: all.filter(function (r) {
+    return r.role !== "review";
+  })
+  readonly property int toReview: all.length - requests.length
+  readonly property int shown: 10
   readonly property string worst: info && info.worst ? info.worst : "none"
 
   function count(status) {
@@ -93,7 +100,7 @@ Popup {
     PanelHero {
       icon: "\u{f0ba0}"
       iconColor: root.tone(root.worst)
-      title: "Pipelines"
+      title: "Merge requests"
       status: Layout.summary(root.info)
       statusColor: root.tone(root.worst)
       spinning: checkNow.running
@@ -107,6 +114,15 @@ Popup {
       bottomPadding: 4
 
       PanelStat {
+        label: "Yours open"
+        value: String(root.requests.length)
+      }
+      PanelStat {
+        label: "To review"
+        value: String(root.toReview)
+        warn: root.toReview > 0
+      }
+      PanelStat {
         label: "Failed"
         value: String(root.count("failed"))
         warn: root.count("failed") > 0
@@ -114,14 +130,6 @@ Popup {
       PanelStat {
         label: "Running"
         value: String(root.count("running"))
-      }
-      PanelStat {
-        label: "Waiting"
-        value: String(root.count("pending"))
-      }
-      PanelStat {
-        label: "Passed"
-        value: String(root.count("success"))
       }
       PanelStat {
         label: "GitLabs"
@@ -147,12 +155,17 @@ Popup {
 
         PanelSection {
           title: section.modelData.host
-          value: !section.modelData.reachable ? "not reachable" : section.modelData.open > 0 ? section.modelData.open + " open" : "nothing open"
+          value: !section.modelData.reachable ? "not reachable" : section.modelData.open + section.modelData.review.length > 0 ? section.modelData.open + " yours" + (section.modelData.review.length ? " · " + section.modelData.review.length + " to review" : "") : "nothing open"
           rule: true
         }
 
+        PanelSection {
+          visible: section.modelData.requests.length > 0
+          title: "Yours"
+        }
+
         Repeater {
-          model: section.modelData.requests.slice(0, 8)
+          model: section.modelData.requests.slice(0, root.shown)
 
           delegate: PanelRow {
             required property var modelData
@@ -162,8 +175,8 @@ Popup {
             accentColor: root.tone(modelData.status)
             label: modelData.name
             sublabel: modelData.title
-            onClicked: root.openUrl(modelData.pipelineUrl)
-            onRightClicked: root.openUrl(modelData.url)
+            onClicked: root.openUrl(modelData.url)
+            onRightClicked: root.openUrl(modelData.pipelineUrl)
 
             Text {
               text: modelData.word
@@ -175,19 +188,47 @@ Popup {
         }
 
         PanelRow {
-          visible: section.modelData.requests.length > 8
+          visible: section.modelData.requests.length > root.shown
           icon: "\u{f01d8}"
-          label: (section.modelData.requests.length - 8) + " more with a pipeline"
+          label: (section.modelData.requests.length - root.shown) + " more of yours"
           sublabel: "your merge requests on " + section.modelData.host
           onClicked: root.openUrl("https://" + section.modelData.host + "/dashboard/merge_requests")
         }
 
+        PanelSection {
+          visible: section.modelData.review.length > 0
+          title: "Waiting for your review"
+          value: String(section.modelData.review.length)
+        }
+
+        Repeater {
+          model: section.modelData.review.slice(0, root.shown)
+
+          delegate: PanelRow {
+            required property var modelData
+
+            icon: modelData.glyph
+            accentColor: root.tone(modelData.status)
+            label: modelData.name
+            sublabel: modelData.title
+            onClicked: root.openUrl(modelData.url)
+            onRightClicked: root.openUrl(modelData.pipelineUrl)
+
+            Text {
+              text: modelData.word
+              color: Color.popupMuted
+              font.family: Style.fontFamily
+              font.pixelSize: Style.fontSize - 2
+            }
+          }
+        }
+
         PanelRow {
-          visible: section.modelData.without > 0
-          icon: "\u{f0ba0}"
-          label: section.modelData.without + " without a pipeline"
-          sublabel: "your merge requests on " + section.modelData.host
-          onClicked: root.openUrl("https://" + section.modelData.host + "/dashboard/merge_requests")
+          visible: section.modelData.review.length > root.shown
+          icon: "\u{f01d8}"
+          label: (section.modelData.review.length - root.shown) + " more to review"
+          sublabel: "on " + section.modelData.host
+          onClicked: root.openUrl("https://" + section.modelData.host + "/dashboard/merge_requests?reviewer_username=" + section.modelData.me)
         }
       }
     }

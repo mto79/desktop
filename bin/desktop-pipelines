@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 
-# desktop-pipelines: the CI of your own open merge requests, in the bar, and a popup the
-# moment one of their pipelines finishes.
+# desktop-pipelines: your open merge requests and the ones waiting for your review, in
+# the bar, and a popup the moment a pipeline of one of yours finishes.
 #
 #   desktop-pipelines            ask every GitLab host, write the state, notify what finished
-#   desktop-pipelines --list     your merge requests and their pipelines, host by host
+#   desktop-pipelines --list     your merge requests, and those to review, host by host
 #   desktop-pipelines --json     the state the bar reads, as last written
 #
 # The hosts are every GitLab instance glab is logged in to, as for desktop-reviews. One
-# GraphQL question per host -- your open merge requests with their head pipeline -- where
-# the REST API would take one call per merge request.
+# GraphQL question per host -- your open merge requests, those you are a reviewer or
+# assignee of, each with its head pipeline -- where the REST API would take one call per
+# merge request. Only your own colour the mark and pop up when their pipeline finishes.
 #
 # The state goes to $XDG_RUNTIME_DIR/desktop/pipelines.json, which the bar's icon watches:
 # red when a pipeline failed, blue while one runs, amber while one waits (to start, or for
@@ -51,18 +52,18 @@ reachable() {
   getent hosts "$1" >/dev/null 2>&1
 }
 
-QUERY='query {
+FIELDS='iid title webUrl draft updatedAt
+        author { username name }
+        project { fullPath }
+        headPipeline { id status path }'
+QUERY="query {
   currentUser {
     username
-    authoredMergeRequests(state: opened, first: 50, sort: UPDATED_DESC) {
-      nodes {
-        iid title webUrl draft
-        project { fullPath }
-        headPipeline { id status path }
-      }
-    }
+    authoredMergeRequests(state: opened, first: 50, sort: UPDATED_DESC) { nodes { $FIELDS } }
+    reviewRequestedMergeRequests(state: opened, first: 50, sort: UPDATED_DESC) { nodes { $FIELDS } }
+    assignedMergeRequests(state: opened, first: 50, sort: UPDATED_DESC) { nodes { $FIELDS } }
   }
-}'
+}"
 
 # A host's merge requests as a JSON array, the shape the bar reads. Fails when the host
 # does not answer, which is different from answering with nothing.
@@ -70,8 +71,14 @@ requests() {
   local host=$1 answer
   answer=$(timeout "$WAIT" glab api graphql --hostname "$host" -f query="$QUERY" 2>/dev/null) || return 1
   jq -ce --arg host "$host" '
-    .data.currentUser.authoredMergeRequests.nodes // error("no answer")
-    | map({host: $host, ref: "\(.project.fullPath)!\(.iid)", title, url: .webUrl, draft,
+    .data.currentUser as $u
+    | ($u.authoredMergeRequests.nodes // error("no answer")) as $mine
+    | (($u.reviewRequestedMergeRequests.nodes // []) + ($u.assignedMergeRequests.nodes // [])
+       | map(select(.author.username != $u.username)) | unique_by(.webUrl)
+       | sort_by(.updatedAt) | reverse) as $review
+    | ($mine | map(.role = "mine")) + ($review | map(.role = "review"))
+    | map({host: $host, role, me: $u.username, ref: "\(.project.fullPath)!\(.iid)", title, url: .webUrl, draft,
+           author: (.author.name // .author.username // ""), updated: (.updatedAt // ""),
            pipeline: (.headPipeline.id // "" | tostring),
            pipelineUrl: (if .headPipeline.path then "https://\($host)\(.headPipeline.path)" else .webUrl end),
            status: ((.headPipeline.status // "none") | ascii_downcase
@@ -124,8 +131,10 @@ check() {
 
   # A draft colours the mark only when its pipeline runs or failed: an old one's pipeline
   # waiting for a manual job nobody will start would otherwise keep it amber for good.
+  # Someone else's merge request, waiting for your review, never colours it: its CI is
+  # theirs to fix.
   jq -n --argjson requests "$all" --argjson hosts "$hosts" --argjson now "$(date +%s)" '
-    ($requests | map(.counts = ((.draft | not) or .status == "failed" or .status == "running"))) as $requests
+    ($requests | map(.counts = ((.role // "mine") == "mine" and ((.draft | not) or .status == "failed" or .status == "running")))) as $requests
     | {checked: $now, hosts: $hosts, requests: $requests,
      worst: ([$requests[] | select(.counts) | .status] as $s
        | if any($s[]; . == "failed") then "failed"
@@ -142,7 +151,7 @@ check() {
     [[ -n $url ]] && toast "$url" "$summary" "$body"
   done < <(jq -r --argjson was "$before" '
     ($was.requests // [] | map({key: "\(.host) \(.ref)", value: .status}) | from_entries) as $then
-    | .requests[] | select(.stale | not)
+    | .requests[] | select(.stale | not) | select((.role // "mine") == "mine")
     | select(($then["\(.host) \(.ref)"] // "") as $b | ($b == "running" or $b == "pending"))
     | select(.status == "success" or .status == "failed" or .status == "canceled")
     | [.pipelineUrl,
@@ -161,10 +170,16 @@ list() {
     [[ $state == ok ]] || echo "$host  not reachable (VPN off?) -- as it was last seen"
     [[ $state == ok ]] && echo "$host"
     jq -r --arg host "$host" '
-      [.requests[] | select(.host == $host)] as $r
-      | if ($r | length) == 0 then "  no merge requests of yours open" else
-          $r[] | "  \(.status | . + " " * (9 - length)) \(.ref)  \(.title)\n            \(.pipelineUrl)"
-        end' "$OUT"
+      [.requests[] | select(.host == $host)] as $all
+      | [$all[] | select((.role // "mine") == "mine")] as $r
+      | [$all[] | select(.role == "review")] as $v
+      | (if ($r | length) == 0 then "  no merge requests of yours open" else
+          "  yours", ($r[] | "  \(.status | . + " " * (9 - length)) \(.ref)  \(.title)\n            \(.url)")
+        end),
+        (if ($v | length) == 0 then empty else
+          "  waiting for your review",
+          ($v[] | "  \(.status | . + " " * (9 - length)) \(.ref)  \(.title)  -- \(.author)\n            \(.url)")
+        end)' "$OUT"
   done < <(gitlab_hosts)
   [[ -n $any ]] || echo "No GitLab host to ask: log in with glab auth login."
   return 0

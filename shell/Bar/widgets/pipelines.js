@@ -85,6 +85,10 @@ function render(lines, styled) {
 function tooltip(requests, first, stale, colours) {
   requests = requests || [];
   var c = colours || {};
+  var reviews = requests.filter(isReview);
+  requests = requests.filter(function (r) {
+    return !isReview(r);
+  });
   var withPipeline = requests.filter(function (r) {
     return r.status !== "none";
   });
@@ -106,6 +110,8 @@ function tooltip(requests, first, stale, colours) {
   var lines = [head];
   if (stale)
     lines.push([piece("GitLab not reachable, as last seen", c.muted)]);
+  if (reviews.length)
+    lines.push([piece(reviews.length + " waiting for your review", c.pending)]);
 
   // Sorted by how much it matters; the order the timer found them in breaks ties.
   var sorted = withPipeline.map(function (r, i) {
@@ -139,9 +145,28 @@ function tooltip(requests, first, stale, colours) {
 }
 
 // The panel's sections: one per GitLab desktop-pipelines asks -- every host glab is
-// logged in to, in the order it asks them -- with its merge requests that have a pipeline,
-// most urgent first, and how many have none. A host with nothing open is still a section,
-// so a GitLab you added shows up before you have opened anything on it.
+// logged in to, in the order it asks them. Each has your open merge requests, all of them
+// whether they have a pipeline or not, most urgent pipeline first; and those waiting for
+// your review, newest first, each with who asks. A host with nothing open is still a
+// section, so a GitLab you added shows up before you have opened anything on it.
+function isReview(request) {
+  return request.role === "review";
+}
+
+function row(r) {
+  var review = isReview(r);
+  return {
+    status: r.status,
+    glyph: glyphs[r.status] || "\u{f04c2}",
+    urgent: !review && (r.status === "failed" || r.status === "running" || r.status === "pending"),
+    name: name(r.ref) + (isDraft(r) ? "  draft" : ""),
+    title: title(r.title),
+    word: review ? (r.author || "").split(" ")[0] : words[r.status],
+    pipelineUrl: r.pipelineUrl || r.url,
+    url: r.url
+  };
+}
+
 function groups(info) {
   info = info || {};
   var requests = info.requests || [];
@@ -158,40 +183,45 @@ function groups(info) {
     }).map(function (h) {
       return h.state;
     })[0] || "ok";
-    var mine = requests.filter(function (r) {
+    var here = requests.filter(function (r) {
       return r.host === host;
     });
-    var listed = mine.filter(function (r) {
-      return r.status !== "none";
+    var mine = here.filter(function (r) {
+      return !isReview(r);
     }).map(function (r, i) {
       return { r: r, i: i };
     }).sort(function (a, b) {
       return rank(a.r.status) - rank(b.r.status) || a.i - b.i;
     }).map(function (x) {
-      return {
-        status: x.r.status,
-        glyph: glyphs[x.r.status] || "",
-        urgent: x.r.status === "failed" || x.r.status === "running" || x.r.status === "pending",
-        name: name(x.r.ref) + (isDraft(x.r) ? "  draft" : ""),
-        title: title(x.r.title),
-        word: words[x.r.status],
-        pipelineUrl: x.r.pipelineUrl,
-        url: x.r.url
-      };
+      return row(x.r);
     });
+    var review = here.filter(isReview).map(row);
     return {
       host: host,
       reachable: state === "ok",
       open: mine.length,
-      requests: listed,
-      without: mine.length - listed.length
+      requests: mine,
+      review: review,
+      me: here.map(function (r) {
+        return r.me;
+      }).filter(function (m) {
+        return !!m;
+      })[0] || ""
     };
   });
 }
 
 // The panel's headline, in words: the worst there is, or that all is quiet.
 function summary(info) {
-  var requests = (info && info.requests) || [];
+  var all = (info && info.requests) || [];
+  var waiting = all.filter(isReview).length;
+  var said = summaryOf(all.filter(function (r) {
+    return !isReview(r);
+  }));
+  return waiting ? said + "  \u00b7  " + waiting + " to review" : said;
+}
+
+function summaryOf(requests) {
   if (requests.length === 0)
     return "nothing open";
   for (var i = 0; i < order.length; i++) {

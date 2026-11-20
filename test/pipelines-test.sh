@@ -79,6 +79,24 @@ check "  but one that failed does" test "$(jq -r .worst "$out")" = failed
 check "a draft is listed with GitLab's own title, its Draft: said once" \
   test "$(pipes --list | grep -c 'Draft: idea')-$(pipes --list | grep -c 'Draft: Draft:')" = 1-0
 
+# Someone else's merge request, waiting for your review, failing: listed, never the mark.
+jq '.data.currentUser.reviewRequestedMergeRequests.nodes = [{iid: "7", title: "fix: theirs", webUrl: "https://git.example/g/q/-/merge_requests/7",
+      draft: false, updatedAt: "2026-11-20T10:00:00Z", author: {username: "bo", name: "Bo Smit"}, project: {fullPath: "g/q"},
+      headPipeline: {id: "gid://gitlab/Ci::Pipeline/70", status: "RUNNING", path: "/g/q/-/pipelines/70"}}]
+    | .data.currentUser.assignedMergeRequests.nodes = [.data.currentUser.authoredMergeRequests.nodes[0] + {author: {username: "u"}}]
+    | .data.currentUser.authoredMergeRequests.nodes[0].headPipeline.status = "SUCCESS"' \
+  "$sandbox/git.example.json" >"$sandbox/r.json" && mv "$sandbox/r.json" "$sandbox/git.example.json"
+pipes
+check "a merge request waiting for your review is listed, with who asks" \
+  test "$(jq -r '.requests[] | select(.role == "review") | "\(.ref) \(.author)"' "$out")" = "g/q!7 Bo Smit"
+check "  your own, assigned to you, is not counted twice" test "$(jq -r '[.requests[] | select(.role == "review")] | length' "$out")" = 1
+check "  its running pipeline does not colour the mark" test "$(jq -r .worst "$out")" = none
+sed -i 's/"RUNNING"/"FAILED"/' "$sandbox/git.example.json"
+: >"$sandbox/sent"
+pipes
+check "  nor pops up when it finishes" test ! -s "$sandbox/sent"
+check "  and --list shows it under its own heading" grep -q "waiting for your review" <<<"$(pipes --list)"
+
 rm "$sandbox/git.example.json"
 echo '{"requests": [], "worst": "none"}' >"$out"
 pipes

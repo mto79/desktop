@@ -62,7 +62,8 @@ grp() {
 info='{"hosts":[{"host":"git.example","state":"ok"},{"host":"lab.example","state":"unreachable"},{"host":"new.example","state":"ok"}],
  "requests":[
   {"host":"git.example","status":"success","ref":"g/a!1","title":"one"},
-  {"host":"git.example","status":"failed","ref":"g/b!2","title":"Draft: two","draft":true},
+  {"host":"git.example","status":"failed","ref":"g/b!2","title":"Draft: two","draft":true,"url":"mr2","pipelineUrl":"pl2"},
+  {"host":"git.example","role":"review","status":"failed","ref":"g/q!9","title":"theirs","author":"Bo Smit"},
   {"host":"git.example","status":"none","ref":"g/c!3","title":"three"},
   {"host":"lab.example","status":"running","ref":"g/d!4","title":"four","stale":true}]}'
 g=$(grp "$info")
@@ -70,10 +71,15 @@ check "a section for every GitLab, in the order they are asked" \
   test "$(jq -r 'map(.host) | join(" ")' <<<"$g")" = "git.example lab.example new.example"
 check "  one with nothing open is a section all the same" test "$(jq -r '.[2].open' <<<"$g")" = 0
 check "  one off the VPN says so" test "$(jq -r '.[1].reachable' <<<"$g")" = false
-check "  the failed one first, the passed after it" test "$(jq -r '.[0].requests | map(.name) | join(",")' <<<"$g")" = "b !2  draft,a !1"
-check "  failed, running and waiting are the ones marked" test "$(jq -r '.[0].requests | map(.urgent) | join(",")' <<<"$g")" = "true,false"
-check "  merge requests without a pipeline counted, not listed" test "$(jq -r '.[0].without' <<<"$g")" = 1
-check "the headline is the worst there is" test "$(grp "$info" summary)" = "1 failed"
+check "  all yours listed, the failed first, one without a pipeline last" \
+  test "$(jq -r '.[0].requests | map(.name) | join(",")' <<<"$g")" = "b !2  draft,a !1,c !3"
+check "  failed, running and waiting are the ones marked" test "$(jq -r '.[0].requests | map(.urgent) | join(",")' <<<"$g")" = "true,false,false"
+check "  a row opens the merge request, its pipeline kept for the right click" \
+  test "$(jq -r '.[0].requests[0] | "\(.url) \(.pipelineUrl)"' <<<"$g")" = "mr2 pl2"
+check "  waiting for your review in a list of its own, with who asks" \
+  test "$(jq -r '.[0].review | map("\(.name) \(.word) \(.urgent)") | join(",")' <<<"$g")" = "q !9 Bo false"
+check "the headline adds how many wait for your review" test "$(grp "$info" summary)" = "1 failed  ·  1 to review"
+check "the headline is the worst there is" test "$(grp '{"requests":[{"status":"failed"},{"status":"success"}]}' summary)" = "1 failed"
 check "  all passed when all did" test "$(grp '{"requests":[{"status":"success"}]}' summary)" = "all passed"
 check "  and says when nothing is open" test "$(grp '{"requests":[]}' summary)" = "nothing open"
 
