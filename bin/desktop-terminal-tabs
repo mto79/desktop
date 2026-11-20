@@ -253,7 +253,7 @@ cmd_gc() {
     if tmux list-panes -a -F '#{@term_tabs}' 2>/dev/null | grep -qxF "$group"; then
       bar "$session"
     else
-      tmux kill-session -t "$(exact "$session")" 2>/dev/null
+      desktop-tmux-close "$session" 2>/dev/null
     fi
   done < <(tmux list-sessions -F '#{session_name} #{@term_group}' 2>/dev/null | awk 'NF > 1')
 }

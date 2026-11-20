@@ -76,7 +76,7 @@ for key in Q q w x; do
     test -z "$(grep -E "^bind(-key)? -r $key " "$CONF")"
 done
 check "killing the server asks first" grep -qE '^bind-key Q confirm-before .* kill-server$' "$CONF"
-check "and so does killing a session" grep -qE '^bind-key q confirm-before .* kill-session$' "$CONF"
+check "and so does killing a session" grep -qE '^bind-key q confirm-before .*(kill-session|desktop-tmux-close.*)$' "$CONF"
 
 # A #() job runs once per client per status-interval, and every agent column is a client.
 check "the status line's agent count is asked once for all of them" \

@@ -416,7 +416,7 @@ cmd_gc() {
   local session group
   while read -r session group; do
     tmux list-panes -a -F '#{@ai_column}' 2>/dev/null | grep -qxF "$group" && continue
-    tmux kill-session -t "$(exact "$session")" 2>/dev/null
+    desktop-tmux-close "$session" 2>/dev/null
   done < <(tmux list-sessions -F '#{session_name} #{@ai_group}' 2>/dev/null | awk 'NF > 1')
 }
 

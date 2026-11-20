@@ -14,6 +14,15 @@ timer only covers one already in view, and it fetches every ten minutes rather t
 minute. The sessionizer and `desktop-worktree` both go through it, so they agree on the
 name and the shape.
 
+Closing a session -- `prefix + q`, `exit` in its last window, the sidebar, `ocl logout` --
+moves the terminal looking at it to the most recently used session that is not an agent
+column's or a terminal's tabs' own (`ai-*`, `term-*`), through `desktop-tmux-close`. Left
+to tmux, which takes the last active session, it went to the busy agent session behind the
+column, which closes right after the session it belonged to and is set to detach whoever
+is on it: the terminal closed, as if all of tmux had. The columns' and tabs' clean-up
+closes their sessions through it too, and it leaves alone the clients inside panes -- a
+column's own, which are meant to end with their session.
+
 `desktop-agent-layout <target> <agent>...` lays a window out:
 
     +--------------------+--------+

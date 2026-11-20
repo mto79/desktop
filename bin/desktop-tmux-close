@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+
+# desktop-tmux-close: close a tmux session without taking the terminal looking at it along.
+#
+#   desktop-tmux-close [SESSION]     the current session when none is named
+#
+# tmux runs with detach-on-destroy off, so a client whose session closes is moved to the
+# session that was active last. Since the agent columns and the terminal tabs, that is as
+# often as not one of their own sessions -- ai-*, term-*, busy with an agent's output --
+# and those are set to detach whoever is on them when they close, which they do right
+# after: the session they belonged to has gone. The terminal closed with them, and closing
+# one session looked like closing all of tmux.
+#
+# So a terminal looking at the session is moved first, to the most recently active session
+# that is not such a helper, and only then is it closed. A client inside a pane -- an agent
+# column showing its session -- is left: its terminal is the pane, and it is meant to end
+# with the session. With no other session left there is nowhere to go, and tmux detaches as
+# it would anyway.
+#
+# Used by prefix + q, by `ocl logout`, and by the agent columns' and terminal tabs' own
+# clean-up, which is what closes their sessions after the one they belonged to.
+
+set -uo pipefail
+
+name=${1:-$(tmux display-message -p '#{session_name}' 2>/dev/null)}
+[[ -n $name ]] || exit 1
+tmux has-session -t "=$name" 2>/dev/null || exit 0
+
+away=$(tmux list-sessions -F '#{session_activity} #{session_name}' 2>/dev/null |
+  awk -v name="$name" '$2 != name && $2 !~ /^(ai|term)-/' | sort -rn | awk 'NR == 1 { print $2 }')
+if [[ -n $away ]]; then
+  panes=$(tmux list-panes -a -F '#{pane_tty}' 2>/dev/null)
+  while read -r client; do
+    [[ -n $client ]] || continue
+    grep -qxF "$client" <<<"$panes" && continue  # a client inside a pane: a column's own
+    tmux switch-client -c "$client" -t "=$away" 2>/dev/null
+  done < <(tmux list-clients -t "=$name" -F '#{client_tty}' 2>/dev/null)
+fi
+tmux kill-session -t "=$name"

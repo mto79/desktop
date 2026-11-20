@@ -249,6 +249,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- Closing a tmux session no longer closes the terminal: it moves to another session, not
+  to the agent session behind a column, which closed right after and took the terminal along.
 - The tmux sidebar's sections hold still: one folded for want of room stays folded until
   the column is resized, rather than folding and unfolding as agents start and finish.
 - At login the screens show their workspaces as soon as the windows are open, after
