@@ -245,6 +245,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Fixed
 
+- The tmux sidebar's sections hold still: one folded for want of room stays folded until
+  the column is resized, rather than folding and unfolding as agents start and finish.
 - At login the screens show their workspaces as soon as the windows are open, after
   seconds rather than half a minute: the start waited for the tmux sessions to be restored.
 - Workspace 1 has one browser at login, home: the login no longer starts a Brave of its own

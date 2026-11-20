@@ -662,8 +662,9 @@ def worst(states):
 
 
 def compose(sessions, found_clusters, here, detailed=False, module=None, selected=None,
-            room=None, chosen=None, open_sessions=None, found_views=None):
-    """The rows of the whole column, in sections: see the comment above."""
+            room=None, chosen=None, open_sessions=None, found_views=None, held=None):
+    """The rows of the whole column, in sections: see the comment above. held, kept by the
+    caller from one refresh to the next, remembers what was folded for want of room."""
     chosen = chosen or {}
     found_views = found_views or []
     # A cluster's session and a view's are listed in their own sections, not as repositories.
@@ -727,6 +728,17 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
     # that order, each as long as it still fits; a tall column shows everything open, a
     # short one folds what does not fit. Without a height -- a test -- everything fits.
     # A blank line between sections, so they read as separate things: counted in the room.
+    #
+    # Folded for want of room, a section stays folded until the room changes -- the column
+    # resized -- or it is opened by hand. What fits moves by a few lines all the time: the
+    # NEEDS YOU strip comes and goes as agents finish and start, a branch line as a diff is
+    # counted. Decided afresh each refresh, a section on the edge folded and unfolded with
+    # every one of them.
+    held = {} if held is None else held
+    if held.get("room") != room:
+        held.clear()
+        held["room"] = room
+    short = held.setdefault("short", set())
     gaps = len(parts) - 1
     used = len(out) + len(parts) + gaps + sum(len(kept) for _, _, kept, _, _, _ in parts)
     state = {key: chosen[key] for key, *_ in parts if key in chosen}
@@ -738,7 +750,9 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
     for key in ("agents", "clusters", "views", "repos"):
         if key in sizes and key not in state:
             fits = room is None or used + sizes[key] <= room
-            state[key] = "open" if fits and sizes[key] else "closed"
+            state[key] = "open" if fits and sizes[key] and key not in short else "closed"
+            if sizes[key] and not fits:
+                short.add(key)
             used += sizes[key] if state[key] == "open" else 0
 
     for key, rows, kept, count, dot, alert in parts:
@@ -1042,13 +1056,14 @@ def sidebar(screen):
     cluster_seen = cluster_stamp()
     found_views = views()
     chosen = folds()
+    held = {}
     selected = here.split(":")[0]
     def free():
         return max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
 
     def build():
         return compose(data, found_clusters, here, detailed, module, selected, free(), chosen,
-                       found_views=found_views)
+                       found_views=found_views, held=held)
 
     def section_of(index):
         """The section a row is in, and the index of that section's header."""
@@ -1127,6 +1142,7 @@ def sidebar(screen):
         elif key == ord("a"):
             # Every section back to folding by the room there is.
             chosen = {}
+            held.clear()
             set_folds(chosen)
             listed, dirty = build(), True
             cursor = min(cursor, max(0, len(listed) - 1))

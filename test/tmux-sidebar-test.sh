@@ -219,6 +219,18 @@ elif what.startswith("compose"):
     # Two clusters: delta, which is also a tmux session, healthy; and zeta, degraded.
     found = [{"name": "delta", "state": "healthy", "nodes": 3, "ready": 3, "env": "prod"},
              {"name": "zeta", "state": "degraded", "nodes": 4, "ready": 3}]
+    if what == "compose-held":
+        # Folded for want of room while the clusters are there; then the clusters gone, which
+        # frees the room. Held, the repositories stay folded; decided afresh, they open. A
+        # resize lets go of what was held.
+        held = {}
+        sidebar.compose(sidebar.collect(), found, "alpha:2", False, None, None, 16, {}, held=held)
+        for keep in (held, None, held):
+            rows = sidebar.compose(sidebar.collect(), [], "alpha:2", False, None, None, 16, {}, held=keep)
+            print(next(r["folded"] for r in rows if r.get("section") == "repos" and r["kind"] == "section"))
+        rows = sidebar.compose(sidebar.collect(), [], "alpha:2", False, None, None, 30, {}, held=held)
+        print(next(r["folded"] for r in rows if r.get("section") == "repos" and r["kind"] == "section"))
+        sys.exit(0)
     chosen = {"compose": {}, "compose-tall": {}, "compose-open": {"repos": "open"},
               "compose-closed": {"clusters": "closed", "agents": "closed"}}[what]
     # A short column, where not everything fits; a tall one, where it does.
@@ -265,6 +277,10 @@ check "clusters open by themselves when one is degraded, each with its nodes" \
 check "  and its environment after its name, where env= gives one" grep -qE '^ ● zeta  +3/4$' <<<"$composed"
 check "opened by hand, every repository is shown" \
   test "$(sed -n '/▾ REPOS/,/CLUSTERS/p' <<<"$(drive compose-open)" | grep -c '^[▌ ][●○·] ')" = 4
+# What fits moves by a few lines all the time -- NEEDS YOU comes and goes as agents finish --
+# and a section on the edge folded and unfolded with every refresh.
+check "folded for want of room, a section stays folded while the room is the same" \
+  test "$(drive compose-held | tr '\n' ,)" = "True,False,True,False,"
 closed=$(drive compose-closed)
 check "folded by hand, a section is its header alone" \
   test "$(sed -n '/CLUSTERS/,$p' <<<"$closed" | grep -c .)" = 2
