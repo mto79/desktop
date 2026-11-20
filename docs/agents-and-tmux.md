@@ -180,6 +180,7 @@ A session whose dot is `○` or `·` is one you can leave alone.
 | `p` | Peek: the agent's screen in a popup, to answer it from there |
 | `v` | More: each session's review and pipeline, and its other checkouts; under each agent its last prompt |
 | `/` | Find: type, and the list narrows to what has it in its name -- folded sections too; arrows move, `Enter` goes there, `Escape` gives the list back |
+| `w` `W` | A session's windows under it, each by number and name, to go straight to one: `w` this session's, `W` every session's; again to fold them away |
 | `n` | New session by name: a repository's, laid out as the sessionizer lays it out, when one of that name is in its folders; otherwise a shell at home. One that exists is switched to |
 | `R` | Rename the session under the cursor (a cluster's and a view's keep their names) |
 | `x` | Close the session under the cursor, once you have said `y`; anyone looking at it is moved to the session they used last first |

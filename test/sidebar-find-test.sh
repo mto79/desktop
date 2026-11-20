@@ -47,6 +47,19 @@ if what == "match":
     print(" ".join(f"{x['kind']}:{x['text']}" for x in sidebar.matching(listed, sys.argv[3])))
 elif what == "first":
     print(sidebar.first_choice(sidebar.matching(listed, sys.argv[3])))
+elif what == "windows":
+    sessions = {
+        "awx": {"path": "", "agents": [], "windows": [{"index": "1", "name": "ide", "active": True},
+                                                      {"index": "2", "name": "git", "active": False}]},
+        "nexus": {"path": "", "agents": [], "windows": [{"index": "1", "name": "ide", "active": True}]},
+    }
+    unfolded = set(sys.argv[3].split(",")) if len(sys.argv) > 3 and sys.argv[3] else set()
+    for found in sidebar.layout(sessions, "nexus:1", unfolded=unfolded):
+        if found["kind"] in ("session", "window"):
+            print(f"{found['kind']}:{found.get('target') or found['session']}:{found.get('current')}")
+elif what == "window-line":
+    print(sidebar.line_of({"kind": "window", "session": "awx", "target": "awx:2", "text": "2 git",
+                           "active": False, "current": False}, 30)[0].rstrip())
 elif what == "new":
     sidebar.new_session(sys.argv[3], "")
 elif what == "close":
@@ -86,6 +99,16 @@ os.environ['PATH'] = '$sandbox/bin:' + os.environ['PATH']
 l = importlib.machinery.SourceFileLoader('s', '$ROOT/bin/desktop-tmux-sidebar')
 s = importlib.util.spec_from_loader('s', l); m = importlib.util.module_from_spec(s); l.exec_module(m)
 sys.exit(0 if not (m.elsewhere('gitops') or '').startswith(('ai-', 'term-')) else 1)\""
+
+check "a session's windows are not shown until asked for" \
+  test "$(drive windows '' | grep -c '^window')" = 0
+check "w unfolds one session's windows under it, the others left folded" \
+  test "$(drive windows awx | tr '\n' ' ')" = "session:awx:False window:awx:1:False window:awx:2:False session:nexus:True "
+check "W unfolds every session's, and the window you are in is marked" \
+  grep -qx 'window:nexus:1:True' <<<"$(drive windows '*')"
+check "a window's row is its number and name, indented under the session" \
+  test "$(drive window-line)" = "     2 git"
+check "Enter on a window goes to that window" grep -q 'f"={row\['"'"'target'"'"'\]}"' "$ROOT/bin/desktop-tmux-sidebar"
 
 check "the footer names the new keys" grep -q 'FOOTER = "⏎ go  / find  n new' "$ROOT/bin/desktop-tmux-sidebar"
 

@@ -77,6 +77,7 @@ z	z	fold every section but this one
 a	a	every section back to folding by the room there is
 p	p	peek at the agent, and answer it there
 /	/	find: type to narrow the list, Esc to give it back
+w	w W	a session's windows under it, or every session's
 n	n	new session by name, a repository's if there is one
 R	R	rename the session under the cursor
 x	x	close the session under the cursor, once you say y

@@ -12,6 +12,8 @@ Add a line under the current month in the same commit as the change it describes
 
 ### Added
 
+- The tmux sidebar unfolds a session's windows under it (`w`, or `W` for every session),
+  so Enter goes straight to its editor, its git or its shell.
 - The tmux sidebar finds as you type (`/`), and makes, renames and closes sessions (`n`,
   `R`, `x`) without leaving it: a new one by a repository's name is that repository's.
 - A message, shown and said aloud, on joining a Wi-Fi network you name in `wifi.conf`.

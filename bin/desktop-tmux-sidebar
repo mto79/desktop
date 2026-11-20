@@ -383,19 +383,22 @@ def collect():
     listing = tmux("list-windows", "-a", "-F",
                    "#{session_name}\t#{window_index}\t#{@agent_state}\t#{@ai_group}"
                    "\t#{@term_group}\t#{session_path}\t#{@ai_model}\t#{b:@worktree}"
-                   "\t#{window_name}\t#{window_id}")
+                   "\t#{window_name}\t#{window_id}\t#{window_active}")
     sessions = {}
     for line in listing.splitlines():
-        parts = (line.split("\t") + [""] * 10)[:10]
-        name, index, mark, group, tabs, path, model, task, window, window_id = parts
+        parts = (line.split("\t") + [""] * 11)[:11]
+        name, index, mark, group, tabs, path, model, task, window, window_id, active = parts
         if group or tabs:
             owner, where = belong.get(group or tabs) or (None, "")
             if not owner:
                 continue  # Tabs whose column has closed: nowhere to show them.
         else:
             owner, where = name, index
-            sessions.setdefault(owner, {"path": path, "agents": []})["path"] = path
-        session = sessions.setdefault(owner, {"path": "", "agents": []})
+            sessions.setdefault(owner, {"path": path, "agents": [], "windows": []})["path"] = path
+            # The session's own windows, for w to unfold under it: an agent column's tabs
+            # and a terminal's are the column's, not windows of the session's.
+            sessions[owner]["windows"].append({"index": index, "name": window, "active": active == "1"})
+        session = sessions.setdefault(owner, {"path": "", "agents": [], "windows": []})
         record = records.get(f"{name}:{index}", {})
         state = state_of(record, mark)
         # Every tab of an agent column is an agent, whether or not it has reported yet: a
@@ -439,7 +442,8 @@ def number(text):
         return 0
 
 
-def layout(sessions, here, detailed=False, module=None, selected=None, room=None, agents_from=None):
+def layout(sessions, here, detailed=False, module=None, selected=None, room=None, agents_from=None,
+           unfolded=None):
     """The rows to draw: the sessions, then the agents of the selected one.
 
     As herdr's sidebar is laid out. Under SPACES a session takes two lines: its dot, the
@@ -506,6 +510,28 @@ def layout(sessions, here, detailed=False, module=None, selected=None, room=None
     if room and not detailed and len(out) > room // 2:
         out = [row for row in out
                if row["kind"] not in ("sub", "detail") or row["session"] == here_session]
+
+    # A session's windows, where w has unfolded them: after the session's own lines, and
+    # after the room is decided, since they were asked for and are kept whatever the room.
+    if unfolded:
+        with_windows = []
+        for index, row in enumerate(out):
+            with_windows.append(row)
+            following = out[index + 1] if index + 1 < len(out) else None
+            if following is not None and following["kind"] in ("sub", "detail") and following["session"] == row["session"]:
+                continue  # Not the end of this session's lines yet.
+            owner = row["session"]
+            block_head = next((r for r in reversed(with_windows) if r["kind"] == "session"), None)
+            if (block_head is None or block_head["session"] != owner or row["kind"] not in ("session", "sub", "detail")
+                    or not ("*" in unfolded or owner in unfolded)):
+                continue
+            for window in sessions[owner].get("windows", []):
+                with_windows.append({
+                    "kind": "window", "session": owner, "target": f"{owner}:{window['index']}",
+                    "text": f"{window['index']} {window['name']}", "active": window["active"],
+                    "current": owner == here_session and window["active"],
+                })
+        out = with_windows
 
     if selected is None:
         return out
@@ -662,7 +688,7 @@ def worst(states):
 
 
 def compose(sessions, found_clusters, here, detailed=False, module=None, selected=None,
-            room=None, chosen=None, open_sessions=None, found_views=None, held=None):
+            room=None, chosen=None, open_sessions=None, found_views=None, held=None, unfolded=None):
     """The rows of the whole column, in sections: see the comment above. held, kept by the
     caller from one refresh to the next, remembers what was folded for want of room."""
     chosen = chosen or {}
@@ -678,7 +704,7 @@ def compose(sessions, found_clusters, here, detailed=False, module=None, selecte
     with_agents = dict(repos, **viewed)
     if selected not in with_agents:
         selected = None
-    inner = layout(repos, here, detailed, module, selected, room, with_agents)
+    inner = layout(repos, here, detailed, module, selected, room, with_agents, unfolded)
     split = next((i for i, row in enumerate(inner) if row["kind"] == "gap"), len(inner))
     repo_rows, agent_rows = inner[1:split], inner[split + 2:]
     agents_of = inner[split + 1]["session"] if split < len(inner) else ""
@@ -783,7 +809,7 @@ def cluster_row(cluster, here_session, section):
 
 # Where a row's text starts: the dot, then the name a space after it.
 DOT, NAME = 1, 3
-SELECTABLE = ("session", "agent", "section", "cluster", "view")
+SELECTABLE = ("session", "agent", "section", "cluster", "view", "window")
 
 
 def pieces(row, width):
@@ -812,6 +838,12 @@ def pieces(row, width):
             colour = CLUSTER_LOOK["degraded"][1] if row["dot"] == "degraded" else COLOURS.get(row["dot"], "dim")
             out.append((width - 2, "●", colour))
         return out
+    if kind == "window":
+        # Under its session, indented past the dot: the window's number and name, the one
+        # the session shows bright, the rest dim.
+        room = width - NAME - 3
+        text = row["text"] if len(row["text"]) <= room else row["text"][:max(0, room - 1)] + "…"
+        return [(NAME + 2, text, "text" if row.get("active") else "dim")]
     if kind == "cluster":
         dot, colour = CLUSTER_LOOK.get(row["cluster"], ("·", "dim"))
         right = row.get("right", "")
@@ -1016,6 +1048,9 @@ def go(row, here):
             return
         tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
         return
+    if row["kind"] == "window":
+        tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['target']}")
+        return
     if row["kind"] != "session":
         return
     tmux("switch-client", *(["-c", client] if client else []), "-t", f"={row['session']}")
@@ -1181,6 +1216,8 @@ def sidebar(screen):
     selected = here.split(":")[0]
     # What / is filtering on, and whether keys are still going into it.
     query, typing = "", False
+    # The sessions whose windows w has unfolded; "*" is every session (W).
+    unfolded = set()
 
     def free():
         return max(1, screen.getmaxyx()[0] - 2)  # the footer, and a line above it
@@ -1191,9 +1228,9 @@ def sidebar(screen):
             # finding what is out of sight.
             everything = {key: "open" for key in SECTIONS}
             return matching(compose(data, found_clusters, here, detailed, module, selected, None, everything,
-                                    found_views=found_views, held=held), query)
+                                    found_views=found_views, held=held, unfolded=unfolded), query)
         return compose(data, found_clusters, here, detailed, module, selected, free(), chosen,
-                       found_views=found_views, held=held)
+                       found_views=found_views, held=held, unfolded=unfolded)
 
     def section_of(index):
         """The section a row is in, and the index of that section's header."""
@@ -1274,6 +1311,23 @@ def sidebar(screen):
 
         if key == ord("/"):
             query, typing, dirty = "", True, True
+        elif key == ord("w"):
+            # This session's windows, unfolded under it or folded away again; on a window's
+            # row, its session's.
+            row = listed[cursor] if listed else None
+            if row and row["kind"] in ("session", "window"):
+                name = row["session"]
+                if "*" in unfolded:
+                    unfolded = {n for n in data if n != name}
+                else:
+                    unfolded ^= {name}
+                listed, dirty = build(), True
+                cursor = next((i for i, r in enumerate(listed) if r["kind"] == "session" and r["session"] == name), cursor)
+        elif key == ord("W"):
+            # Every session's windows, or none.
+            unfolded = set() if unfolded else {"*"}
+            listed, dirty = build(), True
+            cursor = min(cursor, max(0, len(listed) - 1))
         elif key == ord("n"):
             # A session by name: a repository's when there is one of that name, laid out as
             # the sessionizer would; otherwise a shell at home.
